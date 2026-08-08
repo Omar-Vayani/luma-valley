@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light;
+  --bg: oklch(0.97 0.02 120);
+  --surface: oklch(1 0 0 / 0.94);
+  --ink: oklch(0.3 0.02 60);
+  --muted: oklch(0.55 0.02 60);
+  --accent: oklch(0.65 0.16 150);
+  --accent-dark: oklch(0.5 0.14 150);
+  --danger: oklch(0.62 0.19 25);
+  --warn: oklch(0.8 0.15 75);
+  --card-shadow: 0 10px 30px oklch(0.4 0.04 120 / 0.18);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  overflow: hidden;
+  touch-action: none;
+}
+
+.app { position: relative; height: 100%; width: 100%; }
+
+.mount { position: absolute; inset: 0; }
+.mount canvas { display: block; }
+
+/* ── Top bar ── */
+.topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.7), transparent);
+  pointer-events: none;
+  z-index: 5;
+}
+.topbar > * { pointer-events: auto; }
+.logo { font-size: 1.15rem; font-weight: 800; margin: 0; letter-spacing: 0.02em; }
+.topbar-right { display: flex; gap: 8px; align-items: center; }
+.pill {
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: var(--card-shadow);
+}
+.icon-btn {
+  background: var(--surface);
+  border: none;
+  border-radius: 10px;
+  width: 38px; height: 38px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+}
+
+/* ── Creature panel ── */
+.panel {
+  position: absolute;
+  left: 14px; bottom: 14px;
+  width: min(320px, calc(100vw - 28px));
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: var(--card-shadow);
+  z-index: 6;
+  backdrop-filter: blur(6px);
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel h2 { margin: 0; font-size: 1.25rem; }
+.age { margin: 2px 0 8px; font-size: 0.75rem; color: var(--muted); text-transform: capitalize; }
+.mood { font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; text-transform: capitalize; }
+.mood-happy { background: oklch(0.93 0.1 150); color: oklch(0.42 0.14 150); }
+.mood-scared { background: oklch(0.93 0.08 250); color: oklch(0.45 0.12 250); }
+.mood-unwell { background: oklch(0.93 0.1 30); color: var(--danger); }
+.mood-calm { background: oklch(0.94 0.03 120); color: var(--muted); }
+
+.bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+.bar-label { width: 46px; font-size: 0.72rem; color: var(--muted); }
+.bar-track { flex: 1; height: 8px; border-radius: 999px; background: oklch(0.92 0.01 100); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 999px; transition: width 0.25s ease; }
+.bar-val { width: 26px; font-size: 0.7rem; text-align: right; color: var(--muted); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.08s ease, filter 0.12s ease;
+}
+.btn:active { transform: scale(0.96); }
+.btn:hover { filter: brightness(1.06); }
+.btn-ghost { background: oklch(0.94 0.02 120); color: var(--ink); }
+.btn-small { padding: 7px 12px; font-size: 0.8rem; }
+.btn-big { width: 100%; padding: 14px; font-size: 1.05rem; }
+.btn-active { outline: 3px solid var(--warn); }
+
+.teach { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.teach input {
+  flex: 1 1 120px;
+  border: 2px solid oklch(0.9 0.02 120);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  outline: none;
+}
+.teach input:focus { border-color: var(--accent); }
+.teach-hints { display: flex; gap: 6px; width: 100%; }
+.chip {
+  background: oklch(0.96 0.02 120);
+  border: 1px solid oklch(0.88 0.03 120);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.grave-note { font-style: italic; color: var(--muted); font-size: 0.85rem; }
+
+/* ── Overlays ── */
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: oklch(0.3 0.03 120 / 0.45);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  padding: 16px;
+}
+.card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 22px;
+  width: min(420px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: var(--card-shadow);
+}
+.card h2 { margin-top: 0; }
+.card h3 { margin: 14px 0 6px; font-size: 0.95rem; }
+.logo-big { font-size: 2rem; margin: 0 0 6px; text-align: center; }
+.tagline { text-align: center; color: var(--muted); margin: 0 0 18px; }
+.hint { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 14px; }
+.card .btn { margin-top: 8px; }
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; font-size: 0.9rem; }
+.row input[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.save-rows { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.save-row { display: flex; gap: 8px; }
+.save-row .btn { flex: 1; }
+
+.journal { list-style: none; margin: 0 0 12px; padding: 0; max-height: 50vh; overflow-y: auto; }
+.journal li { padding: 6px 0; border-bottom: 1px solid oklch(0.93 0.01 100); font-size: 0.88rem; }
+.j-tick { color: var(--muted); font-size: 0.72rem; margin-right: 6px; }
+
+.toast {
+  position: absolute;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  box-shadow: var(--card-shadow);
+  z-index: 30;
+  cursor: pointer;
+  animation: toast-in 0.25s ease;
+}
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ── Mobile portrait ── */
+@media (max-width: 600px) {
+  .panel { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 45vh; }
+  .logo { font-size: 1rem; }
+  .card { padding: 16px; }
+}
