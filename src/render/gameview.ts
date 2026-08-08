@@ -113,6 +113,9 @@ export class GameView {
 
     // touch look (mobile fallback — no pointer lock needed)
     this.touchLook = { active: false, lastX: 0, lastY: 0 }
+    // free mouse look: moving the mouse over the world rotates the camera (no drag needed)
+    this.renderer.domElement.addEventListener('mousemove', this.onCanvasMouseMove)
+    // touch look: only touch pointers, cleanly separated from mouse
     this.renderer.domElement.addEventListener('pointerdown', this.onTouchLookDown)
     window.addEventListener('pointermove', this.onTouchLookMove)
     window.addEventListener('pointerup', this.onTouchLookUp)
@@ -136,8 +139,15 @@ export class GameView {
 
   private touchLook: { active: boolean; lastX: number; lastY: number }
 
+  /** Free mouse look over the canvas (works without pointer lock). */
+  private onCanvasMouseMove = (e: MouseEvent): void => {
+    if (this.fps.isLocked) return // pointer lock already handles look
+    this.fps.applyLook(e.movementX, e.movementY)
+  }
+
   private onTouchLookDown = (e: PointerEvent): void => {
-    // only when not pointer-locked (pointer lock handles look itself)
+    // only touch pointers; mouse look uses onCanvasMouseMove
+    if (e.pointerType !== 'touch') return
     if (this.fps.isLocked) return
     this.touchLook.active = true
     this.touchLook.lastX = e.clientX
@@ -145,14 +155,13 @@ export class GameView {
   }
 
   private onTouchLookMove = (e: PointerEvent): void => {
+    if (e.pointerType !== 'touch') return
     if (!this.touchLook.active || this.fps.isLocked) return
     const dx = e.clientX - this.touchLook.lastX
     const dy = e.clientY - this.touchLook.lastY
     this.touchLook.lastX = e.clientX
     this.touchLook.lastY = e.clientY
-    this.fps.yaw -= dx * 0.004
-    this.fps.pitch = THREE.MathUtils.clamp(this.fps.pitch - dy * 0.004, -1.35, 1.35)
-    this.fps.update(0)
+    this.fps.applyLook(dx, dy)
   }
 
   private onTouchLookUp = (): void => {
@@ -878,6 +887,7 @@ export class GameView {
     window.removeEventListener('resize', this.onResize)
     this.renderer.domElement.removeEventListener('click', this.onClick)
     this.renderer.domElement.removeEventListener('pointerdown', this.onTouchLookDown)
+    this.renderer.domElement.removeEventListener('mousemove', this.onCanvasMouseMove)
     window.removeEventListener('pointermove', this.onTouchLookMove)
     window.removeEventListener('pointerup', this.onTouchLookUp)
     this.fps.dispose()

@@ -43,8 +43,6 @@ export class FPSControls {
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('pointerlockchange', this.onLockChangeEvt)
-    domElement.addEventListener('pointerdown', this.onPointerDown)
-    window.addEventListener('pointerup', this.onPointerUp)
     domElement.addEventListener('wheel', this.onWheelEvt, { passive: false })
   }
 
@@ -71,11 +69,16 @@ export class FPSControls {
     this.onWheel?.(e.deltaY > 0 ? 1 : -1)
   }
 
-  private onMouseMove = (e: MouseEvent): void => {
-    if (!this.locked && !this.dragging) return
-    this.yaw -= e.movementX * 0.0022
-    this.pitch -= e.movementY * 0.0022
+  /** Single look entry point — both mouse and touch route here. */
+  applyLook(dx: number, dy: number): void {
+    this.yaw -= dx * 0.0022
+    this.pitch -= dy * 0.0022
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.35, 1.35)
+  }
+
+  private onMouseMove = (e: MouseEvent): void => {
+    // pointer-locked mode: document-level events carry movementX/Y
+    if (this.locked) this.applyLook(e.movementX, e.movementY)
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -84,15 +87,6 @@ export class FPSControls {
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code)
-  }
-
-  /** Drag-to-look fallback when pointer lock isn't available. */
-  private dragging = false
-  onPointerDown = (e: PointerEvent): void => {
-    if (e.button === 0 || e.pointerType === 'touch') this.dragging = true
-  }
-  onPointerUp = (): void => {
-    this.dragging = false
   }
 
   setInput(key: string, down: boolean): void {
