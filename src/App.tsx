@@ -71,7 +71,11 @@ export default function App() {
   const [questText, setQuestText] = useState('')
   const [storyDone, setStoryDone] = useState(false)
   const [exploring, setExploring] = useState(false)
-  const isTouch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  const isTouch = typeof window !== 'undefined' && (
+    navigator.maxTouchPoints > 0 ||
+    'ontouchstart' in window ||
+    window.matchMedia?.('(pointer: coarse)').matches
+  )
 
   const inGame = locked || isTouch || exploring
 
@@ -522,6 +526,10 @@ export default function App() {
             e.preventDefault()
             viewRef.current?.fps.jump()
           }}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            viewRef.current?.fps.jump()
+          }}
         >
           ⬆
         </button>
@@ -536,11 +544,31 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
   const baseRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef<HTMLDivElement>(null)
   const active = useRef(false)
+  const activeTouch = useRef<number | null>(null)
   const origin = useRef({ x: 0, y: 0 })
 
   const setStick = (x: number, y: number): void => {
     if (stickRef.current) stickRef.current.style.transform = `translate(${x * 28}px, ${y * 28}px)`
     onMove(x, y)
+  }
+
+  const move = (clientX: number, clientY: number): void => {
+    const rect = baseRef.current!.getBoundingClientRect()
+    let dx = clientX - rect.left - rect.width / 2 - origin.current.x
+    let dy = clientY - rect.top - rect.height / 2 - origin.current.y
+    const len = Math.hypot(dx, dy)
+    const max = rect.width / 2 - 4
+    if (len > max) {
+      dx = (dx / len) * max
+      dy = (dy / len) * max
+    }
+    setStick(dx / max, dy / max)
+  }
+
+  const release = (): void => {
+    active.current = false
+    activeTouch.current = null
+    setStick(0, 0)
   }
 
   return (
@@ -555,21 +583,28 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
       }}
       onPointerMove={(e) => {
         if (!active.current) return
+        move(e.clientX, e.clientY)
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onTouchStart={(e) => {
+        if (active.current) return
+        const touch = e.changedTouches[0]
+        if (!touch) return
+        e.preventDefault()
         const rect = baseRef.current!.getBoundingClientRect()
-        let dx = e.clientX - rect.left - rect.width / 2 - origin.current.x
-        let dy = e.clientY - rect.top - rect.height / 2 - origin.current.y
-        const len = Math.hypot(dx, dy)
-        const max = rect.width / 2 - 4
-        if (len > max) {
-          dx = (dx / len) * max
-          dy = (dy / len) * max
-        }
-        setStick(dx / max, dy / max)
+        activeTouch.current = touch.identifier
+        origin.current = { x: touch.clientX - rect.left - rect.width / 2, y: touch.clientY - rect.top - rect.height / 2 }
       }}
-      onPointerUp={() => {
-        active.current = false
-        setStick(0, 0)
+      onTouchMove={(e) => {
+        if (active.current || activeTouch.current === null) return
+        const touch = Array.from(e.changedTouches).find((item) => item.identifier === activeTouch.current)
+        if (!touch) return
+        e.preventDefault()
+        move(touch.clientX, touch.clientY)
       }}
+      onTouchEnd={release}
+      onTouchCancel={release}
     >
       <div ref={stickRef} className="joystick-stick" />
     </div>
@@ -581,7 +616,22 @@ function LookStick({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   const baseRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef<HTMLDivElement>(null)
   const active = useRef(false)
+  const activeTouch = useRef<number | null>(null)
   const last = useRef({ x: 0, y: 0 })
+
+  const move = (clientX: number, clientY: number): void => {
+    const dx = clientX - last.current.x
+    const dy = clientY - last.current.y
+    last.current = { x: clientX, y: clientY }
+    if (stickRef.current) stickRef.current.style.transform = `translate(${Math.max(-18, Math.min(18, dx))}px, ${Math.max(-18, Math.min(18, dy))}px)`
+    onMove(dx, dy)
+  }
+
+  const release = (): void => {
+    active.current = false
+    activeTouch.current = null
+    if (stickRef.current) stickRef.current.style.transform = 'translate(0px, 0px)'
+  }
 
   return (
     <div
@@ -594,16 +644,28 @@ function LookStick({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       }}
       onPointerMove={(e) => {
         if (!active.current) return
-        const dx = e.clientX - last.current.x
-        const dy = e.clientY - last.current.y
-        last.current = { x: e.clientX, y: e.clientY }
-        if (stickRef.current) stickRef.current.style.transform = `translate(${Math.max(-18, Math.min(18, dx))}px, ${Math.max(-18, Math.min(18, dy))}px)`
-        onMove(dx, dy)
+        move(e.clientX, e.clientY)
       }}
-      onPointerUp={() => {
-        active.current = false
-        if (stickRef.current) stickRef.current.style.transform = 'translate(0px, 0px)'
+      onPointerUp={release}
+      onPointerCancel={release}
+      onTouchStart={(e) => {
+        // Fallback for mobile webviews which expose Touch Events but not Pointer Events.
+        if (active.current) return
+        const touch = e.changedTouches[0]
+        if (!touch) return
+        e.preventDefault()
+        activeTouch.current = touch.identifier
+        last.current = { x: touch.clientX, y: touch.clientY }
       }}
+      onTouchMove={(e) => {
+        if (active.current || activeTouch.current === null) return
+        const touch = Array.from(e.changedTouches).find((item) => item.identifier === activeTouch.current)
+        if (!touch) return
+        e.preventDefault()
+        move(touch.clientX, touch.clientY)
+      }}
+      onTouchEnd={release}
+      onTouchCancel={release}
     >
       <div ref={stickRef} className="joystick-stick" />
     </div>

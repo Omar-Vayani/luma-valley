@@ -29,7 +29,7 @@ body {
 .mount canvas { display: block; touch-action: none; }
 
 /* Force UI layers above the WebGL canvas compositing layer (Chrome quirk). */
-.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick {
+.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .lookstick, .jump-btn {
   transform: translateZ(0);
   will-change: transform;
 }
@@ -306,6 +306,7 @@ body {
   border: 2px solid oklch(1 0 0 / 0.4);
   touch-action: none;
   z-index: 12;
+  -webkit-user-select: none; user-select: none;
 }
 
 /* Crosshair */

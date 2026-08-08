@@ -42,6 +42,9 @@ export class FPSControls {
   private lastPointerY = 0
   private hasPointerPosition = false
   private lastLockedMove = { dx: 0, dy: 0, at: -Infinity, source: '' }
+  private canvasTouchId: number | null = null
+  private canvasPointerId: number | null = null
+  private canvasLast = { x: 0, y: 0 }
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, spawn: { x: number; z: number }) {
     this.camera = camera
@@ -69,6 +72,16 @@ export class FPSControls {
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('pointerlockchange', this.onLockChangeEvt)
     domElement.addEventListener('wheel', this.onWheelEvt, { passive: false })
+    // Canvas gestures are deliberately element-local, matching the reliable
+    // mobile joystick path instead of depending on window event delivery.
+    domElement.addEventListener('touchstart', this.onCanvasTouchStart, { passive: false })
+    domElement.addEventListener('touchmove', this.onCanvasTouchMove, { passive: false })
+    domElement.addEventListener('touchend', this.onCanvasTouchEnd, { passive: false })
+    domElement.addEventListener('touchcancel', this.onCanvasTouchEnd, { passive: false })
+    domElement.addEventListener('pointerdown', this.onCanvasPointerDown)
+    domElement.addEventListener('pointermove', this.onCanvasPointerMove)
+    domElement.addEventListener('pointerup', this.onCanvasPointerEnd)
+    domElement.addEventListener('pointercancel', this.onCanvasPointerEnd)
   }
 
   /** Request pointer lock (optional; hides the cursor while looking). */
@@ -108,7 +121,63 @@ export class FPSControls {
   /** True if the pointer is over game UI (never rotate then). */
   private overUi(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false
-    return !!target.closest('.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .lookstick, .jump-btn, .btn, input, textarea, select, button')
+    return !!target.closest('.joystick, .lookstick, .jump-btn, .btn, input, textarea, select, button, a')
+  }
+
+  private onCanvasTouchStart = (e: TouchEvent): void => {
+    if (this.canvasTouchId !== null || this.canvasPointerId !== null) return
+    const touch = e.changedTouches[0]
+    if (!touch) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.canvasTouchId = touch.identifier
+    this.canvasLast = { x: touch.clientX, y: touch.clientY }
+  }
+
+  private onCanvasTouchMove = (e: TouchEvent): void => {
+    if (this.canvasTouchId === null) return
+    const touch = Array.from(e.changedTouches).find((item) => item.identifier === this.canvasTouchId)
+    if (!touch) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.canvasDelta(touch.clientX, touch.clientY)
+  }
+
+  private onCanvasTouchEnd = (e: TouchEvent): void => {
+    if (this.canvasTouchId === null) return
+    if (!Array.from(e.changedTouches).some((item) => item.identifier === this.canvasTouchId)) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.canvasTouchId = null
+  }
+
+  private onCanvasPointerDown = (e: PointerEvent): void => {
+    if (e.pointerType !== 'touch') return
+    e.preventDefault()
+    e.stopPropagation()
+    this.canvasPointerId = e.pointerId
+    this.canvasLast = { x: e.clientX, y: e.clientY }
+    this.domElement.setPointerCapture?.(e.pointerId)
+  }
+
+  private onCanvasPointerMove = (e: PointerEvent): void => {
+    if (e.pointerId !== this.canvasPointerId) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.canvasDelta(e.clientX, e.clientY)
+  }
+
+  private onCanvasPointerEnd = (e: PointerEvent): void => {
+    if (e.pointerId !== this.canvasPointerId) return
+    e.stopPropagation()
+    this.canvasPointerId = null
+  }
+
+  private canvasDelta(clientX: number, clientY: number): void {
+    const dx = clientX - this.canvasLast.x
+    const dy = clientY - this.canvasLast.y
+    this.canvasLast = { x: clientX, y: clientY }
+    this.applyLook(dx, dy)
   }
 
   private onPointerDown = (e: PointerEvent | MouseEvent | TouchEvent): void => {
@@ -318,5 +387,13 @@ export class FPSControls {
     document.removeEventListener('keyup', this.onKeyUp)
     document.removeEventListener('pointerlockchange', this.onLockChangeEvt)
     this.domElement.removeEventListener('wheel', this.onWheelEvt)
+    this.domElement.removeEventListener('touchstart', this.onCanvasTouchStart)
+    this.domElement.removeEventListener('touchmove', this.onCanvasTouchMove)
+    this.domElement.removeEventListener('touchend', this.onCanvasTouchEnd)
+    this.domElement.removeEventListener('touchcancel', this.onCanvasTouchEnd)
+    this.domElement.removeEventListener('pointerdown', this.onCanvasPointerDown)
+    this.domElement.removeEventListener('pointermove', this.onCanvasPointerMove)
+    this.domElement.removeEventListener('pointerup', this.onCanvasPointerEnd)
+    this.domElement.removeEventListener('pointercancel', this.onCanvasPointerEnd)
   }
 }
