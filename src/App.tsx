@@ -280,6 +280,9 @@ export default function App() {
       )}
       {started && !quest && <div className="quest-tracker quest-done">✦ {questText}</div>}
 
+      {/* Crosshair — always visible so the player can see where they're looking */}
+      {inGame && <div className="crosshair" />}
+
       {/* Torch + pickup quick actions */}
       {started && inGame && (
         <div className="quickbar">
@@ -502,6 +505,15 @@ export default function App() {
         />
       )}
 
+      {/* Touch look-stick (right thumb) — explicit look control for mobile */}
+      {isTouch && inGame && (
+        <LookStick
+          onMove={(dx, dy) => {
+            viewRef.current?.fps.applyLook(dx * 6, dy * 6)
+          }}
+        />
+      )}
+
       {/* Touch jump button */}
       {isTouch && inGame && (
         <button
@@ -557,6 +569,40 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
       onPointerUp={() => {
         active.current = false
         setStick(0, 0)
+      }}
+    >
+      <div ref={stickRef} className="joystick-stick" />
+    </div>
+  )
+}
+
+/** Right-thumb look stick: drag to rotate the camera (mobile fallback control). */
+function LookStick({ onMove }: { onMove: (dx: number, dy: number) => void }) {
+  const baseRef = useRef<HTMLDivElement>(null)
+  const stickRef = useRef<HTMLDivElement>(null)
+  const active = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+
+  return (
+    <div
+      ref={baseRef}
+      className="lookstick"
+      onPointerDown={(e) => {
+        active.current = true
+        last.current = { x: e.clientX, y: e.clientY }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        if (!active.current) return
+        const dx = e.clientX - last.current.x
+        const dy = e.clientY - last.current.y
+        last.current = { x: e.clientX, y: e.clientY }
+        if (stickRef.current) stickRef.current.style.transform = `translate(${Math.max(-18, Math.min(18, dx))}px, ${Math.max(-18, Math.min(18, dy))}px)`
+        onMove(dx, dy)
+      }}
+      onPointerUp={() => {
+        active.current = false
+        if (stickRef.current) stickRef.current.style.transform = 'translate(0px, 0px)'
       }}
     >
       <div ref={stickRef} className="joystick-stick" />

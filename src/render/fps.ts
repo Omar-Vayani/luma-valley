@@ -40,7 +40,6 @@ export class FPSControls {
   // ── pointer tracking (client-coordinate deltas, browser-agnostic) ──
   private lastPointerX = 0
   private lastPointerY = 0
-  private pointerActive = false
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, spawn: { x: number; z: number }) {
     this.camera = camera
@@ -52,10 +51,21 @@ export class FPSControls {
     this.position.set(spawn.x, 4, spawn.z)
     this.updateCamera(true)
 
-    // window-level events: look works no matter what element is under the pointer
-    window.addEventListener('pointermove', this.onPointerMove, { passive: false })
-    window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
-    window.addEventListener('pointerup', this.onPointerUp)
+    // window-level events: look works no matter what element is under the pointer.
+    // Feature-detect PointerEvent; fall back to mousemove + touchmove for
+    // browsers without it (older Safari/IE) so look works EVERYWHERE.
+    if (typeof window.PointerEvent !== 'undefined') {
+      window.addEventListener('pointermove', this.onPointerMove, { passive: false })
+      window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
+      window.addEventListener('pointerup', this.onPointerUp)
+    } else {
+      window.addEventListener('mousemove', this.onMouseMoveFallback)
+      window.addEventListener('mousedown', this.onPointerDown)
+      window.addEventListener('mouseup', this.onPointerUp)
+      window.addEventListener('touchmove', this.onTouchMoveFallback, { passive: false })
+      window.addEventListener('touchstart', this.onTouchStart)
+      window.addEventListener('touchend', this.onPointerUp)
+    }
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('pointerlockchange', this.onLockChangeEvt)
@@ -100,32 +110,69 @@ export class FPSControls {
     return !!target.closest('.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .jump-btn, .btn, input, textarea, select, button')
   }
 
-  private onPointerDown = (e: PointerEvent): void => {
-    this.lastPointerX = e.clientX
-    this.lastPointerY = e.clientY
-    this.pointerActive = true
-    // seed the reference point even if this is a UI press, so the first
-    // world move doesn't jump
-    if (this.overUi(e.target)) this.pointerActive = false
+  private onPointerDown = (e: PointerEvent | MouseEvent | TouchEvent): void => {
+    this.lastPointerX = this.eventX(e)
+    this.lastPointerY = this.eventY(e)
   }
 
   private onPointerMove = (e: PointerEvent): void => {
-    const dx = e.clientX - this.lastPointerX
-    const dy = e.clientY - this.lastPointerY
-    this.lastPointerX = e.clientX
-    this.lastPointerY = e.clientY
+    // LOCKED: the cursor is captured in place — clientX/Y never change.
+    // movementX/Y are the only reliable signal (and are 100% reliable there).
+    if (this.locked) {
+      if (e.movementX !== 0 || e.movementY !== 0) this.applyLook(e.movementX, e.movementY)
+      return
+    }
+    this.deltaMove(e.clientX, e.clientY, e.target)
+  }
+
+  /** Legacy fallback for browsers without PointerEvent. */
+  private onMouseMoveFallback = (e: MouseEvent): void => {
+    if (this.locked) {
+      if (e.movementX !== 0 || e.movementY !== 0) this.applyLook(e.movementX, e.movementY)
+      return
+    }
+    this.deltaMove(e.clientX, e.clientY, e.target)
+  }
+
+  private onTouchMoveFallback = (e: TouchEvent): void => {
+    const t = e.touches[0]
+    if (!t) return
+    this.deltaMove(t.clientX, t.clientY, e.target)
+  }
+
+  private onTouchStart = (e: TouchEvent): void => {
+    const t = e.touches[0]
+    if (!t) return
+    this.onPointerDown(e as unknown as PointerEvent)
+    void t
+  }
+
+  private deltaMove(clientX: number, clientY: number, target: EventTarget | null): void {
+    const dx = clientX - this.lastPointerX
+    const dy = clientY - this.lastPointerY
+    this.lastPointerX = clientX
+    this.lastPointerY = clientY
     if (dx === 0 && dy === 0) return
     // never rotate while over UI controls
-    if (this.overUi(e.target)) return
+    if (this.overUi(target)) return
     // clamp large jumps (pointer re-entering the window etc.)
     const cdx = Math.max(-160, Math.min(160, dx))
     const cdy = Math.max(-160, Math.min(160, dy))
     this.applyLook(cdx, cdy)
-    void this.pointerActive
+  }
+
+  private eventX(e: PointerEvent | MouseEvent | TouchEvent): number {
+    if ('touches' in e && e.touches[0]) return e.touches[0].clientX
+    return (e as PointerEvent | MouseEvent).clientX
+  }
+
+  private eventY(e: PointerEvent | MouseEvent | TouchEvent): number {
+    if ('touches' in e && e.touches[0]) return e.touches[0].clientY
+    return (e as PointerEvent | MouseEvent).clientY
   }
 
   private onPointerUp = (): void => {
-    this.pointerActive = false
+    // nothing to clear — deltas are always relative to the last event
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -232,9 +279,18 @@ export class FPSControls {
   }
 
   dispose(): void {
-    window.removeEventListener('pointermove', this.onPointerMove)
-    window.removeEventListener('pointerdown', this.onPointerDown)
-    window.removeEventListener('pointerup', this.onPointerUp)
+    if (typeof window.PointerEvent !== 'undefined') {
+      window.removeEventListener('pointermove', this.onPointerMove)
+      window.removeEventListener('pointerdown', this.onPointerDown)
+      window.removeEventListener('pointerup', this.onPointerUp)
+    } else {
+      window.removeEventListener('mousemove', this.onMouseMoveFallback)
+      window.removeEventListener('mousedown', this.onPointerDown)
+      window.removeEventListener('mouseup', this.onPointerUp)
+      window.removeEventListener('touchmove', this.onTouchMoveFallback)
+      window.removeEventListener('touchstart', this.onTouchStart)
+      window.removeEventListener('touchend', this.onPointerUp)
+    }
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keyup', this.onKeyUp)
     document.removeEventListener('pointerlockchange', this.onLockChangeEvt)
