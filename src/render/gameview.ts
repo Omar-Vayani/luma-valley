@@ -105,20 +105,12 @@ export class GameView {
     this.shrineGroup = new THREE.Group()
     this.scene.add(this.shrineGroup)
 
-    // interactions
+    // interactions (look input is owned entirely by FPSControls — window-level,
+    // client-delta based, works for mouse + touch in every browser)
     this.renderer.domElement.style.touchAction = 'none' // vertical swipes must reach us, not the browser
     this.renderer.domElement.style.display = 'block'
     this.renderer.domElement.addEventListener('click', this.onClick)
     window.addEventListener('resize', this.onResize)
-
-    // touch look (mobile fallback — no pointer lock needed)
-    this.touchLook = { active: false, lastX: 0, lastY: 0 }
-    // free mouse look: moving the mouse over the world rotates the camera (no drag needed)
-    this.renderer.domElement.addEventListener('mousemove', this.onCanvasMouseMove)
-    // touch look: only touch pointers, cleanly separated from mouse
-    this.renderer.domElement.addEventListener('pointerdown', this.onTouchLookDown)
-    window.addEventListener('pointermove', this.onTouchLookMove)
-    window.addEventListener('pointerup', this.onTouchLookUp)
 
     void this.assets.preload().then(() => {
       for (const c of game.creatures) this.addCreature(c)
@@ -135,37 +127,6 @@ export class GameView {
     this.raf = requestAnimationFrame(this.loop)
     // QA/debug hook
     ;(window as unknown as Record<string, unknown>).__luma = { view: this }
-  }
-
-  private touchLook: { active: boolean; lastX: number; lastY: number }
-
-  /** Free mouse look over the canvas (works without pointer lock). */
-  private onCanvasMouseMove = (e: MouseEvent): void => {
-    if (this.fps.isLocked) return // pointer lock already handles look
-    this.fps.applyLook(e.movementX, e.movementY)
-  }
-
-  private onTouchLookDown = (e: PointerEvent): void => {
-    // only touch pointers; mouse look uses onCanvasMouseMove
-    if (e.pointerType !== 'touch') return
-    if (this.fps.isLocked) return
-    this.touchLook.active = true
-    this.touchLook.lastX = e.clientX
-    this.touchLook.lastY = e.clientY
-  }
-
-  private onTouchLookMove = (e: PointerEvent): void => {
-    if (e.pointerType !== 'touch') return
-    if (!this.touchLook.active || this.fps.isLocked) return
-    const dx = e.clientX - this.touchLook.lastX
-    const dy = e.clientY - this.touchLook.lastY
-    this.touchLook.lastX = e.clientX
-    this.touchLook.lastY = e.clientY
-    this.fps.applyLook(dx, dy)
-  }
-
-  private onTouchLookUp = (): void => {
-    this.touchLook.active = false
   }
 
   // ── World structures: cave entrance, player cabin, shrine ──
@@ -886,10 +847,6 @@ export class GameView {
     cancelAnimationFrame(this.raf)
     window.removeEventListener('resize', this.onResize)
     this.renderer.domElement.removeEventListener('click', this.onClick)
-    this.renderer.domElement.removeEventListener('pointerdown', this.onTouchLookDown)
-    this.renderer.domElement.removeEventListener('mousemove', this.onCanvasMouseMove)
-    window.removeEventListener('pointermove', this.onTouchLookMove)
-    window.removeEventListener('pointerup', this.onTouchLookUp)
     this.fps.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()

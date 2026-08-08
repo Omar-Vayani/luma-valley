@@ -2,9 +2,17 @@ import * as THREE from 'three'
 import type { World } from '../sim/world'
 
 /**
- * FPSControls — first-person movement like Minecraft:
- * pointer-lock mouse look, WASD move, Shift sprint, Space jump.
- * Height follows terrain with a simple vertical collision.
+ * FPSControls — first-person movement + look.
+ *
+ * LOOK is built to work in EVERY browser and input mode:
+ *   - window-level `pointermove` using clientX/clientY deltas
+ *     (movementX/Y are unreliable outside pointer lock — e.g. Safari)
+ *   - free mouse look: moving the mouse rotates the camera, no click/drag
+ *   - touch drag rotates the camera too (same delta code path)
+ *   - pointer lock is a *bonus* (hides the cursor) but never required
+ *   - pointer over UI (panels/buttons) never rotates the camera
+ * MOVE: WASD/arrows always work; joystick (mobile) calls setInput();
+ * Space or jump() to jump.
  */
 export class FPSControls {
   camera: THREE.PerspectiveCamera
@@ -29,6 +37,11 @@ export class FPSControls {
   private worldMax = 0
   onWheel: ((d: number) => void) | null = null
 
+  // ── pointer tracking (client-coordinate deltas, browser-agnostic) ──
+  private lastPointerX = 0
+  private lastPointerY = 0
+  private pointerActive = false
+
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, spawn: { x: number; z: number }) {
     this.camera = camera
     this.domElement = domElement
@@ -39,14 +52,17 @@ export class FPSControls {
     this.position.set(spawn.x, 4, spawn.z)
     this.updateCamera(true)
 
-    document.addEventListener('mousemove', this.onMouseMove)
+    // window-level events: look works no matter what element is under the pointer
+    window.addEventListener('pointermove', this.onPointerMove, { passive: false })
+    window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
+    window.addEventListener('pointerup', this.onPointerUp)
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('pointerlockchange', this.onLockChangeEvt)
     domElement.addEventListener('wheel', this.onWheelEvt, { passive: false })
   }
 
-  /** Request pointer lock (must be called from a user gesture). */
+  /** Request pointer lock (optional; hides the cursor while looking). */
   lock(): void {
     this.domElement.requestPointerLock()
   }
@@ -69,16 +85,47 @@ export class FPSControls {
     this.onWheel?.(e.deltaY > 0 ? 1 : -1)
   }
 
-  /** Single look entry point — both mouse and touch route here. */
+  /** Single look entry point — every input routes here and the camera updates NOW. */
   applyLook(dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return
     this.yaw -= dx * 0.0022
     this.pitch -= dy * 0.0022
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.35, 1.35)
+    this.updateCamera()
   }
 
-  private onMouseMove = (e: MouseEvent): void => {
-    // pointer-locked mode: document-level events carry movementX/Y
-    if (this.locked) this.applyLook(e.movementX, e.movementY)
+  /** True if the pointer is over game UI (never rotate then). */
+  private overUi(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false
+    return !!target.closest('.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .jump-btn, .btn, input, textarea, select, button')
+  }
+
+  private onPointerDown = (e: PointerEvent): void => {
+    this.lastPointerX = e.clientX
+    this.lastPointerY = e.clientY
+    this.pointerActive = true
+    // seed the reference point even if this is a UI press, so the first
+    // world move doesn't jump
+    if (this.overUi(e.target)) this.pointerActive = false
+  }
+
+  private onPointerMove = (e: PointerEvent): void => {
+    const dx = e.clientX - this.lastPointerX
+    const dy = e.clientY - this.lastPointerY
+    this.lastPointerX = e.clientX
+    this.lastPointerY = e.clientY
+    if (dx === 0 && dy === 0) return
+    // never rotate while over UI controls
+    if (this.overUi(e.target)) return
+    // clamp large jumps (pointer re-entering the window etc.)
+    const cdx = Math.max(-160, Math.min(160, dx))
+    const cdy = Math.max(-160, Math.min(160, dy))
+    this.applyLook(cdx, cdy)
+    void this.pointerActive
+  }
+
+  private onPointerUp = (): void => {
+    this.pointerActive = false
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -173,7 +220,6 @@ export class FPSControls {
 
   private updateCamera(force = false): void {
     // Always sync the camera to the player (position + look from yaw/pitch).
-    // The old `locked` guard froze the camera in touch/exploring mode.
     void force
     const bobY = Math.sin(this.bobPhase) * 0.06 * this.bobAmp
     this.camera.position.set(this.position.x, this.position.y + this.eyeHeight + bobY, this.position.z)
@@ -186,7 +232,9 @@ export class FPSControls {
   }
 
   dispose(): void {
-    document.removeEventListener('mousemove', this.onMouseMove)
+    window.removeEventListener('pointermove', this.onPointerMove)
+    window.removeEventListener('pointerdown', this.onPointerDown)
+    window.removeEventListener('pointerup', this.onPointerUp)
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keyup', this.onKeyUp)
     document.removeEventListener('pointerlockchange', this.onLockChangeEvt)
