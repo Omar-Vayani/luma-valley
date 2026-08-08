@@ -296,6 +296,16 @@ body {
   z-index: 12;
 }
 
+/* Full-screen look surface (touch): above canvas, below UI controls */
+.look-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Crosshair */
 .crosshair {
   position: absolute;

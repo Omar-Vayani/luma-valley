@@ -287,6 +287,19 @@ export default function App() {
       {/* Crosshair — always visible so the player can see where they're looking */}
       {inGame && <div className="crosshair" />}
 
+      {/* Full-screen LOOK SURFACE (touch): same synthetic events as the joystick.
+          Drag anywhere to look (non-inverted); tap to interact. */}
+      {isTouch && inGame && (
+        <LookSurface
+          onLook={(dx, dy) => {
+            viewRef.current?.fps.applyLook(dx, dy)
+          }}
+          onTap={() => {
+            viewRef.current?.interact()
+          }}
+        />
+      )}
+
       {/* Torch + pickup quick actions */}
       {started && inGame && (
         <div className="quickbar">
@@ -531,6 +544,65 @@ export default function App() {
 
       {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
     </div>
+  )
+}
+
+/** Full-screen LOOK SURFACE — drag anywhere to look (non-inverted), tap to interact.
+ *  Uses the same React synthetic touch/pointer events as the working joystick. */
+function LookSurface({ onLook, onTap }: { onLook: (dx: number, dy: number) => void; onTap: () => void }) {
+  const last = useRef<{ x: number; y: number } | null>(null)
+  const downAt = useRef({ x: 0, y: 0 })
+  const moved = useRef(false)
+
+  const start = (x: number, y: number): void => {
+    last.current = { x, y }
+    downAt.current = { x, y }
+    moved.current = false
+  }
+  const move = (x: number, y: number): void => {
+    if (!last.current) return
+    const dx = x - last.current.x
+    const dy = y - last.current.y
+    last.current = { x, y }
+    if (Math.abs(x - downAt.current.x) + Math.abs(y - downAt.current.y) > 14) moved.current = true
+    if (dx !== 0 || dy !== 0) onLook(dx, dy)
+  }
+  const end = (): void => {
+    last.current = null
+    if (!moved.current) onTap()
+  }
+
+  return (
+    <div
+      className="look-surface"
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse') return // desktop uses mouse free-look
+        e.preventDefault()
+        start(e.clientX, e.clientY)
+      }}
+      onPointerMove={(e) => {
+        if (!last.current) return
+        e.preventDefault()
+        move(e.clientX, e.clientY)
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onTouchStart={(e) => {
+        const t = e.changedTouches[0]
+        if (!t) return
+        e.preventDefault()
+        start(t.clientX, t.clientY)
+      }}
+      onTouchMove={(e) => {
+        if (!last.current) return
+        const t = Array.from(e.changedTouches)[0]
+        if (!t) return
+        e.preventDefault()
+        move(t.clientX, t.clientY)
+      }}
+      onTouchEnd={end}
+      onTouchCancel={end}
+    />
   )
 }
 
