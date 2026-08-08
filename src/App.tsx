@@ -246,7 +246,7 @@ export default function App() {
       {started && !inGame && (
         <div className="fpv-hint">
           <p><strong>Click to enter the valley</strong></p>
-          <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · mouse to look · Space to jump · click to interact'}</p>
+          <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · move mouse to look · arrows/Q/E also look · Space to jump'}</p>
           <button className="btn" onClick={() => {
             if (isTouch) {
               setExploring(true)
