@@ -40,6 +40,8 @@ export class FPSControls {
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('pointerlockchange', this.onLockChangeEvt)
+    domElement.addEventListener('pointerdown', this.onPointerDown)
+    window.addEventListener('pointerup', this.onPointerUp)
     domElement.addEventListener('wheel', this.onWheelEvt, { passive: false })
   }
 
@@ -67,19 +69,27 @@ export class FPSControls {
   }
 
   private onMouseMove = (e: MouseEvent): void => {
-    if (!this.locked) return
+    if (!this.locked && !this.dragging) return
     this.yaw -= e.movementX * 0.0022
     this.pitch -= e.movementY * 0.0022
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.35, 1.35)
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.locked) return
     this.keys.add(e.code)
   }
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code)
+  }
+
+  /** Drag-to-look fallback when pointer lock isn't available. */
+  private dragging = false
+  onPointerDown = (e: PointerEvent): void => {
+    if (e.button === 0 || e.pointerType === 'touch') this.dragging = true
+  }
+  onPointerUp = (): void => {
+    this.dragging = false
   }
 
   setInput(key: string, down: boolean): void {
@@ -118,11 +128,14 @@ export class FPSControls {
     this.jumpVel += this.gravity * dt
     if (this.jumpVel < -12) this.jumpVel = -12
 
-    // horizontal move with collision
+    // horizontal move with collision (terrain bounds + static colliders)
     const nx = this.position.x + move.x
     const nz = this.position.z + move.z
     if (nx > this.worldMin + this.radius && nx < this.worldMax - this.radius) this.position.x = nx
     if (nz > this.worldMin + this.radius && nz < this.worldMax - this.radius) this.position.z = nz
+    const resolved = this.world.resolveCollision({ x: this.position.x, z: this.position.z }, this.radius)
+    this.position.x = resolved.x
+    this.position.z = resolved.z
 
     // vertical: terrain height (feet rest ON the ground; eye is +eyeHeight)
     const ground = this.world.height(this.position.x, this.position.z) * 6 - 2.5

@@ -69,11 +69,11 @@ export class Game {
 
   private placeRandom(c: Creature): void {
     const s = this.world.state.size
-    for (let tries = 0; tries < 30; tries++) {
+    for (let tries = 0; tries < 40; tries++) {
       const x = range(this.rng, -s + 5, s - 5)
       const z = range(this.rng, -s + 5, s - 5)
       const h = this.world.height(x, z)
-      if (h > 0.3 && Math.hypot(x - this.world.state.den.x, z - this.world.state.den.z) > 6) {
+      if (h > 0.3 && Math.hypot(x - this.world.state.den.x, z - this.world.state.den.z) > 6 && !this.world.collides({ x, z }, 0.5)) {
         c.pos = { x, z }
         return
       }
@@ -105,6 +105,7 @@ export class Game {
       findFood: () => this.world.nearestFood(self.pos),
       findWater: () => this.world.nearestWater(self.pos),
       findFriend: () => this.world.nearestCreature(self.pos, this.creatures, self.id),
+      resolveCollision: (p, r) => this.world.resolveCollision(p, r),
       eatAt: (p) => {
         const fx = this.world.eatAt(p)
         if (fx) remember(self.mind, 'food', p, 1, 0.6, self.age)

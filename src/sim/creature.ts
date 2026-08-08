@@ -55,6 +55,7 @@ export interface CreatureCtx {
   findWater: () => Vec2 | null
   findFriend: () => Vec2 | null
   eatAt: (pos: Vec2) => FoodEffect | null
+  resolveCollision: (pos: Vec2, radius: number) => Vec2
 }
 
 export interface LearnedWord {
@@ -411,6 +412,10 @@ export class Creature {
     this.facing += noise
     this.pos.x += Math.cos(this.facing) * dist
     this.pos.z += Math.sin(this.facing) * dist
+    // collision: push out of rocks/trees/structures
+    const resolved = ctx.resolveCollision(this.pos, 0.35)
+    this.pos.x = resolved.x
+    this.pos.z = resolved.z
   }
 
   private turnToward(target: Vec2): void {

@@ -24,6 +24,7 @@ export interface WorldState {
   waterPoints: Vec2[]
   den: Vec2
   flatZones: { x: number; z: number; r: number; y: number }[]
+  colliders: { x: number; z: number; r: number }[]
 }
 
 export function valueNoise(x: number, z: number, seed: number): number {
@@ -51,6 +52,7 @@ export class World {
       waterPoints: [],
       den: { x: 0, z: 0 },
       flatZones: [],
+      colliders: [],
     }
     // stream along z axis at x ≈ -6 with meander
     for (let z = -size; z <= size; z += 2) {
@@ -152,6 +154,39 @@ export class World {
       }
     }
     return null
+  }
+
+  // ── collision: static colliders (rocks, trees, structures) ──
+  /** Register a static circular collider (world units). */
+  addCollider(x: number, z: number, r: number): void {
+    this.state.colliders.push({ x, z, r })
+  }
+
+  /** Push a circle of radius `radius` out of any overlapping collider. */
+  resolveCollision(pos: Vec2, radius: number): Vec2 {
+    const out = { ...pos }
+    for (const c of this.state.colliders) {
+      const dx = out.x - c.x
+      const dz = out.z - c.z
+      const d = Math.hypot(dx, dz)
+      const min = c.r + radius
+      if (d < min && d > 0.0001) {
+        const push = min - d
+        out.x += (dx / d) * push
+        out.z += (dz / d) * push
+      } else if (d <= 0.0001) {
+        out.x = c.x + min
+      }
+    }
+    return out
+  }
+
+  /** True if the circle at pos overlaps a collider (for spawning checks). */
+  collides(pos: Vec2, radius: number): boolean {
+    for (const c of this.state.colliders) {
+      if (Math.hypot(pos.x - c.x, pos.z - c.z) < c.r + radius) return true
+    }
+    return false
   }
 
   toJSON(): WorldState {

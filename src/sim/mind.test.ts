@@ -60,6 +60,7 @@ describe('mind', () => {
       findWater: () => null,
       findFriend: () => null,
       eatAt: () => null,
+      resolveCollision: (p) => ({ ...p }),
     })
     expect(c.chem.fear).toBeGreaterThanOrEqual(before)
     void c2

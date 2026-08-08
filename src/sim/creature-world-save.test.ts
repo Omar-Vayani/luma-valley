@@ -20,6 +20,7 @@ function makeCtx(world: World, creatures: Creature[], self: Creature, day = 0.4)
     findWater: () => world.nearestWater(self.pos),
     findFriend: () => world.nearestCreature(self.pos, creatures, self.id),
     eatAt: (p) => world.eatAt(p),
+    resolveCollision: (p, r) => world.resolveCollision(p, r),
   }
 }
 

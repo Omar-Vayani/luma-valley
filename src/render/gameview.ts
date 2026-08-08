@@ -244,6 +244,141 @@ export class GameView {
       this.scene.add(mesh)
       this.pickups.push(mesh)
     })
+
+    // ── static colliders for structures ──
+    const w2 = this.game.world
+    // cave rocks ring
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2
+      w2.addCollider(cavePos.x + Math.cos(ang) * 3.2, cavePos.z + Math.sin(ang) * 3.2, 1.0)
+    }
+    w2.addCollider(cavePos.x, cavePos.z, 1.8)
+    // cabin + fire pit
+    w2.addCollider(base.x, base.z, 2.8)
+    w2.addCollider(base.x - 3, base.z, 0.8)
+    // village house footprint (walls at -10..-6, z 11..17)
+    for (let i = 0; i < 6; i++) {
+      const wx = i < 4 ? -10 + (i % 2) * 4 : -10.2
+      const wz = i < 4 ? 11 + Math.floor(i / 2) * 6 : 12.5 + (i % 2) * 3
+      w2.addCollider(wx, wz, 1.2)
+    }
+    w2.addCollider(-8, 14, 1.2) // roof center
+    // graveyard corner
+    w2.addCollider(28, 30, 2.4)
+    // shrine
+    w2.addCollider(-24, -18, 1.8)
+    // den
+    w2.addCollider(w.state.den.x, w.state.den.z, 1.5)
+
+    this.scatterNature()
+  }
+
+  /** Fill the valley with trees, rocks, bushes, flowers and grass tufts. */
+  private scatterNature(): void {
+    const w = this.game.world
+    const rng = this.game.rng
+    const treeMat = new THREE.MeshLambertMaterial({ color: 0x4c8c3a })
+    const treeMat2 = new THREE.MeshLambertMaterial({ color: 0x3f7a33 })
+    const treeMat3 = new THREE.MeshLambertMaterial({ color: 0x5a9c44 })
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x7a5230 })
+    const rockMat = new THREE.MeshLambertMaterial({ color: 0x9a9a8a })
+    const rockMat2 = new THREE.MeshLambertMaterial({ color: 0x8a8a7c })
+    const bushMat = new THREE.MeshLambertMaterial({ color: 0x3f8f3f })
+    const flowerMats = [0xe05a8a, 0xf0c040, 0x7a7ae0, 0xe07a40].map((c) => new THREE.MeshLambertMaterial({ color: c }))
+    const grassMat = new THREE.MeshLambertMaterial({ color: 0x66b04a })
+    const S = w.state.size
+
+    const scatter = (n: number, make: () => THREE.Mesh, tryRadius: number, colliderRadius: number) => {
+      let placed = 0
+      let guard = 0
+      while (placed < n && guard < n * 25) {
+        guard++
+        const x = -S + rng() * S * 2
+        const z = -S + rng() * S * 2
+        // keep off the stream corridor, structure pads, and other colliders
+        if (Math.abs(x + 6) < 2.2 && Math.abs(z) < S) continue
+        if (w.collides({ x, z }, tryRadius)) continue
+        const m = make()
+        const y = this.groundY(x, z) - 0.3
+        m.position.set(x, y, z)
+        m.rotation.y = rng() * Math.PI * 2
+        const s = 0.7 + rng() * 0.9
+        m.scale.setScalar(s)
+        this.scene.add(m)
+        if (colliderRadius > 0) w.addCollider(x, z, colliderRadius * s)
+        placed++
+      }
+    }
+
+    // trees: trunk + cone canopy (generous — the valley should feel wooded)
+    scatter(45, () => {
+      const g = new THREE.Group()
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.6, 5), trunkMat)
+      trunk.position.y = 0.8
+      const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.6, 6), [treeMat, treeMat2, treeMat3][Math.floor(rng() * 3)])
+      canopy.position.y = 2.4
+      g.add(trunk)
+      g.add(canopy)
+      return g as unknown as THREE.Mesh
+    }, 1.6, 0.8)
+
+    // rocks
+    scatter(35, () => {
+      const r = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55 + rng() * 0.6, 0), [rockMat, rockMat2][Math.floor(rng() * 2)])
+      r.scale.y = 0.6
+      r.rotation.set(rng() * 3, rng() * 3, rng() * 3)
+      return r
+    }, 1.0, 0.7)
+
+    // bushes
+    scatter(30, () => {
+      const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + rng() * 0.3, 0), bushMat)
+      b.scale.y = 0.75
+      return b
+    }, 0.9, 0)
+
+    // flowers (small stem + colored head)
+    scatter(45, () => {
+      const g = new THREE.Group()
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 4), grassMat)
+      stem.position.y = 0.28
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), flowerMats[Math.floor(rng() * flowerMats.length)])
+      head.position.y = 0.6
+      g.add(stem)
+      g.add(head)
+      return g as unknown as THREE.Mesh
+    }, 0.5, 0)
+
+    // grass tufts
+    scatter(55, () => {
+      const g = new THREE.Group()
+      for (let i = 0; i < 6; i++) {
+        const blade = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.45 + rng() * 0.35, 4), grassMat)
+        blade.position.set(rng() * 0.55 - 0.28, 0.22, rng() * 0.55 - 0.28)
+        blade.rotation.set(rng() * 0.4 - 0.2, 0, rng() * 0.4 - 0.2)
+        g.add(blade)
+      }
+      return g as unknown as THREE.Mesh
+    }, 0.4, 0)
+
+    // hero trees: a few big trees framing the cabin and the house
+    const hero = [
+      { x: 1, z: 4 }, { x: -1, z: 12 }, { x: 12, z: 3 }, { x: -16, z: 8 }, { x: 18, z: 16 }, { x: -2, z: 24 },
+    ]
+    for (const h of hero) {
+      if (w.collides({ x: h.x, z: h.z }, 1.8)) continue
+      const g = new THREE.Group()
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.55, 3, 6), trunkMat)
+      trunk.position.y = 1.5
+      const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4.5, 7), treeMat3)
+      canopy.position.y = 4.2
+      g.add(trunk)
+      g.add(canopy)
+      g.position.set(h.x, this.groundY(h.x, h.z) - 0.3, h.z)
+      g.scale.setScalar(1 + rng() * 0.5)
+      this.scene.add(g)
+      w.addCollider(h.x, h.z, 1.6)
+    }
   }
 
   private spawnMentor(): void {
