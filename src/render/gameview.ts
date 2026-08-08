@@ -688,7 +688,8 @@ export class GameView {
 
   private onInteractKey = (e: KeyboardEvent): void => {
     const target = e.target instanceof Element ? e.target : null
-    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+    if (document.querySelector('.overlay')) return
+    if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return
     if (e.code === 'KeyF' && !e.repeat) this.interact()
   }
 

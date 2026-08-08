@@ -157,8 +157,11 @@ try {
   // The topbar must stay above the look surface so Menu remains tappable.
   await page.getByRole('button', { name: 'Menu' }).click()
   assert(await page.getByRole('heading', { name: 'Menu' }).isVisible(), 'look surface intercepted the Menu button')
+  await page.keyboard.press('f')
+  const interactCallsWithModalOpen = await page.evaluate(() => window.__interactCalls)
+  assert(interactCallsWithModalOpen === 0, 'F interacted with the world through an open modal')
   await page.getByRole('button', { name: 'Close' }).click()
-  results.uiIsolation = { interactCallsWhileTyping, menuOpened: true }
+  results.uiIsolation = { interactCallsWhileTyping, interactCallsWithModalOpen, menuOpened: true }
 
   results.mobileErrors = errors
   assert(errors.length === 0, `mobile page errors: ${errors.join('; ')}`)
