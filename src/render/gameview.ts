@@ -98,6 +98,13 @@ export class GameView {
       ? { x: firstCreature.pos.x + 4, z: firstCreature.pos.z + 4 }
       : { x: game.world.state.den.x + 4, z: game.world.state.den.z + 4 }
     this.fps = new FPSControls(this.camera, this.renderer.domElement, game.world, spawn)
+    // Spawn already facing the nearest Luma and a little toward the ground.
+    // A blank-sky opening makes working look controls appear completely dead.
+    if (firstCreature) {
+      this.fps.yaw = Math.atan2(firstCreature.pos.x - spawn.x, firstCreature.pos.z - spawn.z)
+      this.fps.pitch = -0.22
+      this.fps.update(0)
+    }
     this.fps.onLockChange = (l) => this.callbacks.onLockChange(l)
     this.fps.onWheel = () => {
       /* wheel reserved */
@@ -122,6 +129,7 @@ export class GameView {
     this.renderer.domElement.style.display = 'block'
     this.renderer.domElement.addEventListener('click', this.onClick)
     window.addEventListener('resize', this.onResize)
+    window.addEventListener('keydown', this.onInteractKey)
 
     void this.assets.preload().then(() => {
       for (const c of game.creatures) this.addCreature(c)
@@ -678,9 +686,13 @@ export class GameView {
     this.interact()
   }
 
-  /** Center-screen interaction (like Minecraft's use button). */
-  interact(): InteractEvent | null {
-    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera)
+  private onInteractKey = (e: KeyboardEvent): void => {
+    const target = e.target instanceof Element ? e.target : null
+    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+    if (e.code === 'KeyF' && !e.repeat) this.interact()
+  }
+
+  private interactionTargets(): THREE.Object3D[] {
     const targets: THREE.Object3D[] = []
     for (const v of this.creatureViews.values()) {
       if (v.group.userData.model) v.group.userData.model.traverse((o: THREE.Object3D) => { if (o instanceof THREE.Mesh) targets.push(o) })
@@ -688,12 +700,39 @@ export class GameView {
     targets.push(...this.woodMeshes)
     targets.push(...this.pickups)
     this.shrineGroup.traverse((o: THREE.Object3D) => { if (o instanceof THREE.Mesh && o.userData.interact === 'shrine') targets.push(o) })
-    const hits = this.raycaster.intersectObjects(targets, false)
-    if (hits.length === 0) {
+    return targets
+  }
+
+  private aimedHit(): THREE.Intersection | null {
+    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera)
+    const hit = this.raycaster.intersectObjects(this.interactionTargets(), false)[0]
+    return hit && hit.distance <= 6 ? hit : null
+  }
+
+  /** Short contextual label for the object under the crosshair. */
+  interactionHint(): string | null {
+    const hit = this.aimedHit()
+    if (!hit) return null
+    const itemId = hit.object.userData.pickupItem as string | undefined
+    if (itemId) return `Pick up ${itemId.replaceAll('_', ' ')}`
+    for (const [id, v] of this.creatureViews) {
+      const model = v.group.userData.model as THREE.Object3D | undefined
+      if (model && (model === hit.object || model.getObjectById(hit.object.id))) {
+        return `Meet ${this.game.selectedCreature(id)?.name ?? 'Luma'}`
+      }
+    }
+    if (hit.object.userData.interact === 'wood') return 'Collect wood'
+    if (hit.object.userData.interact === 'shrine') return 'Light the shrine'
+    return null
+  }
+
+  /** Center-screen interaction (like Minecraft's use button). */
+  interact(): InteractEvent | null {
+    const hit = this.aimedHit()
+    if (!hit) {
       this.callbacks.onSelect(null)
       return null
     }
-    const hit = hits[0]
     // pickup?
     const itemId = hit.object.userData.pickupItem as string | undefined
     if (itemId && this.game.pickupItem(itemId)) {
@@ -900,6 +939,7 @@ export class GameView {
   dispose(): void {
     cancelAnimationFrame(this.raf)
     window.removeEventListener('resize', this.onResize)
+    window.removeEventListener('keydown', this.onInteractKey)
     this.renderer.domElement.removeEventListener('click', this.onClick)
     this.fps.dispose()
     this.renderer.dispose()

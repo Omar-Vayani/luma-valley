@@ -8,10 +8,10 @@ import type { World } from '../sim/world'
  *   - window-level `pointermove` using clientX/clientY deltas
  *     (movementX/Y are unreliable outside pointer lock — e.g. Safari)
  *   - free mouse look: moving the mouse rotates the camera, no click/drag
- *   - touch drag rotates the camera too (same delta code path)
+ *   - mobile touch look is owned by App's full-screen LookSurface
  *   - pointer lock is a *bonus* (hides the cursor) but never required
  *   - pointer over UI (panels/buttons) never rotates the camera
- * MOVE: WASD/arrows always work; joystick (mobile) calls setInput();
+ * MOVE: WASD always works; joystick (mobile) calls setInput();
  * Space or jump() to jump.
  */
 export class FPSControls {
@@ -54,16 +54,13 @@ export class FPSControls {
     this.updateCamera(true)
 
     // window-level events: look works no matter what element is under the pointer.
-    // Register pointermove + mousemove + touchmove ALL — the delta handler
-    // naturally dedupes (compat events after a pointer event see delta 0),
-    // and this covers every browser/webview input path (some webviews only
-    // deliver mousemove or only touchmove).
+    // Desktop look. Mobile touch look has one owner: App's LookSurface.
+    // Keeping touch out of this global path is essential for two-thumb play:
+    // the movement joystick and look surface must never fight over touches.
     window.addEventListener('pointermove', this.onPointerMove, { passive: false })
     window.addEventListener('mousemove', this.onMouseMoveUniversal)
-    window.addEventListener('touchmove', this.onTouchMoveUniversal, { passive: false })
     window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
     window.addEventListener('mousedown', this.onPointerDown)
-    window.addEventListener('touchstart', this.onPointerDown, { passive: false })
     window.addEventListener('blur', this.onBlur)
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
@@ -123,13 +120,15 @@ export class FPSControls {
     this.hasPointerPosition = false
   }
 
-  private onPointerDown = (e: PointerEvent | MouseEvent | TouchEvent): void => {
-    this.lastPointerX = this.eventX(e)
-    this.lastPointerY = this.eventY(e)
+  private onPointerDown = (e: PointerEvent | MouseEvent): void => {
+    if ('pointerType' in e && e.pointerType === 'touch') return
+    this.lastPointerX = e.clientX
+    this.lastPointerY = e.clientY
     this.hasPointerPosition = true
   }
 
   private onPointerMove = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') return
     // LOCKED: the cursor is captured in place — clientX/Y never change.
     // movementX/Y are the only reliable signal (and are 100% reliable there).
     if (this.locked) {
@@ -148,12 +147,6 @@ export class FPSControls {
     this.deltaMove(e.clientX, e.clientY, e.target)
   }
 
-  /** Universal touchmove (always registered; dedupes naturally via deltas). */
-  private onTouchMoveUniversal = (e: TouchEvent): void => {
-    const t = e.touches[0]
-    if (!t || this.locked) return
-    this.deltaMove(t.clientX, t.clientY, e.target)
-  }
 
   private deltaMove(clientX: number, clientY: number, target: EventTarget | null): void {
     if (!this.hasPointerPosition) {
@@ -184,15 +177,6 @@ export class FPSControls {
     if (!duplicate) this.applyLook(dx, dy)
   }
 
-  private eventX(e: PointerEvent | MouseEvent | TouchEvent): number {
-    if ('touches' in e && e.touches[0]) return e.touches[0].clientX
-    return (e as PointerEvent | MouseEvent).clientX
-  }
-
-  private eventY(e: PointerEvent | MouseEvent | TouchEvent): number {
-    if ('touches' in e && e.touches[0]) return e.touches[0].clientY
-    return (e as PointerEvent | MouseEvent).clientY
-  }
 
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.code.startsWith('Arrow')) e.preventDefault()
@@ -310,16 +294,16 @@ export class FPSControls {
       Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch),
     )
-    this.camera.lookAt(this.position.clone().add(dir))
+    // Aim from the EYE, not from the player's feet. Using `position + dir`
+    // made the camera always look steeply down and severely muted pitch.
+    this.camera.lookAt(this.camera.position.clone().add(dir))
   }
 
   dispose(): void {
     window.removeEventListener('pointermove', this.onPointerMove)
     window.removeEventListener('mousemove', this.onMouseMoveUniversal)
-    window.removeEventListener('touchmove', this.onTouchMoveUniversal)
     window.removeEventListener('pointerdown', this.onPointerDown)
     window.removeEventListener('mousedown', this.onPointerDown)
-    window.removeEventListener('touchstart', this.onPointerDown)
     window.removeEventListener('blur', this.onBlur)
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keyup', this.onKeyUp)

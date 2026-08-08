@@ -1,74 +1,186 @@
 import { chromium } from 'playwright-core'
 
 const executablePath = '/root/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome'
+const url = process.env.LUMA_URL ?? 'http://localhost:5210/'
 const browser = await chromium.launch({
   executablePath,
   headless: true,
-  args: ['--disable-crash-reporter', '--disable-crashpad', '--disable-gpu'],
+  args: ['--disable-crash-reporter', '--disable-crashpad'],
 })
 
+const results = {}
+const assert = (condition, message) => {
+  if (!condition) throw new Error(message)
+}
+
 async function startGame(page) {
-  await page.goto('http://localhost:5210/', { waitUntil: 'networkidle' })
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.getByRole('button', { name: /New Valley/ }).click()
-  await page.waitForFunction(() => window.__luma?.view?.fps)
+  await page.waitForFunction(() => window.__luma?.view?.fps, null, { timeout: 20_000 })
+  await page.waitForTimeout(800)
 }
 
-async function angles(page) {
-  return page.evaluate(() => ({
-    yaw: window.__luma.view.fps.yaw,
-    pitch: window.__luma.view.fps.pitch,
-  }))
-}
-
-function changed(before, after) {
-  return before.yaw !== after.yaw || before.pitch !== after.pitch
+async function state(page) {
+  return page.evaluate(() => {
+    const view = window.__luma.view
+    const direction = view.camera.position.clone()
+    view.camera.getWorldDirection(direction)
+    return {
+      yaw: view.fps.yaw,
+      pitch: view.fps.pitch,
+      direction,
+      renderedYaw: Math.atan2(direction.x, direction.z),
+      renderedPitch: Math.asin(direction.y),
+      quaternion: view.camera.quaternion.toArray(),
+      position: view.fps.position.toArray(),
+    }
+  })
 }
 
 try {
-  const mobile = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+  const mobile = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+  })
   const page = await mobile.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
   await startGame(page)
 
-  const rendered = await page.locator('.lookstick').isVisible()
-  if (!rendered) throw new Error('lookstick was not rendered in touch context')
+  results.mobileUi = await page.evaluate(() => ({
+    lookSurface: !!document.querySelector('.look-surface'),
+    joystick: !!document.querySelector('.joystick'),
+    lookStick: !!document.querySelector('.lookstick'),
+    jump: !!document.querySelector('.jump-btn'),
+    interact: !!document.querySelector('.interact-btn'),
+    initialCarePanel: !!document.querySelector('.panel'),
+  }))
+  assert(results.mobileUi.lookSurface, 'full-screen look surface is missing')
+  assert(results.mobileUi.joystick, 'movement joystick is missing')
+  assert(!results.mobileUi.lookStick, 'a second joystick was rendered')
+  assert(!results.mobileUi.initialCarePanel, 'care panel blocks the initial mobile playfield')
 
-  const stick = page.locator('.lookstick')
-  const box = await stick.boundingBox()
-  if (!box) throw new Error('lookstick has no bounding box')
-  const sx = box.x + box.width / 2
-  const sy = box.y + box.height / 2
-  const stickBefore = await angles(page)
-  await stick.dispatchEvent('pointerdown', { pointerId: 41, pointerType: 'touch', clientX: sx, clientY: sy, bubbles: true })
-  await stick.dispatchEvent('pointermove', { pointerId: 41, pointerType: 'touch', clientX: sx + 32, clientY: sy - 18, bubbles: true })
-  await stick.dispatchEvent('pointerup', { pointerId: 41, pointerType: 'touch', clientX: sx + 32, clientY: sy - 18, bubbles: true })
-  const stickAfter = await angles(page)
-  if (!changed(stickBefore, stickAfter)) throw new Error('lookstick did not rotate camera')
-
-  const canvas = page.locator('canvas')
-  const canvasBox = await canvas.boundingBox()
-  if (!canvasBox) throw new Error('canvas has no bounding box')
-  const cx = canvasBox.x + canvasBox.width * 0.72
-  const cy = canvasBox.y + canvasBox.height * 0.35
   const cdp = await mobile.newCDPSession(page)
-  const canvasBefore = await angles(page)
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy, id: 7 }] })
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx - 45, y: cy + 24, id: 7 }] })
+
+  // Real touch drag right: yaw and rendered camera direction must both turn right.
+  const rightBefore = await state(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 220, y: 270, id: 11 }] })
+  for (let i = 1; i <= 12; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 220 + i * 9, y: 270, id: 11 }] })
+  }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-  const canvasAfter = await angles(page)
-  if (!changed(canvasBefore, canvasAfter)) throw new Error('canvas touch drag did not rotate camera')
+  const rightAfter = await state(page)
+  assert(rightAfter.yaw > rightBefore.yaw + 0.2, 'slide right did not increase yaw')
+  assert(rightAfter.renderedYaw > rightBefore.renderedYaw + 0.2, 'rendered camera did not visibly turn right')
+  assert(Math.abs(rightAfter.renderedYaw - rightAfter.yaw) < 0.001, 'rendered camera yaw diverged from controls')
+  results.slideRight = { yawDelta: rightAfter.yaw - rightBefore.yaw, renderedYawDelta: rightAfter.renderedYaw - rightBefore.renderedYaw }
+
+  // Real touch drag up: pitch and actual world-direction Y must both look up.
+  const upBefore = await state(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 220, y: 330, id: 12 }] })
+  for (let i = 1; i <= 12; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 220, y: 330 - i * 9, id: 12 }] })
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  const upAfter = await state(page)
+  assert(upAfter.pitch > upBefore.pitch + 0.2, 'slide up did not increase pitch')
+  assert(upAfter.direction.y > upBefore.direction.y + 0.15, 'rendered camera did not visibly look up')
+  assert(Math.abs(upAfter.renderedPitch - upAfter.pitch) < 0.001, 'rendered camera pitch diverged from controls')
+  results.slideUp = { pitchDelta: upAfter.pitch - upBefore.pitch, renderedPitchDelta: upAfter.renderedPitch - upBefore.renderedPitch }
+
+  // Two-thumb path: hold movement joystick while a second finger drags the look surface.
+  const joystick = await page.locator('.joystick').boundingBox()
+  assert(joystick, 'joystick has no layout box')
+  const jx = joystick.x + joystick.width / 2
+  const jy = joystick.y + joystick.height / 2
+  const simultaneousBefore = await state(page)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: jx, y: jy, id: 21 }] })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: jx, y: jy, id: 21 }, { x: 250, y: 300, id: 22 }] })
+  for (let i = 1; i <= 10; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [
+        { x: jx, y: jy - 32, id: 21 },
+        { x: 250 + i * 7, y: 300 - i * 4, id: 22 },
+      ],
+    })
+    await page.waitForTimeout(25)
+  }
+  await page.waitForTimeout(350)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  const simultaneousAfter = await state(page)
+  const movedDistance = Math.hypot(
+    simultaneousAfter.position[0] - simultaneousBefore.position[0],
+    simultaneousAfter.position[2] - simultaneousBefore.position[2],
+  )
+  assert(movedDistance > 0.5, 'joystick did not move during simultaneous touch')
+  assert(simultaneousAfter.yaw > simultaneousBefore.yaw + 0.1, 'second finger did not look during simultaneous touch')
+  results.twoThumb = { movedDistance, yawDelta: simultaneousAfter.yaw - simultaneousBefore.yaw }
+
+  // Care interaction: selecting opens the panel, feeding consumes inventory,
+  // and the close button restores the unobstructed playfield.
+  const berriesBefore = await page.evaluate(() => {
+    const view = window.__luma.view
+    const firstId = view.game.creatures.find((creature) => creature.alive)?.id
+    view.select(firstId)
+    return view.game.player.inventory.berries
+  })
+  await page.locator('.panel').waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: /Feed/ }).click()
+  const berriesAfter = await page.evaluate(() => window.__luma.view.game.player.inventory.berries)
+  assert(berriesAfter === berriesBefore - 1, 'Feed did not consume exactly one berry')
+  await page.getByRole('button', { name: 'Close creature care' }).click()
+  assert(!(await page.locator('.panel').isVisible()), 'care panel did not close')
+  results.careInteraction = { berriesBefore, berriesAfter, panelClosed: true }
+
+  // Focused text fields must isolate desktop interaction hotkeys.
+  await page.evaluate(() => {
+    const view = window.__luma.view
+    const firstId = view.game.creatures.find((creature) => creature.alive)?.id
+    view.select(firstId)
+    window.__interactCalls = 0
+    const originalInteract = view.interact.bind(view)
+    view.interact = (...args) => {
+      window.__interactCalls += 1
+      return originalInteract(...args)
+    }
+  })
+  const teachInput = page.getByPlaceholder('teach a word…')
+  await teachInput.focus()
+  await teachInput.press('f')
+  const interactCallsWhileTyping = await page.evaluate(() => window.__interactCalls)
+  assert(interactCallsWhileTyping === 0, 'F interacted with the world while typing')
+  await page.getByRole('button', { name: 'Close creature care' }).click()
+
+  // The topbar must stay above the look surface so Menu remains tappable.
+  await page.getByRole('button', { name: 'Menu' }).click()
+  assert(await page.getByRole('heading', { name: 'Menu' }).isVisible(), 'look surface intercepted the Menu button')
+  await page.getByRole('button', { name: 'Close' }).click()
+  results.uiIsolation = { interactCallsWhileTyping, menuOpened: true }
+
+  results.mobileErrors = errors
+  assert(errors.length === 0, `mobile page errors: ${errors.join('; ')}`)
   await mobile.close()
 
+  // Desktop regression: real mouse motion still rotates the rendered camera.
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 720 } })
   const desktopPage = await desktop.newPage()
   await startGame(desktopPage)
-  const desktopBefore = await angles(desktopPage)
-  await desktopPage.mouse.move(700, 300)
-  await desktopPage.mouse.move(755, 325)
-  const desktopAfter = await angles(desktopPage)
-  if (!changed(desktopBefore, desktopAfter)) throw new Error('desktop mouse did not rotate camera')
+  const desktopBefore = await state(desktopPage)
+  await desktopPage.mouse.move(650, 320)
+  await desktopPage.mouse.move(780, 250, { steps: 12 })
+  const desktopAfter = await state(desktopPage)
+  assert(desktopAfter.yaw > desktopBefore.yaw + 0.1, 'desktop mouse did not turn right')
+  assert(desktopAfter.pitch > desktopBefore.pitch + 0.05, 'desktop mouse did not look up')
+  results.desktop = {
+    yawDelta: desktopAfter.yaw - desktopBefore.yaw,
+    pitchDelta: desktopAfter.pitch - desktopBefore.pitch,
+  }
   await desktop.close()
 
-  console.log(JSON.stringify({ rendered, stick: { before: stickBefore, after: stickAfter }, canvas: { before: canvasBefore, after: canvasAfter }, desktop: { before: desktopBefore, after: desktopAfter } }, null, 2))
+  console.log(`PASS mobile controls and rendered camera\n${JSON.stringify(results, null, 2)}`)
 } finally {
   await browser.close()
 }

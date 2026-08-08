@@ -71,6 +71,7 @@ export default function App() {
   const [questText, setQuestText] = useState('')
   const [storyDone, setStoryDone] = useState(false)
   const [exploring, setExploring] = useState(false)
+  const [hasLooked, setHasLooked] = useState(false)
   const isTouch = typeof window !== 'undefined' && (
     navigator.maxTouchPoints > 0 ||
     'ontouchstart' in window ||
@@ -104,7 +105,9 @@ export default function App() {
       onQuestHint: (t) => setToast(t),
     })
     viewRef.current = view
-    setSelectedId(g.creatures[0]?.id ?? null)
+    // Keep the mobile playfield unobstructed until the player selects a Luma.
+    setSelectedId(null)
+    setHasLooked(false)
     setStarted(true)
     setTick((t) => t + 1)
   }
@@ -194,18 +197,7 @@ export default function App() {
       soundRef.current?.click()
     } else if (ev.kind === 'creature' && ev.creatureId != null) {
       const c = g.selectedCreature(ev.creatureId)
-      if (c?.alive) {
-        // feed if we have berries and they're hungry
-        if (g.player.inventory.berries > 0 && c.chem.hunger > 0.4) {
-          g.feed(ev.creatureId)
-          g.player.inventory.berries--
-          soundRef.current?.munch()
-        } else if (c.chem.hunger <= 0.4) {
-          setToast(`${c.name} isn't hungry right now.`)
-        } else {
-          setToast('No berries left — pick some from a bush!')
-        }
-      }
+      if (c?.alive) setToast(`${c.name} is ${MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}. Care actions are now open.`)
     }
     setTick((t) => t + 1)
   }
@@ -226,6 +218,24 @@ export default function App() {
     setTick((t) => t + 1)
   }
 
+  const feedSelected = (): void => {
+    if (!game || !selected) return
+    if (game.player.inventory.berries <= 0) {
+      setToast('No berries left — pick some from the valley.')
+      return
+    }
+    if (game.feed(selected.id)) {
+      game.player.inventory.berries--
+      soundRef.current?.munch()
+      setToast(`You feed ${selected.name}.`)
+      setTick((t) => t + 1)
+    }
+  }
+
+  const interact = (): void => {
+    if (!viewRef.current?.interact()) setToast('Nothing within reach — aim at a nearby Luma, item, log, or shrine.')
+  }
+
   const dayLabel =
     game && game.world.state.dayTime > 0.75 ? '🌙 night'
     : game && game.world.state.dayTime > 0.35 ? '🌞 day'
@@ -241,6 +251,7 @@ export default function App() {
           .map((id) => `${ITEMS[id].emoji}${inventory.items[id]}`)
           .join(' ')
       : ''
+  const interactionHint = inGame ? viewRef.current?.interactionHint() ?? null : null
 
   return (
     <div className="app">
@@ -292,13 +303,19 @@ export default function App() {
       {isTouch && inGame && (
         <LookSurface
           onLook={(dx, dy) => {
-            viewRef.current?.fps.applyLook(dx, dy)
+            // Mobile sensitivity is intentionally higher than desktop mouse.
+            viewRef.current?.fps.applyLook(dx * 1.6, dy * 1.6)
+            if (!hasLooked) setHasLooked(true)
           }}
-          onTap={() => {
-            viewRef.current?.interact()
-          }}
+          onTap={interact}
         />
       )}
+
+      {isTouch && inGame && !hasLooked && (
+        <div className="control-tip">Drag the open screen to look<br /><span>← your view follows your finger →</span></div>
+      )}
+
+      {interactionHint && <div className="interaction-prompt">✦ {interactionHint} · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
 
       {/* Torch + pickup quick actions */}
       {started && inGame && (
@@ -322,6 +339,7 @@ export default function App() {
             <span className={`mood mood-${MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}`}>
               {MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}
             </span>
+            <button className="panel-close" aria-label="Close creature care" onClick={() => { setSelectedId(null); viewRef.current?.select(null) }}>×</button>
           </div>
           <p className="age">age {Math.floor(selected.age / 100)} · {selected.alive ? selected.action : 'deceased'}</p>
           {selected.alive && (
@@ -351,7 +369,7 @@ export default function App() {
                 )}
               </div>
               <div className="actions">
-                <button className="btn" onClick={() => act(() => game?.feed(selected.id), () => soundRef.current?.munch())}>🍓 Feed</button>
+                <button className="btn" onClick={feedSelected}>🍓 Feed ({inventory?.berries ?? 0})</button>
                 <button className="btn" onClick={() => act(() => game?.tickle(selected.id), () => soundRef.current?.voice(selected.traits.voicePitch, 'happy'))}>✨ Tickle</button>
                 <button
                   className={`btn ${game?.carriedId === selected.id ? 'btn-active' : ''}`}
@@ -527,6 +545,12 @@ export default function App() {
 
       {/* Touch jump button */}
       {isTouch && inGame && (
+        <button className="interact-btn" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label="Interact">
+          🤲<span>{interactionHint ?? 'Interact'}</span>
+        </button>
+      )}
+
+      {isTouch && inGame && (
         <button
           className="jump-btn"
           onPointerDown={(e) => {
@@ -547,62 +571,82 @@ export default function App() {
   )
 }
 
-/** Full-screen LOOK SURFACE — drag anywhere to look (non-inverted), tap to interact.
- *  Uses the same React synthetic touch/pointer events as the working joystick. */
+/** Full-screen LOOK SURFACE — one isolated gesture owner for mobile look.
+ * Pointer Events are preferred; Touch Events are used only as an old-browser fallback. */
 function LookSurface({ onLook, onTap }: { onLook: (dx: number, dy: number) => void; onTap: () => void }) {
-  const last = useRef<{ x: number; y: number } | null>(null)
+  const activePointer = useRef<number | null>(null)
+  const activeTouch = useRef<number | null>(null)
+  const last = useRef({ x: 0, y: 0 })
   const downAt = useRef({ x: 0, y: 0 })
   const moved = useRef(false)
+  const feedbackRef = useRef<HTMLDivElement>(null)
+  const supportsPointer = typeof window !== 'undefined' && 'PointerEvent' in window
 
+  const showFeedback = (x: number, y: number): void => {
+    if (!feedbackRef.current) return
+    feedbackRef.current.style.transform = `translate(${x}px, ${y}px)`
+    feedbackRef.current.dataset.active = 'true'
+  }
   const start = (x: number, y: number): void => {
     last.current = { x, y }
     downAt.current = { x, y }
     moved.current = false
+    showFeedback(x, y)
   }
   const move = (x: number, y: number): void => {
-    if (!last.current) return
     const dx = x - last.current.x
     const dy = y - last.current.y
     last.current = { x, y }
-    if (Math.abs(x - downAt.current.x) + Math.abs(y - downAt.current.y) > 14) moved.current = true
+    showFeedback(x, y)
+    if (Math.abs(x - downAt.current.x) + Math.abs(y - downAt.current.y) > 10) moved.current = true
     if (dx !== 0 || dy !== 0) onLook(dx, dy)
   }
-  const end = (): void => {
-    last.current = null
-    if (!moved.current) onTap()
+  const end = (tap: boolean): void => {
+    activePointer.current = null
+    activeTouch.current = null
+    if (feedbackRef.current) feedbackRef.current.dataset.active = 'false'
+    if (tap && !moved.current) onTap()
   }
 
   return (
     <div
       className="look-surface"
+      aria-label="Drag to look around"
       onPointerDown={(e) => {
-        if (e.pointerType === 'mouse') return // desktop uses mouse free-look
-        e.preventDefault()
+        if (e.pointerType === 'mouse' || activePointer.current !== null) return
+        activePointer.current = e.pointerId
+        e.currentTarget.setPointerCapture(e.pointerId)
         start(e.clientX, e.clientY)
       }}
       onPointerMove={(e) => {
-        if (!last.current) return
-        e.preventDefault()
+        if (e.pointerId !== activePointer.current) return
         move(e.clientX, e.clientY)
       }}
-      onPointerUp={end}
-      onPointerCancel={end}
+      onPointerUp={(e) => {
+        if (e.pointerId === activePointer.current) end(true)
+      }}
+      onPointerCancel={(e) => {
+        if (e.pointerId === activePointer.current) end(false)
+      }}
       onTouchStart={(e) => {
-        const t = e.changedTouches[0]
-        if (!t) return
-        e.preventDefault()
-        start(t.clientX, t.clientY)
+        if (supportsPointer || activeTouch.current !== null) return
+        const touch = e.changedTouches[0]
+        if (!touch) return
+        activeTouch.current = touch.identifier
+        start(touch.clientX, touch.clientY)
       }}
       onTouchMove={(e) => {
-        if (!last.current) return
-        const t = Array.from(e.changedTouches)[0]
-        if (!t) return
-        e.preventDefault()
-        move(t.clientX, t.clientY)
+        if (supportsPointer || activeTouch.current === null) return
+        const touch = Array.from(e.changedTouches).find((item) => item.identifier === activeTouch.current)
+        if (touch) move(touch.clientX, touch.clientY)
       }}
-      onTouchEnd={end}
-      onTouchCancel={end}
-    />
+      onTouchEnd={(e) => {
+        if (!supportsPointer && Array.from(e.changedTouches).some((item) => item.identifier === activeTouch.current)) end(true)
+      }}
+      onTouchCancel={() => end(false)}
+    >
+      <div ref={feedbackRef} className="look-feedback" data-active="false" />
+    </div>
   )
 }
 
