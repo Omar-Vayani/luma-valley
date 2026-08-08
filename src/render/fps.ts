@@ -109,19 +109,21 @@ export class FPSControls {
     this.onWheel?.(e.deltaY > 0 ? 1 : -1)
   }
 
-  /** Single look entry point — every input routes here and the camera updates NOW. */
+  /** Single look entry point — every input routes here and the camera updates NOW.
+   *  NATURAL (non-inverted): slide right → look right (yaw+), slide up → look up (pitch+). */
   applyLook(dx: number, dy: number): void {
     if (dx === 0 && dy === 0) return
-    this.yaw -= dx * 0.0022
+    this.yaw += dx * 0.0022
     this.pitch -= dy * 0.0022
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.35, 1.35)
     this.updateCamera()
   }
 
-  /** True if the pointer is over game UI (never rotate then). */
+  /** True if the pointer is over an interactive control (never rotate then).
+   *  Panels/background are lookable — only buttons/inputs/sticks block look. */
   private overUi(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false
-    return !!target.closest('.joystick, .lookstick, .jump-btn, .btn, input, textarea, select, button, a')
+    return !!target.closest('button, .btn, input, textarea, select, .joystick, .jump-btn, .fpv-hint')
   }
 
   private onCanvasTouchStart = (e: TouchEvent): void => {
@@ -282,15 +284,15 @@ export class FPSControls {
   }
 
   /**
-   * KEYBOARD LOOK — guaranteed to work in any environment where keys work
-   * (movement proves keys reach the page). ArrowLeft/Right rotate yaw,
-   * ArrowUp/Down tilt pitch (when Shift is NOT held), Q/E strafe-rotate.
+   * KEYBOARD LOOK — guaranteed to work in any environment where keys work.
+   * ArrowRight/Left rotate right/left (non-inverted), ArrowUp/Down tilt
+   * up/down, Q/E rotate left/right.
    */
   private keyLook(dt: number): void {
-    if (this.keys.has('ArrowLeft') || this.keys.has('KeyQ')) this.applyLook(1.2 * (dt * 60), 0)
-    if (this.keys.has('ArrowRight') || this.keys.has('KeyE')) this.applyLook(-1.2 * (dt * 60), 0)
-    if (this.keys.has('ArrowUp')) this.applyLook(0, 1.0 * (dt * 60))
-    if (this.keys.has('ArrowDown')) this.applyLook(0, -1.0 * (dt * 60))
+    if (this.keys.has('ArrowLeft') || this.keys.has('KeyQ')) this.applyLook(-1.2 * (dt * 60), 0)
+    if (this.keys.has('ArrowRight') || this.keys.has('KeyE')) this.applyLook(1.2 * (dt * 60), 0)
+    if (this.keys.has('ArrowUp')) this.applyLook(0, -1.0 * (dt * 60))
+    if (this.keys.has('ArrowDown')) this.applyLook(0, 1.0 * (dt * 60))
   }
 
   /** Jump (Space or the mobile jump button). */

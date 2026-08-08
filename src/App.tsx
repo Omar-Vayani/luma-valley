@@ -509,14 +509,8 @@ export default function App() {
         />
       )}
 
-      {/* Touch look-stick (right thumb) — explicit look control for mobile */}
-      {isTouch && inGame && (
-        <LookStick
-          onMove={(dx, dy) => {
-            viewRef.current?.fps.applyLook(dx * 6, dy * 6)
-          }}
-        />
-      )}
+      {/* Touch look-stick REMOVED — the whole screen is the look surface now */}
+      {/* One joystick (left thumb) for movement; drag anywhere else to look */}
 
       {/* Touch jump button */}
       {isTouch && inGame && (
@@ -595,67 +589,6 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
         const rect = baseRef.current!.getBoundingClientRect()
         activeTouch.current = touch.identifier
         origin.current = { x: touch.clientX - rect.left - rect.width / 2, y: touch.clientY - rect.top - rect.height / 2 }
-      }}
-      onTouchMove={(e) => {
-        if (active.current || activeTouch.current === null) return
-        const touch = Array.from(e.changedTouches).find((item) => item.identifier === activeTouch.current)
-        if (!touch) return
-        e.preventDefault()
-        move(touch.clientX, touch.clientY)
-      }}
-      onTouchEnd={release}
-      onTouchCancel={release}
-    >
-      <div ref={stickRef} className="joystick-stick" />
-    </div>
-  )
-}
-
-/** Right-thumb look stick: drag to rotate the camera (mobile fallback control). */
-function LookStick({ onMove }: { onMove: (dx: number, dy: number) => void }) {
-  const baseRef = useRef<HTMLDivElement>(null)
-  const stickRef = useRef<HTMLDivElement>(null)
-  const active = useRef(false)
-  const activeTouch = useRef<number | null>(null)
-  const last = useRef({ x: 0, y: 0 })
-
-  const move = (clientX: number, clientY: number): void => {
-    const dx = clientX - last.current.x
-    const dy = clientY - last.current.y
-    last.current = { x: clientX, y: clientY }
-    if (stickRef.current) stickRef.current.style.transform = `translate(${Math.max(-18, Math.min(18, dx))}px, ${Math.max(-18, Math.min(18, dy))}px)`
-    onMove(dx, dy)
-  }
-
-  const release = (): void => {
-    active.current = false
-    activeTouch.current = null
-    if (stickRef.current) stickRef.current.style.transform = 'translate(0px, 0px)'
-  }
-
-  return (
-    <div
-      ref={baseRef}
-      className="lookstick"
-      onPointerDown={(e) => {
-        active.current = true
-        last.current = { x: e.clientX, y: e.clientY }
-        e.currentTarget.setPointerCapture(e.pointerId)
-      }}
-      onPointerMove={(e) => {
-        if (!active.current) return
-        move(e.clientX, e.clientY)
-      }}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onTouchStart={(e) => {
-        // Fallback for mobile webviews which expose Touch Events but not Pointer Events.
-        if (active.current) return
-        const touch = e.changedTouches[0]
-        if (!touch) return
-        e.preventDefault()
-        activeTouch.current = touch.identifier
-        last.current = { x: touch.clientX, y: touch.clientY }
       }}
       onTouchMove={(e) => {
         if (active.current || activeTouch.current === null) return
