@@ -13,6 +13,7 @@ export interface World3D {
   ambient: THREE.HemisphereLight
   plants: THREE.Group
   stream: THREE.Group
+  shimmer: (time: number) => void
   update: (dayTime: number) => void
 }
 
@@ -59,6 +60,7 @@ export function buildWorld3D(world: World): World3D {
 
   // ── Stream ──
   const stream = new THREE.Group()
+  const waterMeshes: THREE.Mesh[] = []
   const waterPts = world.state.waterPoints
   for (let i = 0; i < waterPts.length - 1; i++) {
     const a = waterPts[i]
@@ -71,6 +73,7 @@ export function buildWorld3D(world: World): World3D {
     mesh.position.set((a.x + b.x) / 2, 0.02, (a.z + b.z) / 2)
     mesh.rotation.y = Math.atan2(b.z - a.z, b.x - a.x)
     stream.add(mesh)
+    waterMeshes.push(mesh)
   }
   group.add(stream)
 
@@ -149,7 +152,17 @@ export function buildWorld3D(world: World): World3D {
     ambient.color.copy(PALETTE.skyDay).lerp(PALETTE.skyDusk, duskness * 0.6)
   }
 
-  return { group, sky, sun, ambient, plants, stream, update }
+  // Animated water shimmer — per-segment opacity pulse + gentle surface undulation.
+  function shimmer(time: number): void {
+    for (let i = 0; i < waterMeshes.length; i++) {
+      const mesh = waterMeshes[i]
+      const mat = mesh.material as THREE.MeshLambertMaterial
+      mat.opacity = THREE.MathUtils.clamp(0.7 + Math.sin(time * 2 + i) * 0.3, 0.45, 1)
+      mesh.position.y = 0.02 + Math.sin(time * 1.6 + i * 1.3) * 0.012
+    }
+  }
+
+  return { group, sky, sun, ambient, plants, stream, shimmer, update }
 }
 
 export function updatePlantBush(group: THREE.Group, plantId: number, berries: number, pos: { x: number; z: number }, height: number): void {

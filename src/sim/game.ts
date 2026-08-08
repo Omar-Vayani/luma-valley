@@ -1,9 +1,14 @@
 import { Creature } from './creature'
 import type { CreatureCtx } from './creature'
 import { applyFood, FOOD_EFFECTS } from './biochem'
+import { ITEMS } from './items'
 import { World } from './world'
 import { applySave, buildSave, type SaveData } from './save'
 import { clamp, mulberry32, range, type RNG } from './rng'
+import { createPlayer, type PlayerState } from './player'
+import { ShadowBeast } from './shadowbeast'
+import { createQuestLog, questEvent, type QuestEvent, type QuestLogState } from './quests'
+import { contagion, remember, updateAffinity } from './mind'
 
 /**
  * Game — orchestrates the world + creatures into one playable simulation.
@@ -25,16 +30,27 @@ export interface GameView {
 export class Game {
   world: World
   creatures: Creature[] = []
+  player: PlayerState
+  shadowBeasts: ShadowBeast[] = []
+  quests: QuestLogState
   time = 0
   nextId = 1
   settings: GameSettings = { gentle: false }
   rng: RNG
   private breedCooldown = 0
+  private shadowSpawnTimer = 0
+  private beastNextId = 1
 
   constructor(seed: number, size = 40, settings?: GameSettings) {
     this.world = new World(seed, size)
+    // level pads for the village house, cave, and graveyard structures
+    this.world.addFlatZone(-8, 14, 10)
+    this.world.addFlatZone(-24, -18, 9)
+    this.world.addFlatZone(28, 30, 9)
     this.rng = mulberry32(seed)
     if (settings) this.settings = settings
+    this.player = createPlayer({ x: 0, z: 0 })
+    this.quests = createQuestLog()
   }
 
   spawnInitial(count = 5): void {
@@ -44,6 +60,11 @@ export class Game {
       this.creatures.push(c)
       c.log('hatches into the valley')
     }
+  }
+
+  /** Fire a gameplay event into the quest engine. */
+  emit(kind: QuestEvent, amount = 1): string[] {
+    return questEvent(this.quests, kind, amount)
   }
 
   private placeRandom(c: Creature): void {
@@ -68,7 +89,7 @@ export class Game {
     return 1 - d / max
   }
 
-  private ctxFor(c: Creature): CreatureCtx {
+  private ctxFor(c: Creature, bondFear = 0): CreatureCtx {
     const self = c
     return {
       rng: this.rng,
@@ -76,13 +97,19 @@ export class Game {
       waterNear: this.proximity(self.pos, () => this.world.nearestWater(self.pos)),
       creatureNear: this.proximity(self.pos, () => this.world.nearestCreature(self.pos, this.creatures, self.id), 8),
       dangerNear: this.world.dangerAt(self.pos, this.world.state.dayTime),
+      playerNear: this.proximity(self.pos, () => this.player.pos, 12),
       day: this.world.state.dayTime,
       time: this.time,
       gentle: this.settings.gentle,
+      bondFear,
       findFood: () => this.world.nearestFood(self.pos),
       findWater: () => this.world.nearestWater(self.pos),
       findFriend: () => this.world.nearestCreature(self.pos, this.creatures, self.id),
-      eatAt: (p) => this.world.eatAt(p),
+      eatAt: (p) => {
+        const fx = this.world.eatAt(p)
+        if (fx) remember(self.mind, 'food', p, 1, 0.6, self.age)
+        return fx
+      },
     }
   }
 
@@ -90,19 +117,109 @@ export class Game {
   tick(): void {
     this.time++
     this.world.tick()
+    const dayTime = this.world.state.dayTime
+    const night = dayTime > 0.72 || dayTime < 0.1
+
+    // social bonds: proximity builds friendship; friends share fear
+    const bondFear = new Map<number, number>()
+    for (let i = 0; i < this.creatures.length; i++) {
+      for (let j = i + 1; j < this.creatures.length; j++) {
+        const a = this.creatures[i]
+        const b = this.creatures[j]
+        if (!a.alive || !b.alive) continue
+        const d = Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z)
+        if (d < 5) {
+          const delta = 0.004 * (1 - d / 5)
+          updateAffinity(a.mind, b.id, delta)
+          updateAffinity(b.mind, a.id, delta)
+          const aFear = contagion(a.mind, b.id, b.chem.fear)
+          const bFear = contagion(b.mind, a.id, a.chem.fear)
+          bondFear.set(a.id, (bondFear.get(a.id) ?? 0) + aFear)
+          bondFear.set(b.id, (bondFear.get(b.id) ?? 0) + bFear)
+        }
+      }
+    }
+
     for (const c of this.creatures) {
       if (!c.alive) continue
+      // adult milestone for quests
+      if (c.age === 600) this.emit('adult', 1)
       // carried creatures stay put (brain still thinks, body frozen in hand)
       if (this.carriedId === c.id) {
         const savePos = { ...c.pos }
-        c.tick(this.ctxFor(c))
+        c.tick(this.ctxFor(c, bondFear.get(c.id) ?? 0))
         c.pos = savePos
         continue
       }
-      c.tick(this.ctxFor(c))
+      c.tick(this.ctxFor(c, bondFear.get(c.id) ?? 0))
     }
+    this.tickShadows(night)
     this.maybeBreed()
     if (this.breedCooldown > 0) this.breedCooldown--
+    // sanity: recovers near home/den, drains in the night dark
+    const nearDen = Math.hypot(this.player.pos.x - this.world.state.den.x, this.player.pos.z - this.world.state.den.z) < 8
+    const torchSafe = this.player.torchLit
+    if (nearDen || !night) this.player.sanity = clamp(this.player.sanity + 0.001, 0, 1)
+    else if (!torchSafe) this.player.sanity = clamp(this.player.sanity - 0.0006, 0, 1)
+  }
+
+  private tickShadows(night: boolean): void {
+    if (night) {
+      this.shadowSpawnTimer++
+      if (this.shadowSpawnTimer > 200 && this.shadowBeasts.length < 3) {
+        this.shadowSpawnTimer = 0
+        const s = this.world.state.size
+        const ang = this.rng() * Math.PI * 2
+        const dist = s - 2
+        this.shadowBeasts.push(new ShadowBeast(this.beastNextId++, { x: Math.cos(ang) * dist, z: Math.sin(ang) * dist }))
+      }
+    } else {
+      this.shadowSpawnTimer = 0
+      this.shadowBeasts = []
+      return
+    }
+    const torchLit = this.player.torchLit
+    const beasts = this.shadowBeasts
+    this.shadowBeasts = []
+    for (const b of beasts) {
+      const torchNear = torchLit && Math.hypot(b.state.pos.x - this.player.pos.x, b.state.pos.z - this.player.pos.z) < 8
+      const events = b.tick({
+        creatures: this.creatures.map((c) => ({ id: c.id, pos: c.pos, alive: c.alive, fear: c.chem.fear })),
+        playerPos: this.player.pos,
+        torchNear,
+        dayTime: this.world.state.dayTime,
+      })
+      if (events.includes('dissolve')) continue
+      if (events.includes('attack')) {
+        // wound the nearest creature + scare it
+        let best: Creature | null = null
+        let bd = 3
+        for (const c of this.creatures) {
+          if (!c.alive) continue
+          const d = Math.hypot(c.pos.x - b.state.pos.x, c.pos.z - b.state.pos.z)
+          if (d < bd) {
+            bd = d
+            best = c
+          }
+        }
+        if (best) {
+          best.chem.fear = clamp(best.chem.fear + 0.5, 0, 1)
+          best.chem.health = clamp(best.chem.health - 0.01, 0, 1)
+          best.log('is terrified by a Shadow Beast!')
+        }
+      }
+      // fear spreads to nearby creatures
+      for (const c of this.creatures) {
+        if (!c.alive) continue
+        const d = Math.hypot(c.pos.x - b.state.pos.x, c.pos.z - b.state.pos.z)
+        if (d < 6) c.chem.fear = clamp(c.chem.fear + 0.02, 0, 1)
+      }
+      this.shadowBeasts.push(b)
+    }
+    // repel event: any beast in flee state near the torch counts once
+    if (torchLit && this.shadowBeasts.some((b) => b.state.state === 'flee')) {
+      this.emit('repelShadow', 1)
+    }
   }
 
   private maybeBreed(): void {
@@ -130,6 +247,7 @@ export class Game {
       child.log('is born')
       this.creatures.push(child)
       this.breedCooldown = 300
+      this.emit('birth', 1)
     }
   }
 
@@ -137,6 +255,7 @@ export class Game {
     const c = this.creatures.find((x) => x.id === creatureId && x.alive)
     if (!c) return false
     c.teachWord(word, kind)
+    this.emit('teach', 1)
     return true
   }
 
@@ -147,6 +266,57 @@ export class Game {
     this.carriedId = id
   }
 
+  /** Pick up an item into the player's inventory. */
+  pickupItem(itemId: string): boolean {
+    const inv = this.player.inventory.items
+    inv[itemId] = (inv[itemId] ?? 0) + 1
+    return true
+  }
+
+  /** Give an item to a creature from the player's inventory. */
+  giveItem(creatureId: number, itemId: string): { ok: boolean; msg: string } {
+    const item = ITEMS[itemId as keyof typeof ITEMS]
+    const c = this.creatures.find((x) => x.id === creatureId && x.alive)
+    if (!item || !c) return { ok: false, msg: 'Nothing happened.' }
+    const inv = this.player.inventory.items
+    const count = inv[itemId] ?? 0
+    if (count <= 0) return { ok: false, msg: `No ${item.name} left — find it in the valley.` }
+    const result = c.giveItem(item)
+    inv[itemId] = count - 1
+    if (result?.toxic) {
+      this.emit('poisoned', 1)
+      return { ok: true, msg: `${c.name} sickens from the ${result.label}…` }
+    }
+    this.emit(item.healthy ? 'feed' : 'gaveItem', 1)
+    return { ok: true, msg: result ? `${c.name} ${result.trustDelta >= 0 ? 'brightens' : 'sours'} at the ${result.label}.` : `${c.name} can't respond.` }
+  }
+
+  /** Terrorise a creature — trauma, fear, trust loss. */
+  scareCreature(creatureId: number, trigger: 'player' | 'fire' | 'noise' = 'player'): { ok: boolean; msg: string } {
+    const c = this.creatures.find((x) => x.id === creatureId && x.alive)
+    if (!c) return { ok: false, msg: 'Gone.' }
+    const intensity = trigger === 'fire' ? 0.8 : trigger === 'noise' ? 0.55 : 0.7
+    c.scare(trigger, intensity, trigger === 'fire' ? 'the naked flame' : trigger === 'noise' ? 'your sudden shout' : 'your looming hand')
+    this.emit('terrorised', 1)
+    return { ok: true, msg: `${c.name} cowers in terror. It will remember this.` }
+  }
+
+  /** Dropping a carried creature while it is scared wounds its trust badly. */
+  dropCarried(): { ok: boolean; msg: string } {
+    if (this.carriedId == null) return { ok: false, msg: 'Not carrying anyone.' }
+    const c = this.creatures.find((x) => x.id === this.carriedId && x.alive)
+    this.carriedId = null
+    if (!c) return { ok: false, msg: 'The air is empty.' }
+    if (c.chem.fear > 0.5 || c.psyche.memories.length > 0) {
+      c.scare('drop', 0.7, 'falling from your hands')
+      return { ok: true, msg: `${c.name} tumbles and panics — falling is now a fear.` }
+    }
+    c.chem.pain = clamp(c.chem.pain + 0.25, 0, 1)
+    c.psyche.trust = clamp(c.psyche.trust - 0.12, 0, 1)
+    c.log('is dropped — ouch!')
+    return { ok: true, msg: `${c.name} lands with a thud.` }
+  }
+
   /** Hand-feed a creature a berry (instant effect — no world drop). */
   feed(creatureId: number): boolean {
     const c = this.creatures.find((x) => x.id === creatureId && x.alive)
@@ -154,6 +324,7 @@ export class Game {
     applyFood(c.chem, FOOD_EFFECTS.berry)
     c.brain.reinforce(0.6)
     c.log('is hand-fed')
+    this.emit('feed', 1)
     return true
   }
 
@@ -185,7 +356,17 @@ export class Game {
   }
 
   save(): SaveData {
-    const data = buildSave(this.world, this.creatures, this.settings, this.nextId, this.time)
+    const data = buildSave(
+      this.world,
+      this.creatures,
+      this.settings,
+      this.nextId,
+      this.time,
+      { pos: { ...this.player.pos }, facingYaw: this.player.facingYaw, inventory: { ...this.player.inventory, items: { ...(this.player.inventory.items ?? {}) } as Record<string, number> }, torchLit: this.player.torchLit, sanity: this.player.sanity },
+      { active: this.quests.active, progress: { ...this.quests.progress }, completed: [...this.quests.completed], unlocked: [...this.quests.unlocked] },
+      this.shadowBeasts.map((b) => ({ id: b.state.id, pos: { ...b.state.pos }, state: b.state.state, health: b.state.health, targetId: b.state.targetId })),
+      this.beastNextId,
+    )
     data.extra = { carriedId: this.carriedId ?? undefined } as any
     return data
   }
@@ -196,6 +377,28 @@ export class Game {
     this.time = data.time
     applySave(data, this.world, this.creatures)
     this.carriedId = (data as any).extra?.carriedId ?? null
+    if (data.player) {
+      this.player = {
+        pos: { ...data.player.pos },
+        facingYaw: data.player.facingYaw ?? 0,
+        inventory: { ...data.player.inventory, items: { ...(data.player.inventory.items ?? {}) } },
+        torchLit: data.player.torchLit ?? false,
+        sanity: data.player.sanity ?? 1,
+        carryingId: null,
+      }
+    }
+    if (data.quests) {
+      this.quests = {
+        active: data.quests.active,
+        progress: { ...data.quests.progress },
+        completed: [...data.quests.completed],
+        unlocked: [...data.quests.unlocked],
+      }
+    }
+    if (data.shadowBeasts) {
+      this.shadowBeasts = data.shadowBeasts.map((s) => new ShadowBeast(s.id, s.pos))
+      this.beastNextId = data.beastNextId ?? data.shadowBeasts.length + 1
+    }
   }
 
   view(): GameView {

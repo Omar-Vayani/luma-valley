@@ -11,7 +11,7 @@ import { describeGenome, type Genome } from './genetics'
  */
 
 export interface SaveData {
-  version: 1
+  version: 2
   seed: number
   settings: { gentle: boolean }
   world: WorldState
@@ -19,6 +19,21 @@ export interface SaveData {
   nextId: number
   time: number
   extra?: { carriedId?: number | null }
+  player: {
+    pos: { x: number; z: number }
+    facingYaw: number
+    inventory: { berries: number; wood: number; torch: number; items?: Record<string, number> }
+    torchLit: boolean
+    sanity: number
+  }
+  quests: {
+    active: string | null
+    progress: Record<string, number>
+    completed: string[]
+    unlocked: string[]
+  }
+  shadowBeasts: { id: number; pos: { x: number; z: number }; state: string; health: number; targetId: number | null }[]
+  beastNextId: number
 }
 
 export interface SavedCreature {
@@ -35,6 +50,18 @@ export interface SavedCreature {
   action: string
   learnedWords: Record<string, { kind: string }>
   journal: { tick: number; text: string }[]
+  psyche: {
+    memories: { trigger: string; intensity: number }[]
+    baselineFear: number
+    trust: number
+    addiction: Record<string, number>
+    lastDose: Record<string, number>
+  }
+  mind: {
+    episodes: { id: number; kind: string; pos: { x: number; z: number }; entityId: number | null; valence: number; intensity: number; tick: number }[]
+    affinity: Record<string, number>
+    curiosity: number
+  }
 }
 
 /** Compact brain: rounded tuples, no transient eligibility/state. */
@@ -75,9 +102,13 @@ export function buildSave(
   settings: { gentle: boolean },
   nextId: number,
   time: number,
+  player: { pos: { x: number; z: number }; facingYaw: number; inventory: { berries: number; wood: number; torch: number; items?: Record<string, number> }; torchLit: boolean; sanity: number },
+  quests: { active: string | null; progress: Record<string, number>; completed: string[]; unlocked: string[] },
+  shadowBeasts: { id: number; pos: { x: number; z: number }; state: string; health: number; targetId: number | null }[],
+  beastNextId: number,
 ): SaveData {
   return {
-    version: 1,
+    version: 2,
     seed: world.state.seed,
     settings,
     world: world.toJSON(),
@@ -95,9 +126,25 @@ export function buildSave(
       action: c.action,
       learnedWords: c.learnedWords,
       journal: c.journal.map((j) => ({ ...j })),
+      psyche: {
+        memories: c.psyche.memories.map((m) => ({ trigger: m.trigger, intensity: Math.round(m.intensity * 100) / 100 })),
+        baselineFear: Math.round(c.psyche.baselineFear * 100) / 100,
+        trust: Math.round(c.psyche.trust * 100) / 100,
+        addiction: { ...c.psyche.addiction },
+        lastDose: { ...c.lastDose },
+      },
+      mind: {
+        episodes: c.mind.episodes.map((e) => ({ id: e.id, kind: e.kind, pos: { ...e.pos }, entityId: e.entityId, valence: Math.round(e.valence * 100) / 100, intensity: Math.round(e.intensity * 100) / 100, tick: e.tick })),
+        affinity: { ...c.mind.affinity },
+        curiosity: Math.round(c.mind.curiosity * 100) / 100,
+      },
     })),
     nextId,
     time,
+    player,
+    quests,
+    shadowBeasts,
+    beastNextId,
   }
 }
 
@@ -118,6 +165,24 @@ export function applySave(data: SaveData, world: World, creatures: Creature[]): 
     c.learnedWords = Object.fromEntries(
       Object.entries(sc.learnedWords).map(([k, v]) => [k, { kind: v.kind as 'food' | 'water' | 'come' }]),
     )
+    if (sc.psyche) {
+      c.psyche.memories = sc.psyche.memories.map((m, i) => ({
+        id: i + 1,
+        trigger: m.trigger as 'shadow' | 'player' | 'drop' | 'fire' | 'noise' | 'poison' | 'abandonment',
+        intensity: m.intensity,
+        createdAt: c.age,
+        healTimer: 0,
+      }))
+      c.psyche.baselineFear = sc.psyche.baselineFear ?? 0
+      c.psyche.trust = sc.psyche.trust ?? 0.5
+      c.psyche.addiction = { smoke: 0, sugar: 0, cactus: 0, mushroom: 0, ...(sc.psyche.addiction ?? {}) }
+      c.lastDose = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999, ...(sc.psyche.lastDose ?? {}) }
+    }
+    if (sc.mind) {
+      c.mind.episodes = sc.mind.episodes.map((e) => ({ id: e.id, kind: e.kind as 'food' | 'scare' | 'friend' | 'water' | 'player-kind' | 'player-cruel', pos: { ...e.pos }, entityId: e.entityId, valence: e.valence, intensity: e.intensity, tick: e.tick }))
+      c.mind.affinity = { ...(sc.mind.affinity ?? {}) }
+      c.mind.curiosity = sc.mind.curiosity ?? 0.5
+    }
     c.journal = sc.journal.map((j) => ({ ...j }))
     creatures.push(c)
   }

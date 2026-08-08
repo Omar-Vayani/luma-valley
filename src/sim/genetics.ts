@@ -29,7 +29,7 @@ const KEYS_BY_KIND: Record<GeneKind, string[]> = {
   synth: ['hunger', 'thirst', 'fatigue', 'boredom', 'loneliness', 'fear'],
   brain: ['threshold', 'leak', 'lr', 'density'],
   temper: ['curiosity', 'aggression', 'sociability', 'energy'],
-  appear: ['hue', 'accentHue', 'size', 'eyeSize', 'voicePitch', 'earType'],
+  appear: ['hue', 'accentHue', 'size', 'eyeSize', 'voicePitch', 'earType', 'species'],
   lifespan: ['base'],
   fertility: ['base'],
 }
@@ -77,6 +77,7 @@ export function describeGenome(genome: Genome): Record<string, number> {
     eyeSize: 0.08 + geneValue(genome, 'appear', 'eyeSize') * 0.1,
     voicePitch: 0.5 + geneValue(genome, 'appear', 'voicePitch') * 0.6,
     earType: Math.round(geneValue(genome, 'appear', 'earType') * 2),
+    species: geneValue(genome, 'appear', 'species', 0.5),
     curiosity: geneValue(genome, 'temper', 'curiosity'),
     aggression: geneValue(genome, 'temper', 'aggression'),
     sociability: geneValue(genome, 'temper', 'sociability'),

@@ -28,6 +28,12 @@ body {
 .mount { position: absolute; inset: 0; }
 .mount canvas { display: block; }
 
+/* Force UI layers above the WebGL canvas compositing layer (Chrome quirk). */
+.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
 /* ── Top bar ── */
 .topbar {
   position: absolute;
@@ -132,6 +138,46 @@ body {
 
 .grave-note { font-style: italic; color: var(--muted); font-size: 0.85rem; }
 
+/* ── Psyche (trust, trauma, give) ── */
+.trust { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; }
+.trust-tag {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+.trust-devoted { background: oklch(0.92 0.12 150); color: oklch(0.4 0.14 150); }
+.trust-trusting { background: oklch(0.93 0.09 140); color: oklch(0.44 0.12 145); }
+.trust-wary { background: oklch(0.94 0.1 90); color: oklch(0.5 0.12 80); }
+.trust-afraid { background: oklch(0.93 0.1 45); color: oklch(0.52 0.14 40); }
+.trust-terrified { background: oklch(0.92 0.12 25); color: oklch(0.48 0.16 25); }
+.trust-track { height: 10px; }
+.psyche-sub {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 4px;
+}
+.trauma-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.trauma-chip {
+  background: oklch(0.96 0.02 40);
+  border-color: oklch(0.88 0.05 40);
+  color: oklch(0.5 0.12 30);
+  cursor: default;
+}
+.trauma-empty { font-size: 0.75rem; color: var(--muted); font-style: italic; }
+.give-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.give-btn { background: oklch(0.94 0.03 120); color: var(--ink); }
+.psyche-actions { display: flex; gap: 8px; margin-top: 10px; }
+.psyche-actions .btn { flex: 1; }
+.btn-danger { background: var(--danger); }
+.btn-danger:hover { filter: brightness(1.08); }
+
 /* ── Overlays ── */
 .overlay {
   position: absolute;
@@ -187,9 +233,80 @@ body {
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* ── FPV ── */
+.fpv-hint {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 22px 28px;
+  text-align: center;
+  box-shadow: var(--card-shadow);
+  z-index: 15;
+}
+.fpv-hint p { margin: 4px 0; }
+.fpv-hint .btn { margin-top: 10px; }
+
+.quest-tracker {
+  position: absolute;
+  top: 56px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: var(--card-shadow);
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: min(520px, calc(100vw - 40px));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quest-title { overflow: hidden; text-overflow: ellipsis; }
+.quest-progress { background: var(--accent); color: white; border-radius: 999px; padding: 2px 8px; font-size: 0.7rem; }
+.quest-done { background: oklch(0.95 0.08 150); color: oklch(0.45 0.12 150); }
+
+.quickbar {
+  position: absolute;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 6;
+}
+
 /* ── Mobile portrait ── */
+.joystick {
+  position: absolute;
+  bottom: 24px; left: 24px;
+  width: 110px; height: 110px;
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.25);
+  border: 2px solid oklch(1 0 0 / 0.5);
+  touch-action: none;
+  z-index: 8;
+}
+.joystick-stick {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 52px; height: 52px;
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.6);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 @media (max-width: 600px) {
   .panel { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 45vh; }
   .logo { font-size: 1rem; }
   .card { padding: 16px; }
+  .quest-tracker { top: 48px; font-size: 0.72rem; padding: 5px 12px; }
+  .quickbar { bottom: 8px; gap: 6px; }
+  .quickbar .btn { padding: 8px 10px; font-size: 0.75rem; }
+  .joystick { bottom: 12px; left: 12px; width: 96px; height: 96px; }
 }

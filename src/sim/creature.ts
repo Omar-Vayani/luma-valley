@@ -12,6 +12,9 @@ import {
 } from './biochem'
 import { crossover, describeGenome, randomGenome, type Genome } from './genetics'
 import { clamp, hashSeed, pick, type RNG } from './rng'
+import { createPsyche, psycheTick, traumatise, trustReaction, type PsycheState, type TraumaTrigger } from './trauma'
+import { applyItem, type ItemDef } from './items'
+import { createMind, dreadAt, remember, wantsToExplore, type MindState } from './mind'
 
 export const ACTIONS = [
   'wander',
@@ -22,6 +25,7 @@ export const ACTIONS = [
   'sleep',
   'social',
   'vocalize',
+  'flee',
 ] as const
 export type Action = (typeof ACTIONS)[number]
 
@@ -41,6 +45,8 @@ export interface CreatureCtx {
   waterNear: number
   creatureNear: number
   dangerNear: number
+  playerNear: number // 0..1 proximity to the player
+  bondFear?: number // fear bleeding in from bonded friends (emotional contagion)
   day: number // 0..1
   time: number // elapsed ticks
   gentle: boolean
@@ -75,6 +81,10 @@ export class Creature {
   learnedWords: Record<string, LearnedWord> = {}
   journal: JournalEvent[] = []
   bornTick: number
+  psyche: PsycheState
+  mind: MindState
+  lastDose: Record<string, number> = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999 }
+  private rngStore: RNG
 
   constructor(genome: Genome | null, rng: RNG, id: number, bornTick = 0, name?: string) {
     this.id = id
@@ -114,6 +124,47 @@ export class Creature {
     this.pos = { x: 0, z: 0 }
     this.facing = rng() * Math.PI * 2
     this.bornTick = bornTick
+    this.psyche = createPsyche()
+    this.mind = createMind()
+    this.rngStore = rng
+  }
+
+  /** Give an item — returns what it did (or null if dead). */
+  giveItem(item: ItemDef): { label: string; trustDelta: number; toxic: boolean } | null {
+    if (!this.alive) return null
+    const out = applyItem(this.chem, item)
+    this.chem = out.chem
+    this.psyche.trust = clamp(this.psyche.trust + out.trustDelta, 0, 1)
+    for (const [sub, amt] of Object.entries(out.addictionDelta)) {
+      this.psyche.addiction[sub] = clamp((this.psyche.addiction[sub] ?? 0) + amt, 0, 1)
+      this.lastDose[sub] = this.age
+    }
+    if (out.healthDelta > 0) this.chem.health = clamp(this.chem.health - out.healthDelta, 0, 1)
+    const nice = out.trustDelta >= 0
+    this.log(nice ? `enjoys the ${out.label} (trust ↑)` : `sours at the ${out.label}`)
+    if (out.toxic && this.chem.health <= 0.15) {
+      this.die('poisoning')
+      return { label: out.label, trustDelta: out.trustDelta, toxic: true }
+    }
+    return { label: out.label, trustDelta: out.trustDelta, toxic: false }
+  }
+
+  /** Terrify the creature — etches trauma + spikes fear + burns trust. */
+  scare(trigger: TraumaTrigger, intensity: number, reason: string): void {
+    if (!this.alive) return
+    const mem = traumatise(this.psyche, trigger, intensity, this.age, () => this.psyche.memories.length + this.id)
+    this.chem.fear = clamp(this.chem.fear + intensity * 0.7, 0, 1)
+    this.psyche.trust = clamp(this.psyche.trust - intensity * 0.25, 0, 1)
+    remember(this.mind, 'scare', this.pos, -1, intensity, this.age)
+    this.log(mem ? `is terrorised by ${reason}! It won't forget.` : `startles at ${reason}`)
+  }
+
+  /** Kindness heals — raising trust accelerates trauma recovery. */
+  comfort(amount: number, reason: string): void {
+    if (!this.alive) return
+    this.psyche.trust = clamp(this.psyche.trust + amount, 0, 1)
+    this.chem.pleasure = clamp(this.chem.pleasure + amount * 0.5, 0, 1)
+    this.log(reason)
   }
 
   gene(key: string): number {
@@ -133,6 +184,10 @@ export class Creature {
   reactToWord(word: string): boolean {
     const w = this.learnedWords[word.toLowerCase()]
     if (!w) return false
+    if (w.kind === 'come' && trustReaction(this.psyche).ignoreCome) {
+      this.log(`stays away — doesn't trust you yet`)
+      return false
+    }
     if (w.kind === 'food') this.action = 'toFood'
     else if (w.kind === 'water') this.action = 'toWater'
     else if (w.kind === 'come') this.action = 'social'
@@ -151,6 +206,38 @@ export class Creature {
 
     // chemistry
     chemTick(this.chem, this.chemConfig)
+
+    // ── psyche: trauma, flashbacks, withdrawal ──
+    const night = ctx.day > 0.72 || ctx.day < 0.1
+    const withdrawal: string[] = []
+    for (const sub of ['smoke', 'sugar', 'cactus', 'mushroom']) {
+      if ((this.psyche.addiction[sub] ?? 0) > 0.35 && this.age - (this.lastDose[sub] ?? -9999) > 600) withdrawal.push(sub)
+    }
+    const psy = psycheTick(this.psyche, this.age, this.rngStore, {
+      night,
+      triggerPresent: {
+        shadow: ctx.dangerNear > 0.3,
+        abandonment: night && ctx.creatureNear < 0.1 && ctx.time > 400,
+      },
+      withdrawal,
+    })
+    if (psy.fearSpike > 0) {
+      this.chem.fear = clamp(this.chem.fear + psy.fearSpike, 0, 1)
+      this.chem.pleasure = clamp(this.chem.pleasure - psy.fearSpike * 0.15, 0, 1)
+    }
+    if (psy.flashback) {
+      const worst = this.psyche.memories.reduce((a, b) => (b.intensity > a.intensity ? b : a))
+      this.log(`shudders — haunted by ${worst.trigger}`)
+    }
+    if (psy.healed) this.log('the fear seems a little smaller today')
+
+    // ── mind: episodic dread + emotional contagion ──
+    const dread = dreadAt(this.mind, this.pos)
+    if (dread > 0) this.chem.fear = clamp(this.chem.fear + dread, 0, 1)
+    if (ctx.bondFear) {
+      this.chem.fear = clamp(this.chem.fear + ctx.bondFear, 0, 1)
+    }
+
     if (this.sleeping) {
       sleepTick(this.chem, 1)
       this.chem.fatigue = clamp(this.chem.fatigue - 0.008, 0, 1)
@@ -206,12 +293,22 @@ export class Creature {
     }
     // Instinct overlay: hardwired survival drives guarantee baseline behavior
     // even before the neural net has learned anything. Learning refines it.
-    if (this.chem.hunger > 0.72 && ctx.foodNear > 0.15) this.action = 'eat'
+    if (this.chem.fear > 0.6) this.action = 'flee'
+    else if (this.chem.hunger > 0.72 && ctx.foodNear > 0.15) this.action = 'eat'
     else if (this.chem.hunger > 0.55) this.action = 'toFood'
     else if (this.chem.thirst > 0.72 && ctx.waterNear > 0.15) this.action = 'drink'
     else if (this.chem.thirst > 0.55) this.action = 'toWater'
     else if (this.chem.fatigue > 0.82) this.action = 'sleep'
     else if (this.chem.loneliness > 0.8 || (this.chem.boredom > 0.85 && ctx.creatureNear > 0.2)) this.action = 'social'
+
+    // terrified creatures flee the player
+    if (this.psyche.trust < 0.18 && ctx.playerNear > 0.3) this.action = 'flee'
+
+    // curiosity: explore when healthy and no urgent need
+    if (this.chem.hunger < 0.5 && this.chem.thirst < 0.5 && this.chem.fatigue < 0.6 && wantsToExplore(this.mind, this.age, ctx.rng, this.chem.health > 0.6)) {
+      this.action = 'wander'
+    }
+
     this.execute(ctx)
     return true
   }
@@ -220,6 +317,12 @@ export class Creature {
     this.actionTimer++
     const speed = 0.5 + this.traits.energy * 0.6
     switch (this.action) {
+      case 'flee': {
+        // panic: run fast, turning hard
+        this.facing += (ctx.rng() - 0.5) * 1.6
+        this.move(speed * 1.8, ctx)
+        break
+      }
       case 'wander': {
         if (this.actionTimer > 60 || this.actionTimer === 1) {
           this.facing += (ctx.rng() - 0.5) * 2.4

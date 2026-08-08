@@ -18,11 +18,12 @@ export interface Plant {
 
 export interface WorldState {
   seed: number
-  dayTime: number // 0..1 (0=dawn, 0.5=noon, 1=next dawn)
-  size: number // world half-size (bounds -size..size)
+  dayTime: number
+  size: number
   plants: Plant[]
   waterPoints: Vec2[]
   den: Vec2
+  flatZones: { x: number; z: number; r: number; y: number }[]
 }
 
 export function valueNoise(x: number, z: number, seed: number): number {
@@ -49,6 +50,7 @@ export class World {
       plants: [],
       waterPoints: [],
       den: { x: 0, z: 0 },
+      flatZones: [],
     }
     // stream along z axis at x ≈ -6 with meander
     for (let z = -size; z <= size; z += 2) {
@@ -67,7 +69,21 @@ export class World {
   }
 
   height(x: number, z: number): number {
-    return sampleHeight(x, z, this.state.seed)
+    let h = sampleHeight(x, z, this.state.seed)
+    for (const zone of this.state.flatZones) {
+      const d = Math.hypot(x - zone.x, z - zone.z)
+      if (d < zone.r) {
+        const edge = Math.max(0, Math.min(1, (d - zone.r * 0.6) / (zone.r * 0.4)))
+        h = zone.y + (h - zone.y) * (edge * edge * (3 - 2 * edge))
+      }
+    }
+    return h
+  }
+
+  /** Carve a level pad for a structure. */
+  addFlatZone(x: number, z: number, r: number): void {
+    const y = sampleHeight(x, z, this.state.seed)
+    this.state.flatZones.push({ x, z, r, y })
   }
 
   /** Advance world clock (day/night). */

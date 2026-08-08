@@ -12,6 +12,7 @@ function makeCtx(world: World, creatures: Creature[], self: Creature, day = 0.4)
     waterNear: 0,
     creatureNear: 0,
     dangerNear: 0,
+    playerNear: 0,
     day,
     time: 0,
     gentle: false,
@@ -142,7 +143,10 @@ describe('save', () => {
     creatures[0].pos = { x: 5, z: -3 }
     creatures[0].teachWord('berry', 'food')
     for (let i = 0; i < 50; i++) creatures[0].tick(makeCtx(w, creatures, creatures[0]))
-    const save = buildSave(w, creatures, { gentle: false }, 3, 50)
+    const save = buildSave(w, creatures, { gentle: false }, 3, 50,
+      { pos: { x: 0, z: 0 }, facingYaw: 0, inventory: { berries: 0, wood: 0, torch: 1 }, torchLit: false, sanity: 1 },
+      { active: null, progress: {}, completed: [], unlocked: [] },
+      [], 1)
     const w2 = new World(0)
     const c2: Creature[] = []
     applySave(save, w2, c2)
@@ -161,8 +165,11 @@ describe('save', () => {
     for (let i = 0; i < 200; i++) {
       for (const c of creatures) c.tick(makeCtx(w, creatures, c))
     }
-    const save = buildSave(w, creatures, { gentle: false }, 9, 200)
+    const save = buildSave(w, creatures, { gentle: false }, 9, 200,
+      { pos: { x: 0, z: 0 }, facingYaw: 0, inventory: { berries: 0, wood: 0, torch: 1 }, torchLit: false, sanity: 1 },
+      { active: null, progress: {}, completed: [], unlocked: [] },
+      [], 1)
     const kb = saveSizeKb(save)
-    expect(kb).toBeLessThan(60)
+    expect(kb).toBeLessThan(70)
   })
 })

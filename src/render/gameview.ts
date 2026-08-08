@@ -1,29 +1,51 @@
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { Game } from '../sim/game'
 import type { Creature } from '../sim/creature'
 import { buildWorld3D, type World3D } from './world3d'
-import { buildCreature3D, buildNameLabel, type Creature3D } from './creature3d'
+import { buildNameLabel } from './creature3d'
+import { AssetManager, speciesFromGene } from './assets'
+import { buildDungeonDressing, buildGraveyard, buildStoneHouse } from './structures'
+import { FPSControls } from './fps'
 import type { SoundEngine } from '../audio/sfx'
+
+export type InteractKind = 'creature' | 'berry' | 'wood' | 'shrine' | 'den' | 'pickup'
+
+export interface InteractEvent {
+  kind: InteractKind
+  creatureId?: number
+  itemId?: string
+}
 
 export interface GameViewCallbacks {
   onSelect: (creatureId: number | null) => void
+  onInteract: (ev: InteractEvent) => void
+  onLockChange: (locked: boolean) => void
+  onQuestHint: (text: string) => void
 }
 
-/**
- * GameView — owns the Three.js scene, camera and render loop.
- * The React layer owns UI; this class only renders + input.
- */
+interface CreatureView {
+  group: THREE.Group
+  label: THREE.Sprite
+  animMixer?: THREE.AnimationMixer
+  animClip?: THREE.AnimationClip
+}
+
+/** Actions that mean the creature is on the move (walking animation). */
+const WALK_ACTIONS = new Set(['wander', 'toFood', 'toWater', 'social', 'flee'])
+
 export class GameView {
   renderer: THREE.WebGLRenderer
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
-  controls: OrbitControls
+  fps: FPSControls
   world3d: World3D
-  creatureViews = new Map<number, Creature3D>()
-  labels = new Map<number, THREE.Sprite>()
+  assets: AssetManager
+  creatureViews = new Map<number, CreatureView>()
+  beastViews: { group: THREE.Group }[] = []
+  mentorGroup: THREE.Group
+  shrineGroup: THREE.Group
+  torchLight: THREE.PointLight
   raycaster = new THREE.Raycaster()
-  pointer = new THREE.Vector2()
   selectedId: number | null = null
   private raf = 0
   private lastTime = performance.now()
@@ -31,15 +53,18 @@ export class GameView {
   private callbacks: GameViewCallbacks
   private game: Game
   private sound: SoundEngine | null
-  private follow = false
   private showNames = true
-  /** sim ticks per second (fixed timestep) */
+  private mentor: THREE.Group | null = null
+  private woodMeshes: THREE.Object3D[] = []
+  private pickups: THREE.Mesh[] = []
+  private shrineLit = false
   private static TICK_RATE = 6
 
   constructor(container: HTMLElement, game: Game, sound: SoundEngine | null, callbacks: GameViewCallbacks) {
     this.game = game
     this.sound = sound
     this.callbacks = callbacks
+    this.assets = new AssetManager()
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -49,135 +74,309 @@ export class GameView {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 400)
-    this.camera.position.set(16, 14, 20)
-
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement)
-    this.controls.target.set(0, 1, 0)
-    this.controls.enableDamping = true
-    this.controls.maxPolarAngle = Math.PI / 2.05
-    this.controls.minDistance = 4
-    this.controls.maxDistance = 60
+    this.camera = new THREE.PerspectiveCamera(70, container.clientWidth / container.clientHeight, 0.1, 400)
+    this.scene.fog = new THREE.Fog(0xaee1f5, 40, 110)
 
     this.world3d = buildWorld3D(game.world)
     this.scene.add(this.world3d.group)
-    this.scene.fog = new THREE.Fog(0xaee1f5, 40, 110)
 
-    for (const c of game.creatures) {
-      this.addCreature(c)
+    // FPV controls — spawn near the first alive creature so life is in view
+    const firstCreature = game.creatures.find((c) => c.alive) ?? game.creatures[0]
+    const spawn = firstCreature
+      ? { x: firstCreature.pos.x + 4, z: firstCreature.pos.z + 4 }
+      : { x: game.world.state.den.x + 4, z: game.world.state.den.z + 4 }
+    this.fps = new FPSControls(this.camera, this.renderer.domElement, game.world, spawn)
+    this.fps.onLockChange = (l) => this.callbacks.onLockChange(l)
+    this.fps.onWheel = () => {
+      /* wheel reserved */
     }
-    // frame the first alive creature so the player sees life immediately
-    const first = game.creatures.find((c) => c.alive) ?? game.creatures[0]
-    if (first) {
-      this.controls.target.set(first.pos.x, 1, first.pos.z)
-      this.camera.position.set(first.pos.x + 12, 10, first.pos.z + 15)
-    }
 
-    // interaction
-    this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown)
-    this.renderer.domElement.addEventListener('pointermove', this.onPointerMove)
+    // torch light (attached to camera)
+    this.torchLight = new THREE.PointLight(0xff9a3c, 0, 18, 2)
+    this.torchLight.position.set(0.5, -0.2, -0.6)
+    this.camera.add(this.torchLight)
+    this.scene.add(this.camera)
 
+    // structures
+    this.buildStructures()
+    this.mentorGroup = new THREE.Group()
+    this.scene.add(this.mentorGroup)
+    this.shrineGroup = new THREE.Group()
+    this.scene.add(this.shrineGroup)
+
+    // interactions
+    this.renderer.domElement.addEventListener('click', this.onClick)
     window.addEventListener('resize', this.onResize)
+
+    // touch look (mobile fallback — no pointer lock needed)
+    this.touchLook = { active: false, lastX: 0, lastY: 0 }
+    this.renderer.domElement.addEventListener('pointerdown', this.onTouchLookDown)
+    window.addEventListener('pointermove', this.onTouchLookMove)
+    window.addEventListener('pointerup', this.onTouchLookUp)
+
+    void this.assets.preload().then(() => {
+      for (const c of game.creatures) this.addCreature(c)
+      this.spawnMentor()
+      this.spawnShrine()
+      // village house + dungeon + graveyard structures
+      const gy = (x: number, z: number) => this.game.world.height(x, z) * 6 - 2.5
+      void buildStoneHouse(this.scene, -10, 14, gy)
+      void buildDungeonDressing(this.scene, -24, -18, gy)
+      void buildGraveyard(this.scene, 28, 30, gy)
+    })
 
     this.loop = this.loop.bind(this)
     this.raf = requestAnimationFrame(this.loop)
+    // QA/debug hook
+    ;(window as unknown as Record<string, unknown>).__luma = { view: this }
+  }
+
+  private touchLook: { active: boolean; lastX: number; lastY: number }
+
+  private onTouchLookDown = (e: PointerEvent): void => {
+    // only when not pointer-locked (pointer lock handles look itself)
+    if (this.fps.isLocked) return
+    this.touchLook.active = true
+    this.touchLook.lastX = e.clientX
+    this.touchLook.lastY = e.clientY
+  }
+
+  private onTouchLookMove = (e: PointerEvent): void => {
+    if (!this.touchLook.active || this.fps.isLocked) return
+    const dx = e.clientX - this.touchLook.lastX
+    const dy = e.clientY - this.touchLook.lastY
+    this.touchLook.lastX = e.clientX
+    this.touchLook.lastY = e.clientY
+    this.fps.yaw -= dx * 0.004
+    this.fps.pitch = THREE.MathUtils.clamp(this.fps.pitch - dy * 0.004, -1.35, 1.35)
+    this.fps.update(0)
+  }
+
+  private onTouchLookUp = (): void => {
+    this.touchLook.active = false
+  }
+
+  // ── World structures: cave entrance, player cabin, shrine ──
+  private buildStructures(): void {
+    const w = this.game.world
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x9a7d5c })
+    const darkMat = new THREE.MeshLambertMaterial({ color: 0x3a2c1e })
+    const cavePos = { x: -24, z: -18 }
+    // cave mouth (cluster of rocks with a dark opening)
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2
+      const r = new THREE.Mesh(new THREE.DodecahedronGeometry(1.1 + Math.random() * 0.8, 0), stoneMat)
+      r.position.set(cavePos.x + Math.cos(ang) * 3.2, 0.3, cavePos.z + Math.sin(ang) * 3.2)
+      r.rotation.set(Math.random(), Math.random(), Math.random())
+      r.scale.y = 0.7
+      this.scene.add(r)
+    }
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(1.8, 10, 8), darkMat)
+    mouth.position.set(cavePos.x, 0.2, cavePos.z)
+    mouth.scale.set(1, 0.7, 1.3)
+    this.scene.add(mouth)
+    // crystal glow inside cave
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), new THREE.MeshLambertMaterial({ color: 0x6ef0c8, emissive: 0x2a8f6a }))
+    crystal.position.set(cavePos.x - 4, 1.0, cavePos.z - 3)
+    this.scene.add(crystal)
+    const caveLight = new THREE.PointLight(0x6ef0c8, 1.2, 14)
+    caveLight.position.copy(crystal.position)
+    this.scene.add(caveLight)
+
+    // player cabin near den
+    const cabin = new THREE.Group()
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0xd9b380 })
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0xb06030 })
+    const base = { x: w.state.den.x + 6, z: w.state.den.z + 8 }
+    const box = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m)
+      b.position.set(x, y, z)
+      cabin.add(b)
+    }
+    box(5, 3, 4, base.x, 1.5, base.z, wallMat)
+    box(4.6, 1, 3.6, base.x, 3.2, base.z, roofMat)
+    box(5.2, 0.5, 4.2, base.x, -0.2, base.z, stoneMat)
+    box(1.2, 1.8, 0.1, base.x + 1.2, 0.9, base.z + 2, new THREE.MeshLambertMaterial({ color: 0x5a3a20 }))
+    this.scene.add(cabin)
+    // fire pit
+    const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.3, 8), stoneMat)
+    fire.position.set(base.x - 3, 0.1, base.z)
+    this.scene.add(fire)
+    const fireLight = new THREE.PointLight(0xff9a3c, 0.9, 10)
+    fireLight.position.set(base.x - 3, 1.2, base.z)
+    this.scene.add(fireLight)
+    // wood piles (collectible)
+    for (let i = 0; i < 3; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 1.6, 6), new THREE.MeshLambertMaterial({ color: 0x8a5a30 }))
+      log.position.set(base.x - 1.5 + i * 1.2, 0.25, base.z + 2.4)
+      log.rotation.z = Math.PI / 2
+      log.userData.interact = 'wood'
+      log.userData.id = i
+      this.scene.add(log)
+      this.woodMeshes.push(log)
+    }
+    // item pickups (collectible) — scattered around the cabin
+    const pickupDefs: { id: string; geo: THREE.BufferGeometry; color: number }[] = [
+      { id: 'smoke-herb', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0x9a8c6a },
+      { id: 'sugar-candy', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0xf0a0c0 },
+      { id: 'cactus-juice', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0x7fdc7f },
+      { id: 'dream-mushroom', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0x9a7fdc },
+      { id: 'nightshade', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0x4a3a5a },
+      { id: 'berry', geo: new THREE.OctahedronGeometry(0.35, 0), color: 0xe05a5a },
+      { id: 'warm-lamp', geo: new THREE.BoxGeometry(0.5, 0.6, 0.5), color: 0xffb03a },
+      { id: 'music-box', geo: new THREE.BoxGeometry(0.5, 0.4, 0.4), color: 0x7fb6de },
+      { id: 'soft-blanket', geo: new THREE.BoxGeometry(0.6, 0.25, 0.8), color: 0xe0a0a0 },
+      { id: 'honey', geo: new THREE.BoxGeometry(0.5, 0.45, 0.5), color: 0xf0a83a },
+    ]
+    pickupDefs.forEach((def, i) => {
+      const mat = new THREE.MeshLambertMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.55 })
+      const mesh = new THREE.Mesh(def.geo, mat)
+      const ang = (i / pickupDefs.length) * Math.PI * 2 + 0.4
+      const r = 3.4 + Math.random() * 1.8
+      const x = base.x + Math.cos(ang) * r
+      const z = base.z + Math.sin(ang) * r
+      const baseY = this.groundY(x, z) + 0.9
+      mesh.position.set(x, baseY, z)
+      mesh.rotation.y = Math.random() * Math.PI * 2
+      mesh.userData.pickupItem = def.id
+      mesh.userData.baseY = baseY
+      mesh.userData.phase = i * 1.3
+      this.scene.add(mesh)
+      this.pickups.push(mesh)
+    })
+  }
+
+  private spawnMentor(): void {
+    void this.assets.creatureModel(9).then((m) => {
+      this.assets.tint(m, 0.12, false) // golden spirit
+      m.scale.setScalar(1.4)
+      m.position.set(this.game.world.state.den.x, 2.4, this.game.world.state.den.z + 3)
+      this.mentorGroup.add(m)
+      this.mentor = m
+    })
+  }
+
+  private spawnShrine(): void {
+    const shrinePos = new THREE.Vector3(-24, 0, -18)
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0xb8a888 })
+    const altar = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.0, 1.2, 8), stoneMat)
+    altar.position.set(shrinePos.x, 0.6, shrinePos.z)
+    this.shrineGroup.add(altar)
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), new THREE.MeshLambertMaterial({ color: 0x9ad8ff, emissive: 0x2a6a9a }))
+    orb.position.set(shrinePos.x, 1.6, shrinePos.z)
+    orb.userData.interact = 'shrine'
+    this.shrineGroup.add(orb)
+    const light = new THREE.PointLight(0x9ad8ff, 0.8, 12)
+    light.position.copy(orb.position)
+    this.shrineGroup.add(light)
+    this.shrineGroup.position.set(0, 0, 0)
+  }
+
+  lightShrine(): void {
+    if (this.shrineLit) return
+    this.shrineLit = true
+    this.shrineGroup.traverse((o: THREE.Object3D) => {
+      if (o instanceof THREE.Mesh && o.userData.interact === 'shrine') {
+        const mat = o.material as THREE.MeshLambertMaterial
+        mat.emissive = new THREE.Color(0xffd27a)
+        mat.color = new THREE.Color(0xfff3c8)
+      }
+    })
+    this.callbacks.onQuestHint('The Old Shrine blazes with warm light. The valley feels safer.')
   }
 
   private addCreature(c: Creature): void {
-    const view = buildCreature3D(c)
-    view.group.position.set(c.pos.x, this.groundY(c.pos.x, c.pos.z), c.pos.z)
-    this.scene.add(view.group)
-    this.creatureViews.set(c.id, view)
+    const species = speciesFromGene(c.traits.species ?? 0.5)
+    const holder = new THREE.Group()
+    holder.position.set(c.pos.x, this.groundY(c.pos.x, c.pos.z), c.pos.z)
+    this.scene.add(holder)
     const label = buildNameLabel(c.name)
-    label.position.set(c.pos.x, 2.2, c.pos.z)
+    label.position.y = 2.4
+    holder.add(label)
     label.visible = this.showNames
-    this.scene.add(label)
-    this.labels.set(c.id, label)
-  }
+    this.creatureViews.set(c.id, { group: holder, label })
 
-  syncCreatures(): void {
-    // add newly born creatures
-    for (const c of this.game.creatures) {
-      if (!this.creatureViews.has(c.id)) this.addCreature(c)
-    }
-    // remove? keep dead as graves
-    for (const [id, view] of this.creatureViews) {
-      const c = this.game.selectedCreature(id)
-      if (!c) {
-        this.scene.remove(view.group)
-        const l = this.labels.get(id)
-        if (l) this.scene.remove(l)
-      }
-    }
+    void this.assets.creatureModel(species).then((m) => {
+      this.assets.tint(m, c.traits.hue)
+      m.scale.setScalar(1.4)
+      m.rotation.y = c.facing
+      m.userData.baseScale = 1.4
+      holder.add(m)
+      holder.userData.model = m
+    })
   }
 
   private groundY(x: number, z: number): number {
-    return this.game.world.height(x, z) * 6 - 2.5 + 0.15
+    return this.game.world.height(x, z) * 6 - 2.5 + 0.3
   }
 
-  private onPointerDown = (e: PointerEvent): void => {
-    const rect = this.renderer.domElement.getBoundingClientRect()
-    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    this.raycaster.setFromCamera(this.pointer, this.camera)
-    const meshes: THREE.Object3D[] = []
-    for (const view of this.creatureViews.values()) {
-      view.group.traverse((o) => {
-        if (o instanceof THREE.Mesh) meshes.push(o)
-      })
+  private onClick = (): void => {
+    // interact with whatever is at the crosshair
+    this.interact()
+  }
+
+  /** Center-screen interaction (like Minecraft's use button). */
+  interact(): InteractEvent | null {
+    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera)
+    const targets: THREE.Object3D[] = []
+    for (const v of this.creatureViews.values()) {
+      if (v.group.userData.model) v.group.userData.model.traverse((o: THREE.Object3D) => { if (o instanceof THREE.Mesh) targets.push(o) })
     }
-    const hits = this.raycaster.intersectObjects(meshes, false)
-    if (hits.length > 0) {
-      const hit = hits[0]
-      for (const [id, view] of this.creatureViews) {
-        if (view.group === hit.object || view.group.getObjectById(hit.object.id)) {
-          this.select(id)
-          return
-        }
+    targets.push(...this.woodMeshes)
+    targets.push(...this.pickups)
+    this.shrineGroup.traverse((o: THREE.Object3D) => { if (o instanceof THREE.Mesh && o.userData.interact === 'shrine') targets.push(o) })
+    const hits = this.raycaster.intersectObjects(targets, false)
+    if (hits.length === 0) {
+      this.callbacks.onSelect(null)
+      return null
+    }
+    const hit = hits[0]
+    // pickup?
+    const itemId = hit.object.userData.pickupItem as string | undefined
+    if (itemId && this.game.pickupItem(itemId)) {
+      this.scene.remove(hit.object)
+      const pi = this.pickups.indexOf(hit.object as THREE.Mesh)
+      if (pi >= 0) this.pickups.splice(pi, 1)
+      this.callbacks.onInteract({ kind: 'pickup', itemId })
+      return { kind: 'pickup', itemId }
+    }
+    // creature?
+    for (const [id, v] of this.creatureViews) {
+      const model = v.group.userData.model as THREE.Object3D | undefined
+      if (model && (model === hit.object || model.getObjectById(hit.object.id))) {
+        this.select(id)
+        this.callbacks.onInteract({ kind: 'creature', creatureId: id })
+        return { kind: 'creature', creatureId: id }
       }
-    } else {
-      this.select(null)
     }
-  }
-
-  private onPointerMove = (e: PointerEvent): void => {
-    // cursor affordance
-    const rect = this.renderer.domElement.getBoundingClientRect()
-    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    this.raycaster.setFromCamera(this.pointer, this.camera)
-    const meshes: THREE.Object3D[] = []
-    for (const view of this.creatureViews.values()) {
-      view.group.traverse((o) => {
-        if (o instanceof THREE.Mesh) meshes.push(o)
-      })
+    if (hit.object.userData.interact === 'wood') {
+      this.callbacks.onInteract({ kind: 'wood' })
+      return { kind: 'wood' }
     }
-    const hits = this.raycaster.intersectObjects(meshes, false)
-    this.renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : 'default'
+    if (hit.object.userData.interact === 'shrine') {
+      this.callbacks.onInteract({ kind: 'shrine' })
+      return { kind: 'shrine' }
+    }
+    return null
   }
 
   select(id: number | null): void {
     if (this.selectedId === id) return
     if (this.selectedId !== null) {
-      this.creatureViews.get(this.selectedId)?.setSelected(false)
+      const v = this.creatureViews.get(this.selectedId)
+      if (v) v.group.userData.selected = false
     }
     this.selectedId = id
     if (id !== null) {
-      this.creatureViews.get(id)?.setSelected(true)
+      const v = this.creatureViews.get(id)
+      if (v) v.group.userData.selected = true
     }
     this.callbacks.onSelect(id)
   }
 
-  setFollow(on: boolean): void {
-    this.follow = on
-  }
-
   setShowNames(on: boolean): void {
     this.showNames = on
-    for (const [id, label] of this.labels) {
-      label.visible = on
-      void id
-    }
+    for (const v of this.creatureViews.values()) v.label.visible = on
   }
 
   private onResize = (): void => {
@@ -188,13 +387,19 @@ export class GameView {
     this.renderer.setSize(w, h)
   }
 
+  /** Debug/QA hook: teleport the FPV camera. */
+  teleport(x: number, z: number): void {
+    this.fps.position.set(x, 6, z)
+    this.fps.update(0)
+  }
+
   private loop(): void {
     this.raf = requestAnimationFrame(this.loop)
     const now = performance.now()
     const dt = Math.min((now - this.lastTime) / 1000, 0.1)
     this.lastTime = now
 
-    // fixed-timestep sim: creatures age at a pace you can bond with
+    // sim at fixed rate
     this.simAccum += dt
     const step = 1 / GameView.TICK_RATE
     let guard = 0
@@ -204,51 +409,115 @@ export class GameView {
       guard++
     }
     this.world3d.update(this.game.world.state.dayTime)
-    this.syncCreatures()
+    this.world3d.shimmer(now / 1000)
+    this.torchLight.intensity = this.game.player.torchLit ? 1.6 : 0
+
+    // add newly born creatures
+    for (const c of this.game.creatures) {
+      if (!this.creatureViews.has(c.id)) this.addCreature(c)
+    }
 
     // creature transforms
-    for (const [id, view] of this.creatureViews) {
+    for (const [id, v] of this.creatureViews) {
       const c = this.game.selectedCreature(id)
       if (!c) continue
       const gy = this.groundY(c.pos.x, c.pos.z)
-      view.group.position.x = c.pos.x
-      view.group.position.z = c.pos.z
-      view.group.position.y = gy
-      view.update(dt, now / 1000)
-      const label = this.labels.get(id)
-      if (label) {
-        label.position.x = c.pos.x
-        label.position.z = c.pos.z
-        label.position.y = gy + 2.1
-        label.visible = this.showNames && c.alive
+      v.group.position.set(c.pos.x, gy, c.pos.z)
+      v.group.rotation.y = c.facing
+      const model = v.group.userData.model as THREE.Group | undefined
+      if (model) {
+        if (!c.alive) {
+          // dead: lying flat (unchanged)
+          model.rotation.x = -Math.PI / 2
+          model.position.y = 0
+          model.scale.setScalar(1.4)
+        } else {
+          model.rotation.x = 0
+          if (c.sleeping) {
+            // gentle breathing: slow bob + subtle scale pulse
+            model.position.y = Math.sin(now / 500 + id) * 0.02
+            model.scale.setScalar(1.4 * 0.9 * (1 + Math.sin(now / 900 + id) * 0.03))
+          } else if (WALK_ACTIONS.has(c.action)) {
+            // walking: subtle hop bounce
+            model.position.y = Math.abs(Math.sin(now / 180 + id * 2)) * 0.05
+            model.scale.setScalar(1.4)
+          } else {
+            // idle sway (unchanged)
+            model.position.y = Math.sin(now / 300 + id) * 0.05
+            model.scale.setScalar(1.4)
+          }
+        }
       }
+      v.label.position.y = 2.4 + (c.sleeping ? 0.4 : 0)
+      v.label.visible = this.showNames && c.alive
     }
 
-    // camera follow
-    if (this.follow && this.selectedId !== null) {
-      const c = this.game.selectedCreature(this.selectedId)
-      if (c) {
-        const target = new THREE.Vector3(c.pos.x, 1.2, c.pos.z)
-        this.controls.target.lerp(target, 0.06)
-      }
+    // shadow beasts (dark tinted creatures)
+    this.syncBeasts()
+
+    // mentor float
+    if (this.mentor) {
+      this.mentor.position.y = 2.4 + Math.sin(now / 700) * 0.25
+      this.mentor.rotation.y += dt * 0.6
     }
+
+    // pickup float + spin animation
+    for (const p of this.pickups) {
+      const baseY = (p.userData.baseY as number | undefined) ?? p.position.y
+      const phase = (p.userData.phase as number | undefined) ?? 0
+      p.position.y = baseY + Math.sin(now / 600 + phase) * 0.1
+      p.rotation.y += dt * 0.8
+    }
+
+    this.fps.update(dt)
+    // keep player in sync with sim
+    this.game.player.pos.x = this.fps.position.x
+    this.game.player.pos.z = this.fps.position.z
 
     // occasional creature vocalization → sound
-    if (this.sound && Math.random() < 0.004) {
-      const c = this.game.creatures.find((x) => x.alive && Math.random() < 0.5)
-      if (c) this.sound.voice(c.traits.voicePitch, c.chem.pleasure > 0.5 ? 'happy' : 'neutral')
+    if (this.sound && Math.random() < 0.002) {
+      const c = this.game.creatures.find((x) => x.alive)
+      if (c) this.sound.voice(c.traits.voicePitch, 'neutral')
     }
 
-    this.controls.update()
     this.renderer.render(this.scene, this.camera)
+  }
+
+  private beastModel: THREE.Group | null = null
+  private async syncBeasts(): Promise<void> {
+    if (!this.beastModel) {
+      this.beastModel = await this.assets.creatureModel(3) // Demon base
+      this.assets.tint(this.beastModel, 0.02, true)
+    }
+    const want = this.game.shadowBeasts.length
+    while (this.beastViews.length < want) {
+      const g = this.beastModel.clone(true)
+      g.traverse((o: THREE.Object3D) => {
+        if (o instanceof THREE.Mesh) o.castShadow = true
+      })
+      this.scene.add(g)
+      this.beastViews.push({ group: g })
+    }
+    for (let i = 0; i < this.beastViews.length; i++) {
+      const v = this.beastViews[i]
+      if (i < want) {
+        const b = this.game.shadowBeasts[i]
+        v.group.position.set(b.state.pos.x, this.groundY(b.state.pos.x, b.state.pos.z), b.state.pos.z)
+        v.group.visible = true
+      } else {
+        v.group.visible = false
+      }
+    }
   }
 
   dispose(): void {
     cancelAnimationFrame(this.raf)
     window.removeEventListener('resize', this.onResize)
-    this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown)
-    this.renderer.domElement.removeEventListener('pointermove', this.onPointerMove)
-    this.controls.dispose()
+    this.renderer.domElement.removeEventListener('click', this.onClick)
+    this.renderer.domElement.removeEventListener('pointerdown', this.onTouchLookDown)
+    window.removeEventListener('pointermove', this.onTouchLookMove)
+    window.removeEventListener('pointerup', this.onTouchLookUp)
+    this.fps.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
