@@ -81,7 +81,7 @@ export default function App() {
 
   const startNew = (seed?: number): void => {
     const s = seed ?? Math.floor(Math.random() * 1e9)
-    const g = new Game(s, 40, { gentle })
+    const g = new Game(s, 60, { gentle })
     g.spawnInitial(5)
     bootGame(g)
   }
@@ -246,7 +246,7 @@ export default function App() {
       {started && !inGame && (
         <div className="fpv-hint">
           <p><strong>Click to enter the valley</strong></p>
-          <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · mouse to look · click to interact'}</p>
+          <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · mouse to look · Space to jump · click to interact'}</p>
           <button className="btn" onClick={() => {
             if (isTouch) {
               setExploring(true)
@@ -491,13 +491,28 @@ export default function App() {
           onMove={(x, y) => {
             const fps = viewRef.current?.fps
             if (!fps) return
-            // y: -1 (up) → W; x: -1 (left) → A
-            fps.setInput('KeyW', y < -0.25)
-            fps.setInput('KeyS', y > 0.25)
-            fps.setInput('KeyA', x < -0.25)
-            fps.setInput('KeyD', x > 0.25)
+            // y: -1 (up/forward) .. 1 (down/back), x: -1 (left) .. 1 (right)
+            const fwd = y < 0 ? -y : 0
+            const back = y > 0 ? y : 0
+            fps.setInput('KeyW', fwd > 0.3)
+            fps.setInput('KeyS', back > 0.3)
+            fps.setInput('KeyA', x < -0.3)
+            fps.setInput('KeyD', x > 0.3)
           }}
         />
+      )}
+
+      {/* Touch jump button */}
+      {isTouch && inGame && (
+        <button
+          className="jump-btn"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            viewRef.current?.fps.jump()
+          }}
+        >
+          ⬆
+        </button>
       )}
 
       {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}

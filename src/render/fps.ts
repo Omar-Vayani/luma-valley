@@ -25,14 +25,17 @@ export class FPSControls {
   private bobPhase = 0
   private bobAmp = 0
   private landedAt = 0
-  private worldMin = -38
-  private worldMax = 38
+  private worldMin = 0
+  private worldMax = 0
   onWheel: ((d: number) => void) | null = null
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, spawn: { x: number; z: number }) {
     this.camera = camera
     this.domElement = domElement
     this.world = world
+    // bounds derive from the world size (not hardcoded)
+    this.worldMin = -(world.state.size - 2)
+    this.worldMax = world.state.size - 2
     this.position.set(spawn.x, 4, spawn.z)
     this.updateCamera(true)
 
@@ -105,6 +108,14 @@ export class FPSControls {
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) side -= 1
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) side += 1
     return { fwd, side, sprint: this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') }
+  }
+
+  /** Jump (Space or the mobile jump button). */
+  jump(): void {
+    if (this.grounded) {
+      this.jumpVel = 9
+      this.grounded = false
+    }
   }
 
   /** Advance physics by dt seconds. */

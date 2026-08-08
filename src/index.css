@@ -26,7 +26,7 @@ body {
 .app { position: relative; height: 100%; width: 100%; }
 
 .mount { position: absolute; inset: 0; }
-.mount canvas { display: block; }
+.mount canvas { display: block; touch-action: none; }
 
 /* Force UI layers above the WebGL canvas compositing layer (Chrome quirk). */
 .panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick {
@@ -278,6 +278,21 @@ body {
   display: flex;
   gap: 8px;
   z-index: 6;
+}
+
+.jump-btn {
+  position: absolute;
+  right: 24px; bottom: 24px;
+  width: 72px; height: 72px;
+  border-radius: 999px;
+  border: 2px solid oklch(1 0 0 / 0.5);
+  background: oklch(1 0 0 / 0.3);
+  color: white;
+  font-size: 1.8rem;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-user-select: none; user-select: none;
+  touch-action: none;
+  z-index: 12;
 }
 
 /* ── Mobile portrait ── */

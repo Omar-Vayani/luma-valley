@@ -41,7 +41,7 @@ export class Game {
   private shadowSpawnTimer = 0
   private beastNextId = 1
 
-  constructor(seed: number, size = 40, settings?: GameSettings) {
+  constructor(seed: number, size = 60, settings?: GameSettings) {
     this.world = new World(seed, size)
     // level pads for the village house, cave, and graveyard structures
     this.world.addFlatZone(-8, 14, 10)

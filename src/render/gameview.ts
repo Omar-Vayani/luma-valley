@@ -57,6 +57,7 @@ export class GameView {
   private mentor: THREE.Group | null = null
   private woodMeshes: THREE.Object3D[] = []
   private pickups: THREE.Mesh[] = []
+  private butterflies: THREE.Group[] = []
   private shrineLit = false
   private static TICK_RATE = 6
 
@@ -105,6 +106,8 @@ export class GameView {
     this.scene.add(this.shrineGroup)
 
     // interactions
+    this.renderer.domElement.style.touchAction = 'none' // vertical swipes must reach us, not the browser
+    this.renderer.domElement.style.display = 'block'
     this.renderer.domElement.addEventListener('click', this.onClick)
     window.addEventListener('resize', this.onResize)
 
@@ -271,6 +274,212 @@ export class GameView {
     w2.addCollider(w.state.den.x, w.state.den.z, 1.5)
 
     this.scatterNature()
+    void this.buildPlaces()
+  }
+
+  /**
+   * Places with a purpose — landmarks that make the valley feel designed:
+   * berry grove, flower meadow, ancient stone circle, lookout hill, pond,
+   * and dirt paths connecting them. Plus ambient butterflies.
+   */
+  private async buildPlaces(): Promise<void> {
+    const w = this.game.world
+    const S = w.state.size
+
+    // helper: place an OBJ prop clone at a spot
+    const prop = (name: string, x: number, z: number, s = 1, ry = 0) => {
+      return this.assets.loadProp(name).then((g) => {
+        const y = this.groundY(x, z) - 0.3
+        g.position.set(x, y, z)
+        g.scale.setScalar(s)
+        g.rotation.y = ry
+        this.scene.add(g)
+      })
+    }
+
+    // ── dirt paths between the main places ──
+    const pathMat = new THREE.MeshLambertMaterial({ color: 0x9a7a52 })
+    const pathBetween = (ax: number, az: number, bx: number, bz: number) => {
+      const dx = bx - ax
+      const dz = bz - az
+      const len = Math.hypot(dx, dz)
+      const steps = Math.max(2, Math.floor(len / 3))
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps
+        const x = ax + dx * t
+        const z = az + dz * t
+        const seg = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 3), pathMat)
+        seg.rotation.y = Math.atan2(dz, dx) - Math.PI / 2
+        seg.position.set(x, this.groundY(x, z) - 0.32, z)
+        this.scene.add(seg)
+      }
+    }
+    // cabin (6,8) → house (-8,14); house → cave (-24,-18); cave → graveyard (28,30)
+    pathBetween(6, 8, -8, 14)
+    pathBetween(-8, 14, -24, -18)
+    pathBetween(-24, -18, 28, 30)
+    pathBetween(6, 8, 18, -14) // cabin → berry grove
+    pathBetween(6, 8, 32, -8) // cabin → lookout
+
+    // ── berry grove at (18,-14): a cluster of berry bushes ──
+    const bushMat = new THREE.MeshLambertMaterial({ color: 0x2f7a3a })
+    const berryMat = new THREE.MeshLambertMaterial({ color: 0xd94a4a })
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2
+      const bx = 18 + Math.cos(ang) * (1.5 + Math.random() * 1.2)
+      const bz = -14 + Math.sin(ang) * (1.5 + Math.random() * 1.2)
+      const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7 + Math.random() * 0.3, 0), bushMat)
+      b.scale.y = 0.8
+      b.position.set(bx, this.groundY(bx, bz) - 0.35, bz)
+      this.scene.add(b)
+      for (let j = 0; j < 4; j++) {
+        const berry = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), berryMat)
+        berry.position.set(bx + (Math.random() - 0.5) * 0.8, this.groundY(bx, bz) + 0.4 + Math.random() * 0.5, bz + (Math.random() - 0.5) * 0.8)
+        this.scene.add(berry)
+      }
+    }
+
+    // ── flower meadow at (-16, 26) ──
+    const flowerMats2 = [0xe05a8a, 0xf0c040, 0x7a7ae0, 0xe07a40, 0xffffff].map((c) => new THREE.MeshLambertMaterial({ color: c }))
+    for (let i = 0; i < 70; i++) {
+      const fx = -16 + (Math.random() - 0.5) * 14
+      const fz = 26 + (Math.random() - 0.5) * 10
+      if (Math.abs(fx + 6) < 2) continue // off the stream
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 4), new THREE.MeshLambertMaterial({ color: 0x3f8f3f }))
+      stem.position.set(fx, this.groundY(fx, fz) - 0.3, fz)
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 5, 4), flowerMats2[Math.floor(Math.random() * flowerMats2.length)])
+      head.position.set(fx, this.groundY(fx, fz) + 0.3, fz)
+      this.scene.add(stem)
+      this.scene.add(head)
+    }
+
+    // ── ancient stone circle at (4,-30) ──
+    const stoneMat2 = new THREE.MeshLambertMaterial({ color: 0x8a8a7e })
+    for (let i = 0; i < 7; i++) {
+      const ang = (i / 7) * Math.PI * 2
+      const sx = 4 + Math.cos(ang) * 5
+      const sz = -30 + Math.sin(ang) * 5
+      const stone = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.6 + Math.random() * 1.2, 0.6), stoneMat2)
+      stone.position.set(sx, this.groundY(sx, sz) + 0.3, sz)
+      stone.rotation.y = ang
+      stone.rotation.z = (Math.random() - 0.5) * 0.15
+      this.scene.add(stone)
+      w.addCollider(sx, sz, 1.0)
+    }
+    const centerStone = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.6, 1.1), stoneMat2)
+    centerStone.position.set(4, this.groundY(4, -30) + 0.2, -30)
+    this.scene.add(centerStone)
+    w.addCollider(4, -30, 1.2)
+    const circleGlow = new THREE.PointLight(0x7aa0e0, 0.6, 10)
+    circleGlow.position.set(4, 2, -30)
+    this.scene.add(circleGlow)
+
+    // ── lookout hill at (32,-8): lantern on a mound ──
+    const mound = new THREE.Mesh(new THREE.ConeGeometry(4, 3, 8), new THREE.MeshLambertMaterial({ color: 0x7a9a5a }))
+    mound.position.set(32, this.groundY(32, -8) + 0.6, -8)
+    this.scene.add(mound)
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 3.2, 6), new THREE.MeshLambertMaterial({ color: 0x5a3a20 }))
+    post.position.set(32, this.groundY(32, -8) + 2.8, -8)
+    this.scene.add(post)
+    const lantern = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffb03a, emissive: 0xcc7a1a }))
+    lantern.position.set(32, this.groundY(32, -8) + 4.6, -8)
+    this.scene.add(lantern)
+    const lanternLight = new THREE.PointLight(0xffb03a, 1.0, 12)
+    lanternLight.position.set(32, 4.6, -8)
+    this.scene.add(lanternLight)
+    w.addCollider(32, -8, 1.0)
+
+    // ── pond at (16,24): the stream widens ──
+    const pondMat = new THREE.MeshLambertMaterial({ color: 0x4a9ad0, transparent: true, opacity: 0.85 })
+    const pond = new THREE.Mesh(new THREE.CircleGeometry(4.5, 12), pondMat)
+    pond.rotation.x = -Math.PI / 2
+    pond.position.set(16, this.groundY(16, 24) - 0.15, 24)
+    this.scene.add(pond)
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2
+      const rx = 16 + Math.cos(ang) * 4.5
+      const rz = 24 + Math.sin(ang) * 4.5
+      const reed = new THREE.Mesh(new THREE.ConeGeometry(0.08, 1.1, 4), new THREE.MeshLambertMaterial({ color: 0x4a7a3a }))
+      reed.position.set(rx, this.groundY(rx, rz) + 0.2, rz)
+      this.scene.add(reed)
+    }
+    w.addCollider(16, 24, 4.2) // pond edge is walkable but the water is there
+
+    // ── scattered mushrooms ──
+    const shroomCap = new THREE.MeshLambertMaterial({ color: 0xc83030 })
+    const shroomStem = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 })
+    for (let i = 0; i < 30; i++) {
+      const mx = -S + Math.random() * S * 2
+      const mz = -S + Math.random() * S * 2
+      if (w.collides({ x: mx, z: mz }, 0.6) || Math.abs(mx + 6) < 2.2) continue
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.35, 5), shroomStem)
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 5), shroomCap)
+      cap.position.y = 0.22
+      stem.position.set(mx, this.groundY(mx, mz) - 0.35, mz)
+      cap.position.set(mx, this.groundY(mx, mz) - 0.12, mz)
+      cap.scale.y = 0.7
+      this.scene.add(stem)
+      this.scene.add(cap)
+    }
+
+    // ── fallen logs ──
+    const logMat = new THREE.MeshLambertMaterial({ color: 0x7a4a28 })
+    for (let i = 0; i < 10; i++) {
+      const lx = -S + Math.random() * S * 2
+      const lz = -S + Math.random() * S * 2
+      if (w.collides({ x: lx, z: lz }, 0.8) || Math.abs(lx + 6) < 2.2) continue
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2 + Math.random() * 1.5, 6), logMat)
+      log.position.set(lx, this.groundY(lx, lz) - 0.2, lz)
+      log.rotation.z = Math.PI / 2
+      log.rotation.y = Math.random() * Math.PI
+      this.scene.add(log)
+      w.addCollider(lx, lz, 0.5)
+    }
+
+    // ── nature props from the Drive pack (variety) ──
+    void Promise.allSettled([
+      prop('PineTree_1.obj', -2, 20, 1.6),
+      prop('PineTree_1.obj', -30, 12, 1.4),
+      prop('PineTree_1.obj', 26, -28, 1.7),
+      prop('Willow_1.obj', 38, 10, 1.5),
+      prop('Willow_1.obj', -38, -32, 1.4),
+      prop('BirchTree_1.obj', 24, 4, 1.3),
+      prop('BirchTree_1.obj', -6, -34, 1.4),
+      prop('Rock_1.obj', 12, -30, 1.2),
+      prop('Rock_1.obj', -34, 24, 1.3),
+      prop('TreeStump.obj', 10, 12, 1.2),
+      prop('TreeStump.obj', -20, 4, 1.1),
+      prop('WoodLog.obj', -12, -8, 1.2),
+      prop('WoodLog.obj', 22, -22, 1.2),
+      prop('BushBerries_1.obj', 20, -16, 1.3),
+      prop('BushBerries_1.obj', 16, -12, 1.2),
+      prop('Bush_1.obj', 8, -20, 1.2),
+      prop('Bush_1.obj', -28, -6, 1.3),
+    ])
+
+    // ── butterflies: tiny fluttering ambient sprites ──
+    const butterflyGeo = new THREE.BufferGeometry()
+    const wingMat = new THREE.MeshLambertMaterial({ color: 0xffcc66, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    for (let i = 0; i < 9; i++) {
+      const bf = new THREE.Group()
+      const w1 = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.2), wingMat)
+      const w2 = w1.clone()
+      w1.position.x = 0.12
+      w2.position.x = -0.12
+      w2.rotation.y = Math.PI
+      bf.add(w1)
+      bf.add(w2)
+      bf.userData = {
+        base: { x: -S + Math.random() * S * 2, y: 1.5 + Math.random() * 2, z: -S + Math.random() * S * 2 },
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.4 + Math.random() * 0.5,
+        flap: 0,
+      }
+      bf.position.set(bf.userData.base.x, bf.userData.base.y, bf.userData.base.z)
+      this.butterflies.push(bf)
+      this.scene.add(bf)
+    }
+    void butterflyGeo
   }
 
   /** Fill the valley with trees, rocks, bushes, flowers and grass tufts. */
@@ -614,6 +823,25 @@ export class GameView {
       const c = this.game.creatures.find((x) => x.alive)
       if (c) this.sound.voice(c.traits.voicePitch, 'neutral')
     }
+
+    this.world3d.shimmer(now / 1000)
+
+    // butterflies flutter
+    const t = now / 1000
+    for (const bf of this.butterflies) {
+      const u = bf.userData as { base: { x: number; y: number; z: number }; phase: number; speed: number; flap: number }
+      u.phase += 0.02
+      u.flap = Math.sin(now / 80 + u.phase * 3)
+      const ox = Math.sin(u.phase * u.speed) * 3
+      const oz = Math.cos(u.phase * u.speed * 0.8) * 3
+      const oy = Math.sin(u.phase * u.speed * 0.6) * 0.6
+      bf.position.set(u.base.x + ox, u.base.y + oy, u.base.z + oz)
+      bf.rotation.y = u.phase * 2
+      bf.children.forEach((c) => {
+        c.rotation.z = u.flap * 0.8
+      })
+    }
+    void t
 
     this.renderer.render(this.scene, this.camera)
   }
