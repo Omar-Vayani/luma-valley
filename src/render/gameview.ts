@@ -26,6 +26,7 @@ export interface GameViewCallbacks {
 interface CreatureView {
   group: THREE.Group
   label: THREE.Sprite
+  shadow?: THREE.Mesh
   animMixer?: THREE.AnimationMixer
   animClip?: THREE.AnimationClip
 }
@@ -59,6 +60,9 @@ export class GameView {
   private pickups: THREE.Mesh[] = []
   private butterflies: THREE.Group[] = []
   private shrineLit = false
+  private mentorShadow: THREE.Mesh | null = null
+  private pondMaterial: THREE.MeshPhongMaterial | null = null
+  private contactShadowCount = 0
   private static TICK_RATE = 6
 
   constructor(container: HTMLElement, game: Game, sound: SoundEngine | null, callbacks: GameViewCallbacks) {
@@ -70,15 +74,22 @@ export class GameView {
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(container.clientWidth, container.clientHeight)
+    this.renderer.setClearColor(0xb8d4ee)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFShadowMap
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(70, container.clientWidth / container.clientHeight, 0.1, 400)
-    this.scene.fog = new THREE.Fog(0xaee1f5, 40, 110)
+    this.scene.fog = new THREE.Fog(0xb8d4ee, 60, 220)
 
     this.world3d = buildWorld3D(game.world)
+    this.world3d.sun.color.setHex(0xffe8b0)
+    this.world3d.sun.intensity = 1.1
+    this.world3d.sun.position.set(40, 60, 30)
+    this.world3d.ambient.color.setHex(0x8fa8d8)
+    this.world3d.ambient.groundColor.setHex(0x6a7a4a)
+    this.world3d.ambient.intensity = 0.6
     this.scene.add(this.world3d.group)
 
     // FPV controls — spawn near the first alive creature so life is in view
@@ -164,6 +175,7 @@ export class GameView {
     const box = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material) => {
       const b = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m)
       b.position.set(x, y, z)
+      b.castShadow = true
       cabin.add(b)
     }
     box(5, 3, 4, base.x, 1.5, base.z, wallMat)
@@ -360,7 +372,14 @@ export class GameView {
     w.addCollider(32, -8, 1.0)
 
     // ── pond at (16,24): the stream widens ──
-    const pondMat = new THREE.MeshLambertMaterial({ color: 0x4a9ad0, transparent: true, opacity: 0.85 })
+    const pondMat = new THREE.MeshPhongMaterial({
+      color: 0x4a9ad0,
+      emissive: 0x1a4a7a,
+      transparent: true,
+      opacity: 0.8,
+      shininess: 70,
+    })
+    this.pondMaterial = pondMat
     const pond = new THREE.Mesh(new THREE.CircleGeometry(4.5, 12), pondMat)
     pond.rotation.x = -Math.PI / 2
     pond.position.set(16, this.groundY(16, 24) - 0.15, 24)
@@ -498,6 +517,8 @@ export class GameView {
       canopy.position.y = 2.4
       g.add(trunk)
       g.add(canopy)
+      trunk.castShadow = true
+      canopy.castShadow = true
       return g as unknown as THREE.Mesh
     }, 1.6, 0.8)
 
@@ -553,6 +574,8 @@ export class GameView {
       canopy.position.y = 4.2
       g.add(trunk)
       g.add(canopy)
+      trunk.castShadow = true
+      canopy.castShadow = true
       g.position.set(h.x, this.groundY(h.x, h.z) - 0.3, h.z)
       g.scale.setScalar(1 + rng() * 0.5)
       this.scene.add(g)
@@ -567,6 +590,13 @@ export class GameView {
       m.position.set(this.game.world.state.den.x, 2.4, this.game.world.state.den.z + 3)
       this.mentorGroup.add(m)
       this.mentor = m
+      m.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true })
+      const shadow = this.createContactShadow()
+      if (shadow) {
+        shadow.position.set(m.position.x, this.groundY(m.position.x, m.position.z) + 0.01, m.position.z)
+        this.scene.add(shadow)
+        this.mentorShadow = shadow
+      }
     })
   }
 
@@ -575,6 +605,7 @@ export class GameView {
     const stoneMat = new THREE.MeshLambertMaterial({ color: 0xb8a888 })
     const altar = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.0, 1.2, 8), stoneMat)
     altar.position.set(shrinePos.x, 0.6, shrinePos.z)
+    altar.castShadow = true
     this.shrineGroup.add(altar)
     const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), new THREE.MeshLambertMaterial({ color: 0x9ad8ff, emissive: 0x2a6a9a }))
     orb.position.set(shrinePos.x, 1.6, shrinePos.z)
@@ -608,7 +639,12 @@ export class GameView {
     label.position.y = 2.4
     holder.add(label)
     label.visible = this.showNames
-    this.creatureViews.set(c.id, { group: holder, label })
+    const shadow = this.createContactShadow()
+    if (shadow) {
+      shadow.position.set(c.pos.x, this.groundY(c.pos.x, c.pos.z) + 0.01, c.pos.z)
+      this.scene.add(shadow)
+    }
+    this.creatureViews.set(c.id, { group: holder, label, shadow })
 
     void this.assets.creatureModel(species).then((m) => {
       this.assets.tint(m, c.traits.hue)
@@ -617,7 +653,20 @@ export class GameView {
       m.userData.baseScale = 1.4
       holder.add(m)
       holder.userData.model = m
+      m.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true })
     })
+  }
+
+  private createContactShadow(): THREE.Mesh | undefined {
+    if (this.contactShadowCount >= 59) return undefined
+    this.contactShadowCount++
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.5, 16),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false }),
+    )
+    shadow.rotation.x = -Math.PI / 2
+    shadow.renderOrder = 1
+    return shadow
   }
 
   private groundY(x: number, z: number): number {
@@ -737,6 +786,7 @@ export class GameView {
       if (!c) continue
       const gy = this.groundY(c.pos.x, c.pos.z)
       v.group.position.set(c.pos.x, gy, c.pos.z)
+      if (v.shadow) v.shadow.position.set(c.pos.x, gy + 0.01, c.pos.z)
       v.group.rotation.y = c.facing
       const model = v.group.userData.model as THREE.Group | undefined
       if (model) {
@@ -773,7 +823,11 @@ export class GameView {
     if (this.mentor) {
       this.mentor.position.y = 2.4 + Math.sin(now / 700) * 0.25
       this.mentor.rotation.y += dt * 0.6
+      if (this.mentorShadow) {
+        this.mentorShadow.position.set(this.mentor.position.x, this.groundY(this.mentor.position.x, this.mentor.position.z) + 0.01, this.mentor.position.z)
+      }
     }
+    if (this.pondMaterial) this.pondMaterial.opacity = THREE.MathUtils.lerp(0.7, 0.95, (Math.sin(now / 500) + 1) / 2)
 
     // pickup float + spin animation
     for (const p of this.pickups) {

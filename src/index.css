@@ -8,7 +8,7 @@
   --accent-dark: oklch(0.5 0.14 150);
   --danger: oklch(0.62 0.19 25);
   --warn: oklch(0.8 0.15 75);
-  --card-shadow: 0 10px 30px oklch(0.4 0.04 120 / 0.18);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
@@ -42,7 +42,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: linear-gradient(180deg, oklch(1 0 0 / 0.7), transparent);
+  background: linear-gradient(180deg, oklch(1 0 0 / 0.72), oklch(1 0 0 / 0.18));
+  backdrop-filter: blur(8px);
   pointer-events: none;
   z-index: 5;
 }
@@ -75,7 +76,7 @@ body {
   max-height: calc(100vh - 120px);
   overflow-y: auto;
   background: var(--surface);
-  border-radius: 18px;
+  border-radius: 22px;
   padding: 14px;
   box-shadow: var(--card-shadow);
   z-index: 6;
@@ -192,7 +193,7 @@ body {
 }
 .card {
   background: var(--surface);
-  border-radius: 20px;
+  border-radius: 24px;
   padding: 22px;
   width: min(420px, 100%);
   max-height: 85vh;

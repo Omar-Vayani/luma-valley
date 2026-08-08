@@ -18,15 +18,31 @@ export interface World3D {
 }
 
 const PALETTE = {
-  grassLight: new THREE.Color('#8fd46a'),
-  grassMid: new THREE.Color('#6abf52'),
-  grassDark: new THREE.Color('#4aa347'),
+  grassLight: new THREE.Color(0x8fce6a),
+  grassMid: new THREE.Color(0x7fbf5a),
+  grassDark: new THREE.Color(0x6fae4f),
   dirt: new THREE.Color('#c9a06b'),
   water: new THREE.Color('#6ec8e8'),
   waterDeep: new THREE.Color('#3f9ecf'),
   skyDay: new THREE.Color('#aee1f5'),
   skyDusk: new THREE.Color('#ffb56b'),
   skyNight: new THREE.Color('#1b2a4a'),
+}
+
+function valueNoise(x: number, z: number): number {
+  const hash = (ix: number, iz: number) => {
+    const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
+    return n - Math.floor(n)
+  }
+  const ix = Math.floor(x)
+  const iz = Math.floor(z)
+  const fx = x - ix
+  const fz = z - iz
+  const ux = fx * fx * (3 - 2 * fx)
+  const uz = fz * fz * (3 - 2 * fz)
+  const a = THREE.MathUtils.lerp(hash(ix, iz), hash(ix + 1, iz), ux)
+  const b = THREE.MathUtils.lerp(hash(ix, iz + 1), hash(ix + 1, iz + 1), ux)
+  return THREE.MathUtils.lerp(a, b, uz)
 }
 
 export function buildWorld3D(world: World): World3D {
@@ -45,10 +61,14 @@ export function buildWorld3D(world: World): World3D {
     const h = world.height(x, z) * 6 - 2.5
     pos.setY(i, h)
     const d = Math.hypot(x - world.state.den.x, z - world.state.den.z)
-    let c = PALETTE.grassMid
-    if (h < -1.2) c = PALETTE.dirt
-    else if (h < -0.2) c = PALETTE.grassDark
-    else if (h > 2.2) c = PALETTE.grassLight
+    const noise = valueNoise(x * 0.12, z * 0.12)
+    let c = (noise < 0.34 ? PALETTE.grassDark : noise > 0.67 ? PALETTE.grassLight : PALETTE.grassMid).clone()
+    const streamDistance = world.state.waterPoints.reduce(
+      (nearest, p) => Math.min(nearest, Math.hypot(x - p.x, z - p.z)),
+      Infinity,
+    )
+    if (streamDistance < 5 && h < 0.4) c.lerp(new THREE.Color(0x6f9948), 0.35)
+    else if (h > 2.2) c.lerp(new THREE.Color(0xa4d77a), 0.3)
     if (d < 8) c = c.clone().lerp(PALETTE.dirt, 0.35)
     colors.push(c.r, c.g, c.b)
   }
@@ -68,7 +88,13 @@ export function buildWorld3D(world: World): World3D {
     const w = 2.2
     const wg = new THREE.PlaneGeometry(w, Math.hypot(b.x - a.x, b.z - a.z) + 0.5)
     wg.rotateX(-Math.PI / 2)
-    const mat = new THREE.MeshLambertMaterial({ color: i % 3 === 0 ? PALETTE.waterDeep : PALETTE.water, transparent: true, opacity: 0.92 })
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x4a9ad0,
+      emissive: 0x1a4a7a,
+      transparent: true,
+      opacity: 0.8,
+      shininess: 70,
+    })
     const mesh = new THREE.Mesh(wg, mat)
     mesh.position.set((a.x + b.x) / 2, 0.02, (a.z + b.z) / 2)
     mesh.rotation.y = Math.atan2(b.z - a.z, b.x - a.x)
@@ -119,22 +145,38 @@ export function buildWorld3D(world: World): World3D {
   group.add(den)
 
   // ── Sky sphere ──
+  const skyCanvas = document.createElement('canvas')
+  skyCanvas.width = 16
+  skyCanvas.height = 256
+  const skyContext = skyCanvas.getContext('2d')
+  if (skyContext) {
+    const gradient = skyContext.createLinearGradient(0, skyCanvas.height, 0, 0)
+    gradient.addColorStop(0, '#cfdff2')
+    gradient.addColorStop(1, '#7ab0e8')
+    skyContext.fillStyle = gradient
+    skyContext.fillRect(0, 0, skyCanvas.width, skyCanvas.height)
+  }
+  const skyTexture = new THREE.CanvasTexture(skyCanvas)
+  skyTexture.colorSpace = THREE.SRGBColorSpace
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(120, 16, 12),
-    new THREE.MeshBasicMaterial({ color: PALETTE.skyDay, side: THREE.BackSide, fog: false }),
+    new THREE.SphereGeometry(400, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false }),
   )
   sky.position.y = 0
   group.add(sky)
 
   // ── Lights ──
-  const ambient = new THREE.HemisphereLight(PALETTE.skyDay, PALETTE.grassMid, 0.9)
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2)
+  const ambient = new THREE.HemisphereLight(0x8fa8d8, 0x6a7a4a, 0.6)
+  const sun = new THREE.DirectionalLight(0xffe8b0, 1.1)
+  sun.position.set(40, 60, 30)
   sun.castShadow = true
-  sun.shadow.mapSize.set(1024, 1024)
-  sun.shadow.camera.left = -40
-  sun.shadow.camera.right = 40
-  sun.shadow.camera.top = 40
-  sun.shadow.camera.bottom = -40
+  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.camera.left = -60
+  sun.shadow.camera.right = 60
+  sun.shadow.camera.top = 60
+  sun.shadow.camera.bottom = -60
+  sun.shadow.camera.near = 1
+  sun.shadow.camera.far = 200
   group.add(ambient)
   group.add(sun)
 
@@ -142,22 +184,18 @@ export function buildWorld3D(world: World): World3D {
     // dayTime 0..1 (0=dawn, .5=noon, 1=next dawn)
     const ang = (dayTime - 0.25) * Math.PI * 2
     const sunY = Math.sin(ang)
-    const sunX = Math.cos(ang) * 30
-    sun.position.set(sunX, sunY * 40 + 2, 20)
-    sun.intensity = THREE.MathUtils.clamp(sunY * 1.6 + 0.35, 0.05, 1.6)
     const nightness = THREE.MathUtils.clamp(1 - sunY * 1.6 - 0.1, 0, 1)
-    ambient.intensity = 0.9 - nightness * 0.65
     const duskness = THREE.MathUtils.clamp(1 - Math.abs(sunY) * 2.2, 0, 1)
-    sky.material.color.copy(PALETTE.skyDay).lerp(PALETTE.skyDusk, duskness * 0.7).lerp(PALETTE.skyNight, nightness)
-    ambient.color.copy(PALETTE.skyDay).lerp(PALETTE.skyDusk, duskness * 0.6)
+    const skyMaterial = sky.material as THREE.MeshBasicMaterial
+    skyMaterial.color.copy(PALETTE.skyDay).lerp(PALETTE.skyDusk, duskness * 0.35).lerp(PALETTE.skyNight, nightness * 0.55)
   }
 
   // Animated water shimmer — per-segment opacity pulse + gentle surface undulation.
   function shimmer(time: number): void {
     for (let i = 0; i < waterMeshes.length; i++) {
       const mesh = waterMeshes[i]
-      const mat = mesh.material as THREE.MeshLambertMaterial
-      mat.opacity = THREE.MathUtils.clamp(0.7 + Math.sin(time * 2 + i) * 0.3, 0.45, 1)
+      const mat = mesh.material as THREE.MeshPhongMaterial
+      mat.opacity = THREE.MathUtils.lerp(0.7, 0.95, (Math.sin(time * 2 + i) + 1) / 2)
       mesh.position.y = 0.02 + Math.sin(time * 1.6 + i * 1.3) * 0.012
     }
   }
