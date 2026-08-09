@@ -1,7 +1,31 @@
 import type { RNG } from './rng'
 
-export type CityPlaceId = 'market' | 'tavern' | 'park' | 'apothecary' | 'homes' | 'watch' | 'back-alley'
-export type CityResource = 'bread' | 'water' | 'ale' | 'cigarettes' | 'medicine' | 'dream-dust' | 'rest' | 'company' | 'safety'
+export type CityPlaceId =
+  // Internal ids are STABLE for save compatibility and untouched consumers
+  // (game.ts, creature.ts): market, tavern, park, apothecary, homes, watch,
+  // back-alley are all still registered. Only visible names/purposes carry the
+  // nomad-city semantics (shelter, bar, bank/exchange, drugstore clinic).
+  | 'market'
+  | 'tavern'
+  | 'park'
+  | 'apothecary'
+  | 'homes'
+  | 'watch'
+  | 'back-alley'
+  // New walled services added for the observer city (SOCIETY_REBUILD.md).
+  | 'hospital'
+  | 'restaurant'
+export type CityResource =
+  | 'bread'
+  | 'water'
+  | 'ale'
+  | 'cigarettes'
+  | 'medicine'
+  | 'dream-dust'
+  | 'rest'
+  | 'company'
+  | 'safety'
+  | 'currency'
 
 export interface CityPlace {
   id: CityPlaceId
@@ -14,13 +38,15 @@ export interface CityPlace {
 }
 
 export const CITY_PLACES: CityPlace[] = [
-  { id: 'market', name: 'Old Market', purpose: 'Food, tools and trade', pos: { x: -28, z: 18 }, radius: 10, provides: ['bread', 'company'], danger: 0.05 },
-  { id: 'tavern', name: 'The Crooked Tankard', purpose: 'Ale, smoke and company', pos: { x: -32, z: -28 }, radius: 9, provides: ['ale', 'cigarettes', 'company'], danger: 0.28 },
-  { id: 'park', name: 'Ashen Park', purpose: 'Water, calm and conversation', pos: { x: 0, z: -28 }, radius: 11, provides: ['water', 'rest', 'company'], danger: 0.02 },
-  { id: 'apothecary', name: 'Saint Orra Apothecary', purpose: 'Medicine and recovery', pos: { x: 32, z: -28 }, radius: 9, provides: ['medicine', 'rest'], danger: 0.04 },
-  { id: 'homes', name: 'Lantern Row', purpose: 'Sleep and shelter', pos: { x: 32, z: 26 }, radius: 11, provides: ['rest', 'safety'], danger: 0.01 },
-  { id: 'watch', name: 'Old Watch Yard', purpose: 'Safety and order', pos: { x: 0, z: 34 }, radius: 9, provides: ['safety', 'company'], danger: 0.03 },
-  { id: 'back-alley', name: 'Moth Alley', purpose: 'Illegal dream-dust', pos: { x: -50, z: -4 }, radius: 7, provides: ['dream-dust'], danger: 0.72 },
+  { id: 'market', name: 'Open Bazaar', purpose: 'Self-service vending tables: buy, sell and trade bread and goods', pos: { x: -28, z: 18 }, radius: 10, provides: ['bread', 'company'], danger: 0.05 },
+  { id: 'tavern', name: 'The Crooked Tankard', purpose: 'Coin-operated ale and smoke hatch', pos: { x: -32, z: -28 }, radius: 9, provides: ['ale', 'cigarettes', 'company'], danger: 0.28 },
+  { id: 'park', name: 'Ashen Park', purpose: 'Free water, calm and conversation', pos: { x: 0, z: -28 }, radius: 11, provides: ['water', 'rest', 'company'], danger: 0.02 },
+  { id: 'apothecary', name: 'Saint Orra Drugstore', purpose: 'Clinic shutters: self-service medicine', pos: { x: 32, z: -28 }, radius: 9, provides: ['medicine', 'rest'], danger: 0.04 },
+  { id: 'homes', name: 'Lantern Row Shelter', purpose: 'Self-service bed boxes: pay for rest in a shared alcove', pos: { x: 32, z: 26 }, radius: 11, provides: ['rest', 'safety'], danger: 0.01 },
+  { id: 'watch', name: 'Brass Weigh-House', purpose: 'Deposit, withdraw and ledger kiosk; keeps currency safe', pos: { x: 0, z: 34 }, radius: 9, provides: ['currency', 'company'], danger: 0.03 },
+  { id: 'back-alley', name: 'Moth Alley', purpose: 'Substance hatch: self-service doses, heavy impairment risk', pos: { x: -50, z: -4 }, radius: 7, provides: ['dream-dust'], danger: 0.72 },
+  { id: 'hospital', name: 'Mercy House', purpose: 'Remedy cabinet: pay for treatment', pos: { x: 48, z: -26 }, radius: 9, provides: ['medicine', 'rest'], danger: 0.03 },
+  { id: 'restaurant', name: 'Hearth Kitchen', purpose: 'Bread oven: pay for a hot meal', pos: { x: 16, z: -42 }, radius: 9, provides: ['bread', 'company'], danger: 0.04 },
 ]
 
 export interface PlaceKnowledge {

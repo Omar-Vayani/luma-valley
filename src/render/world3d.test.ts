@@ -1,7 +1,11 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { World } from '../sim/world'
+import { CITY_PLACES } from '../sim/city'
+import { purposeMotif } from './structures'
 import { buildWorld3D, terrainY } from './world3d'
+
+const REQUIRED_SERVICES = ['homes', 'tavern', 'park', 'watch', 'hospital', 'restaurant', 'apothecary'] as const
 
 describe('authoritative terrain height', () => {
   it('uses the same height function for every rendered terrain vertex', () => {
@@ -22,6 +26,20 @@ describe('authoritative terrain height', () => {
       const before = world.state.waterPoints[index - 1]
       const after = world.state.waterPoints[index]
       expect(Math.abs(terrainY(world, before.x, before.z) - terrainY(world, after.x, after.z))).toBeLessThan(4)
+    }
+  })
+})
+
+describe('service signage', () => {
+  it('advertises every required service with a purpose motif', () => {
+    for (const id of REQUIRED_SERVICES) expect(purposeMotif(id)).not.toBe('')
+  })
+
+  it('keeps signage period-appropriate: no modern glass or branding', () => {
+    const banned = ['glass', 'neon', 'plastic', 'logo', 'billboard', 'brand']
+    for (const place of CITY_PLACES) {
+      const text = `${place.name} ${place.purpose} ${purposeMotif(place.id)}`.toLowerCase()
+      for (const token of banned) expect(text).not.toContain(token)
     }
   })
 })

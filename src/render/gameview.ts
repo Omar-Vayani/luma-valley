@@ -153,7 +153,14 @@ export class GameView {
 
   private groundY(x: number, z: number): number { return terrainY(this.game.world, x, z) }
 
-  private onClick = (): void => { this.interact() }
+  private onClick = (event: MouseEvent): void => {
+    const target = event.target instanceof Element ? event.target : null
+    // Global canvas interaction must never fire through HUD/menu clicks. Without
+    // this guard a Society/Tools tap also raycasts the world and can immediately
+    // replace the requested tab with the focused citizen panel.
+    if (target?.closest('button, input, textarea, select, label, .hud-panel, .hud-tabs, .topbar, .overlay, .msg-stack')) return
+    this.interact()
+  }
 
   private onInteractKey = (event: KeyboardEvent): void => {
     const target = event.target instanceof Element ? event.target : null

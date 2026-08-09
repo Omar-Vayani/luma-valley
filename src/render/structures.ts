@@ -18,6 +18,7 @@ const MAT = {
   water: new THREE.MeshLambertMaterial({ color: 0x5b8190 }),
   purple: new THREE.MeshLambertMaterial({ color: 0x71547d }),
   cloth: new THREE.MeshLambertMaterial({ color: 0x9e503e }),
+  red: new THREE.MeshLambertMaterial({ color: 0x8c2f2a }),
 }
 
 function box(parent: THREE.Object3D, size: [number, number, number], pos: [number, number, number], material: THREE.Material): THREE.Mesh {
@@ -25,6 +26,15 @@ function box(parent: THREE.Object3D, size: [number, number, number], pos: [numbe
   mesh.scale.set(...size)
   mesh.position.set(...pos)
   mesh.castShadow = size[1] > 1
+  mesh.receiveShadow = true
+  parent.add(mesh)
+  return mesh
+}
+
+function cylinder(parent: THREE.Object3D, radius: number, height: number, pos: [number, number, number], material: THREE.Material, segments = 10): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, segments), material)
+  mesh.position.set(...pos)
+  mesh.castShadow = true
   mesh.receiveShadow = true
   parent.add(mesh)
   return mesh
@@ -92,11 +102,99 @@ function buildBuilding(root: THREE.Group, building: BuildingFootprint): BoxFootp
   }
 
   // A simple usable interior: table, benches, warm hearth and district colour.
+  const glow: Partial<Record<CityPlaceId, THREE.Material>> = {
+    tavern: MAT.amber,
+    apothecary: MAT.green,
+    homes: MAT.timber,
+    watch: MAT.amber,
+    'back-alley': MAT.purple,
+    hospital: MAT.red,
+    restaurant: MAT.amber,
+  }
   box(root, [2.5, .18, 1.1], [building.x, 1.05, building.z], MAT.timber)
   box(root, [.18, 1, .18], [building.x - .9, .5, building.z], MAT.timber)
   box(root, [.18, 1, .18], [building.x + .9, .5, building.z], MAT.timber)
-  box(root, [1.4, .85, .35], [building.x, .55, building.z + building.depth / 2 - .55], building.placeId === 'back-alley' ? MAT.purple : MAT.amber)
+  const interiorGlow = building.placeId ? glow[building.placeId] : undefined
+  box(root, [1.4, .85, .35], [building.x, .55, building.z + building.depth / 2 - .55], interiorGlow ?? MAT.amber)
+  advertisePurpose(root, building)
   return wallBoxes(building)
+}
+
+/**
+ * Every service building visibly advertises its purpose with chunky,
+ * period-appropriate props and sign motifs — no glass, neon, or branding.
+ */
+function advertisePurpose(root: THREE.Group, building: BuildingFootprint): void {
+  const door = doorwayPoint(building)
+  const horizontal = building.entrance === 'n' || building.entrance === 's'
+  // Beside-the-door anchors read at phone scale without blocking the doorway.
+  const left = horizontal ? { x: building.x - 2.0, z: door.z } : { x: door.x, z: building.z - 2.0 }
+  const right = horizontal ? { x: building.x + 2.0, z: door.z } : { x: door.x, z: building.z + 2.0 }
+  const face = horizontal ? { x: building.x, z: door.z - (building.entrance === 's' ? 0.3 : -0.3) } : { x: door.x - (building.entrance === 'e' ? 0.3 : -0.3), z: building.z }
+
+  switch (building.placeId) {
+    case 'tavern': {
+      // Barrels and a tankard sign: ale and smoke on the tap wall.
+      cylinder(root, .5, .95, [left.x, .48, left.z], MAT.timber)
+      cylinder(root, .52, .1, [left.x, 1.0, left.z], MAT.amber)
+      cylinder(root, .09, 1.8, [right.x, .9, right.z], MAT.timber)
+      box(root, [.95, .6, .14], [right.x, 1.9, right.z], MAT.dark)
+      box(root, [.42, .46, .1], [right.x, 2.0, right.z], MAT.amber)
+      box(root, [.2, .3, .08], [right.x + .28, 1.98, right.z], MAT.timber)
+      break
+    }
+    case 'apothecary': {
+      // Bottles and a mortar: the clinic shutter keeps medicine at hand.
+      cylinder(root, .3, .85, [left.x - .3, .43, left.z], MAT.green)
+      cylinder(root, .26, .7, [left.x + .3, .35, left.z], MAT.amber)
+      box(root, [.26, .18, .26], [left.x - .3, .95, left.z], MAT.timber)
+      box(root, [.22, .16, .22], [left.x + .3, .78, left.z], MAT.timber)
+      cylinder(root, .44, .3, [right.x, .15, right.z], MAT.stone)
+      cylinder(root, .07, .95, [right.x + .12, .85, right.z], MAT.timber, 6)
+      break
+    }
+    case 'homes': {
+      // Bedroll and awning: a pay-bed alcove under the eaves.
+      box(root, [building.doorWidth + .9, .12, .75], [face.x, 3.05, face.z], MAT.cloth)
+      box(root, [1.05, .3, .5], [right.x, .35, right.z], MAT.timber)
+      box(root, [.55, .26, .26], [right.x + .2, .4, right.z], MAT.cloth)
+      break
+    }
+    case 'watch': {
+      // Scales and coins: the weigh-house exchange advertises itself.
+      cylinder(root, .09, 1.5, [face.x, .75, face.z], MAT.timber)
+      box(root, [1.5, .12, .12], [face.x, 1.5, face.z], MAT.timber)
+      box(root, [.42, .1, .42], [face.x - .75, 1.32, face.z], MAT.amber)
+      box(root, [.42, .1, .42], [face.x + .75, 1.32, face.z], MAT.amber)
+      for (let i = 0; i < 3; i++) cylinder(root, .22, .12, [left.x, .14 + i * .24, left.z], MAT.amber, 8)
+      break
+    }
+    case 'back-alley': {
+      // A dark hatch and a small purple vial: substances, no sign of authority.
+      box(root, [.85, 1.15, .14], [right.x, .72, right.z], MAT.dark)
+      box(root, [.95, .16, .18], [right.x, 1.4, right.z], MAT.purple)
+      cylinder(root, .14, .5, [right.x - .4, .25, right.z + .15], MAT.purple, 6)
+      break
+    }
+    case 'hospital': {
+      // Remedy cabinet and a carved red cross on the clinic wall.
+      box(root, [.85, 1.7, .5], [left.x, .85, left.z], MAT.timber)
+      box(root, [.62, 1.4, .55], [left.x + .06, .9, left.z + .06], MAT.dark)
+      box(root, [.34, 1.15, .12], [face.x, 3.4, face.z], MAT.red)
+      box(root, [1.15, .34, .12], [face.x, 3.4, face.z], MAT.red)
+      break
+    }
+    case 'restaurant': {
+      // Bread oven with loaves and a roof chimney: meals, not groceries.
+      box(root, [1.5, 1.1, 1.1], [left.x, .55, left.z], MAT.stone)
+      box(root, [1.05, .85, 1.14], [left.x, .42, left.z + .12], MAT.dark)
+      for (const ox of [-.4, 0, .4]) box(root, [.42, .3, .42], [left.x + ox, 1.28, left.z], MAT.amber)
+      box(root, [.7, 1.7, .7], [building.x + building.width * .32, building.height + .85, building.z - building.depth * .34], MAT.dark)
+      break
+    }
+    default:
+      break
+  }
 }
 
 function stall(root: THREE.Group, x: number, z: number, cloth: THREE.Material): void {
@@ -164,6 +262,11 @@ function streetLife(root: THREE.Group): void {
     box(root, [.42, .25, 2.2], [-5.35, .13, z], MAT.stone)
     box(root, [.42, .25, 2.2], [5.35, .13, z], MAT.stone)
   }
+  // East medical lane and south kitchen lane read as real roads off the
+  // arrival street, so hospital and restaurant sit on the city grid.
+  for (const [x, z] of [[40, -18], [40, -24], [40, -30], [8, -38], [16, -37.5], [24, -38]] as const) {
+    box(root, [3.4, .06, 2.4], [x, .035, z], MAT.stone)
+  }
   box(root, [.65, 4.8, .65], [-6.2, 2.4, -37], MAT.timber)
   box(root, [.65, 4.8, .65], [6.2, 2.4, -37], MAT.timber)
   box(root, [13, .55, .65], [0, 4.65, -37], MAT.timber)
@@ -196,6 +299,22 @@ export function buildCityStructures(): CityBuild {
 
 export function cityPlaceById(id: string): CityPlace | undefined {
   return CITY_PLACES.find((place) => place.id === id)
+}
+
+/** Sign-motif token used to draw and verify each building's purpose props. */
+export function purposeMotif(placeId: CityPlaceId): string {
+  switch (placeId) {
+    case 'market': return 'vending-stalls'
+    case 'tavern': return 'barrel-tankard'
+    case 'park': return 'fountain-trees'
+    case 'apothecary': return 'shutters-bottle'
+    case 'homes': return 'bedroll-awning'
+    case 'watch': return 'scales-coins'
+    case 'back-alley': return 'substance-hatch'
+    case 'hospital': return 'remedy-cabinet-cross'
+    case 'restaurant': return 'bread-oven'
+    default: return ''
+  }
 }
 
 export function cityPlaceName(id: CityPlaceId): string {

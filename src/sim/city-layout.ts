@@ -32,6 +32,8 @@ export const CITY_BUILDINGS: BuildingFootprint[] = [
   { id: 'lantern-home', placeId: 'homes', x: 32, z: 26, width: 10, depth: 8, height: 5.2, entrance: 's', doorWidth: CITY_DOOR_WIDTH, color: 'sand' },
   { id: 'watch-hall', placeId: 'watch', x: 0, z: 34, width: 11, depth: 8, height: 6.4, entrance: 's', doorWidth: CITY_DOOR_WIDTH, color: 'stone' },
   { id: 'moth-den', placeId: 'back-alley', x: -50, z: -4, width: 8, depth: 7, height: 4.8, entrance: 'e', doorWidth: CITY_DOOR_WIDTH, color: 'stone' },
+  { id: 'mercy-house', placeId: 'hospital', x: 48, z: -26, width: 9, depth: 8, height: 5.6, entrance: 'w', doorWidth: CITY_DOOR_WIDTH, color: 'plaster' },
+  { id: 'hearth-kitchen', placeId: 'restaurant', x: 16, z: -42, width: 10, depth: 8, height: 5.4, entrance: 'n', doorWidth: CITY_DOOR_WIDTH, color: 'brick' },
 ]
 
 export const FILLER_BUILDINGS: BuildingFootprint[] = [
@@ -46,7 +48,6 @@ export const FILLER_BUILDINGS: BuildingFootprint[] = [
   { id: 'north-row-c', x: 45, z: 34, width: 9, depth: 8, height: 5.5, entrance: 's', doorWidth: CITY_DOOR_WIDTH, color: 'plaster' },
   { id: 'south-row-a', x: -47, z: -36, width: 9, depth: 8, height: 5.4, entrance: 'n', doorWidth: CITY_DOOR_WIDTH, color: 'stone' },
   { id: 'south-row-b', x: -16, z: -42, width: 10, depth: 8, height: 5.8, entrance: 'n', doorWidth: CITY_DOOR_WIDTH, color: 'sand' },
-  { id: 'south-row-c', x: 16, z: -42, width: 10, depth: 8, height: 5.2, entrance: 'n', doorWidth: CITY_DOOR_WIDTH, color: 'brick' },
   { id: 'south-row-d', x: 47, z: -36, width: 9, depth: 8, height: 6, entrance: 'n', doorWidth: CITY_DOOR_WIDTH, color: 'plaster' },
   { id: 'east-row-a', x: 50, z: -16, width: 8, depth: 9, height: 5.4, entrance: 'w', doorWidth: CITY_DOOR_WIDTH, color: 'sand' },
   { id: 'east-row-b', x: 50, z: 10, width: 8, depth: 9, height: 5.8, entrance: 'w', doorWidth: CITY_DOOR_WIDTH, color: 'brick' },

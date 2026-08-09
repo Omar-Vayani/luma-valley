@@ -14,6 +14,69 @@ import type { World } from '../sim/world'
  * MOVE: WASD always works; joystick (mobile) calls setInput();
  * Space or jump() to jump.
  */
+
+/** Mobile touch control scheme. 'split' (default) is invisible: the left half
+ *  of the screen is a movement pad driven by touch-origin displacement, the
+ *  right half looks — no visible joystick ring. 'classic' restores the
+ *  visible joystick + full-screen look surface. */
+export type TouchControlMode = 'split' | 'classic'
+
+/** Finger displacement (px) that reaches full movement speed. */
+export const TOUCH_MOVE_RADIUS = 64
+
+/** Deadzone on normalized movement. Matches the classic joystick key
+ *  threshold (> 0.3) so tiny displacements never start/stop movement. */
+export const TOUCH_DEADZONE = 0.3
+
+export interface TouchMoveVec {
+  /** +1 = forward, -1 = backward */
+  fwd: number
+  /** +1 = right, -1 = left */
+  side: number
+}
+
+/** Which gesture zone owns a touch at clientX. In split mode the left half of
+ *  the screen owns movement and the right half owns look. In classic mode the
+ *  visible joystick DOM element owns movement; everything else is look. */
+export function touchZoneAt(clientX: number, viewportWidth: number, mode: TouchControlMode): 'move' | 'look' {
+  if (mode === 'classic') return 'look'
+  return clientX < viewportWidth / 2 ? 'move' : 'look'
+}
+
+/** Map touch-origin displacement to a normalized movement vector, clamped to
+ *  the unit circle with a per-axis deadzone — mirrors classic joystick output
+ *  so the same key thresholds can drive FPSControls.setInput. */
+export function touchMoveFromOrigin(
+  origin: { x: number; y: number },
+  current: { x: number; y: number },
+  radius = TOUCH_MOVE_RADIUS,
+  deadzone = TOUCH_DEADZONE,
+): TouchMoveVec {
+  const dx = current.x - origin.x
+  const dy = current.y - origin.y
+  const len = Math.hypot(dx, dy)
+  if (len <= 0) return { fwd: 0, side: 0 }
+  const scale = Math.min(1, len / radius)
+  const fwd = -(dy / len) * scale
+  const side = (dx / len) * scale
+  const zero = (v: number): number => (Math.abs(v) < deadzone ? 0 : v)
+  return { fwd: zero(fwd), side: zero(side) }
+}
+
+/** Look deltas applied by applyLook — the single source of the NATURAL
+ *  (non-inverted) sign contract: slide right → yaw+ (look right),
+ *  slide up → pitch+ (look up). */
+export function lookDeltas(dx: number, dy: number, sensitivity = 0.0022): { yaw: number; pitch: number } {
+  return { yaw: dx * sensitivity, pitch: -dy * sensitivity }
+}
+
+/** Touch look deltas preserving the verified mobile sign (direct
+ *  manipulation: dragging right pans the world right). Returns deltas that
+ *  are safe to pass straight to applyLook(). */
+export function applyTouchLook(dx: number, dy: number, sensitivity = 1.6): { dx: number; dy: number } {
+  return { dx: -dx * sensitivity, dy: dy * sensitivity }
+}
+
 export class FPSControls {
   camera: THREE.PerspectiveCamera
   domElement: HTMLElement
@@ -110,8 +173,9 @@ export class FPSControls {
    *  NATURAL (non-inverted): slide right → look right (yaw+), slide up → look up (pitch+). */
   applyLook(dx: number, dy: number): void {
     if (dx === 0 && dy === 0) return
-    this.yaw += dx * 0.0022
-    this.pitch -= dy * 0.0022
+    const delta = lookDeltas(dx, dy)
+    this.yaw += delta.yaw
+    this.pitch += delta.pitch
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.35, 1.35)
     this.updateCamera()
   }

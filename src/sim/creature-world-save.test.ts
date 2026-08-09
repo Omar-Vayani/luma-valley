@@ -4,6 +4,7 @@ import type { CreatureCtx } from './creature'
 import { World } from './world'
 import { applySave, buildSave, saveSizeKb } from './save'
 import { mulberry32 } from './rng'
+import { avoidCityObstacles, FILLER_BUILDINGS, wallBoxes } from './city-layout'
 
 function makeCtx(world: World, creatures: Creature[], self: Creature, day = 0.4): CreatureCtx {
   return {
@@ -23,6 +24,7 @@ function makeCtx(world: World, creatures: Creature[], self: Creature, day = 0.4)
     resolveCollision: (p, r) => world.resolveCollision(p, r),
     discoverPlaces: () => [],
     findPlace: () => null,
+    navigateTarget: (from, target) => avoidCityObstacles(from, target),
     usePlace: () => null,
   }
 }
@@ -92,6 +94,91 @@ describe('creature', () => {
       c.tick(ctx)
     }
     expect(c.alive).toBe(true)
+  })
+
+  it('eats food at hand instead of walking to a far city goal', () => {
+    const c = new Creature(null, mulberry32(7), 1)
+    c.chem.hunger = 0.9
+    const w = new World(7)
+    // a berry bush right next to the creature
+    w.state.plants.push({ id: 1, pos: { x: 1, z: 0 }, berries: 3, regrow: 0 })
+    const ctx = makeCtx(w, [c], c)
+    ctx.foodNear = 0.9 // bush is well within smell range
+    ctx.rng = () => 0.5 // suppress random exploration
+    const market = { id: 'market' as const, name: 'Old Market', purpose: 'food', pos: { x: -28, z: 18 }, radius: 10, provides: ['bread' as const], danger: 0 }
+    ctx.findPlace = () => market
+    // the market is already known, so the hunger goal would normally send it there
+    c.urban.knownPlaces.market = { provides: ['bread'], pos: market.pos, confidence: 1, valence: 1, lastVisited: 0 }
+    c.tick(ctx)
+    // it must have eaten the berry at its feet, not marched off to the market
+    expect(c.chem.hunger).toBeLessThan(0.9)
+  })
+
+  it('sick citizen seeks an unknown district to find medicine', () => {
+    const c = new Creature(null, mulberry32(9), 1)
+    c.chem.health = 0.3
+    c.chem.hunger = 0.4
+    c.chem.boredom = 0.3
+    c.chem.loneliness = 0.3
+    const w = new World(7)
+    const ctx = makeCtx(w, [c], c)
+    const apothecary = { id: 'apothecary' as const, name: 'Saint Orra Drugstore', purpose: 'Medicine and recovery', pos: { x: 32, z: -28 }, radius: 9, provides: ['medicine' as const, 'rest' as const], danger: 0.04 }
+    ctx.findPlace = () => apothecary
+    // first rng draw passes the exploration gate, second draw picks the
+    // apothecary out of the 9 CITY_PLACES (index 3 → 0.4*9 = 3.6)
+    let calls = 0
+    ctx.rng = () => (calls++ === 0 ? 0.005 : 0.4)
+    c.tick(ctx)
+    expect(c.urban.currentGoal).toBe('apothecary')
+  })
+
+  it('a starving citizen ignores a rest/water goal and forages food instead', () => {
+    // hunger > 0.9 must not be overridden by a park/rest goal — even when
+    // thirst is also high — unless the destination actually supplies food
+    const c = new Creature(null, mulberry32(21), 1)
+    c.chem.hunger = 0.95
+    c.chem.thirst = 0.85
+    const w = new World(7)
+    // food is reachable (within the 12-unit forage range) but not at hand
+    w.state.plants.push({ id: 1, pos: { x: 11, z: 0 }, berries: 3, regrow: 0 })
+    const ctx = makeCtx(w, [c], c)
+    const park = { id: 'park' as const, name: 'Ashen Park', purpose: 'Water, calm and conversation', pos: { x: 0, z: -28 }, radius: 11, provides: ['water' as const, 'rest' as const, 'company' as const], danger: 0.02 }
+    ctx.findPlace = () => park
+    ctx.rng = () => 0.5
+    c.urban.knownPlaces.park = { provides: ['water', 'rest', 'company'], pos: park.pos, confidence: 1, valence: 1, lastVisited: 0 }
+    // the park goal was set in a calmer moment and is still pending
+    c.urban.currentGoal = 'park'
+    c.tick(ctx)
+    // it must head for the berries, not walk off to rest at the park
+    expect(['toFood', 'eat']).toContain(c.action)
+    expect(c.action).not.toBe('toPlace')
+    expect(c.action).not.toBe('usePlace')
+  })
+
+  it('a citizen pressed against a building wall still finds its way to reachable food', () => {
+    // regression: toFood used to turn toward the target and push straight into
+    // walls; a citizen wedged west of a building starved beside a reachable bush
+    const c = new Creature(null, mulberry32(22), 1)
+    const w = new World(7)
+    const rowS1 = FILLER_BUILDINGS.find((b) => b.id === 'row-s1')!
+    for (const wall of wallBoxes(rowS1)) w.addBoxCollider(wall.x, wall.z, wall.hx, wall.hz)
+    // bush east of the building, citizen on the west side (like Fifi6's alley)
+    w.state.plants.push({ id: 1, pos: { x: -8, z: -32 }, berries: 3, regrow: 0 })
+    const ctx = makeCtx(w, [c], c)
+    ctx.findFood = () => w.nearestFood(c.pos, 300)
+    ctx.rng = () => 0.5
+    c.pos = { x: -28, z: -33 }
+    c.chem.hunger = 0.9
+    let ate = false
+    for (let i = 0; i < 500 && c.alive && !ate; i++) {
+      // mirror the game's proximity sensor so the eat instinct fires near the bush
+      const food = w.nearestFood(c.pos, 300)
+      ctx.foodNear = food ? Math.max(0, 1 - Math.hypot(food.x - c.pos.x, food.z - c.pos.z) / 12) : 0
+      c.tick(ctx)
+      ate = c.chem.hunger < 0.5
+    }
+    expect(c.alive).toBe(true)
+    expect(ate).toBe(true)
   })
 
   it('breeding produces a child genome with both parents', () => {

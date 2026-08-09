@@ -145,11 +145,16 @@ export function buildCreature3D(creature: Creature): Creature3D {
   ring.visible = false
   g.add(ring)
 
-  // Grave marker (dead)
-  const grave = new THREE.Mesh(new THREE.BoxGeometry(size * 0.4, size * 0.7, 0.12), new THREE.MeshLambertMaterial({ color: '#b9b3a6' }))
-  grave.position.y = size * 0.35
+  // Grave marker (dead) — a memorial that stands upright, never a lying body.
+  const grave = new THREE.Mesh(new THREE.BoxGeometry(size * 0.5, size * 0.9, 0.14), new THREE.MeshLambertMaterial({ color: '#b9b3a6' }))
+  grave.position.y = size * 0.45
+  grave.userData.kind = 'grave'
   grave.visible = false
   g.add(grave)
+
+  // Every mesh except the grave and selection ring is a body part that must
+  // disappear when the NPC dies — a memorial, not a prone corpse.
+  const bodyParts = g.children.filter((child) => child !== grave && child !== ring)
 
   // state
   let blinkTimer = 2 + Math.random() * 3
@@ -183,16 +188,19 @@ export function buildCreature3D(creature: Creature): Creature3D {
       pupilR.scale.y = eyeScaleY
 
       if (!c.alive) {
-        // lying flat, eyes closed, grave up
-        g.rotation.x = -Math.PI / 2
-        g.position.y = 0.05
+        // Memorial, not a corpse: keep the rig upright and hide every body
+        // part so nothing reads as a prone/lying body. The grave stands.
+        g.rotation.x = 0
+        g.rotation.z = 0
+        g.position.set(0, 0, 0)
         eyeL.scale.y = 0.08
         eyeR2.scale.y = 0.08
+        for (const part of bodyParts) part.visible = false
         grave.visible = true
-        bodyMat.color.setHSL(hue, 0.25, 0.55)
         return
       }
       grave.visible = false
+      for (const part of bodyParts) part.visible = true
       // Every pose starts from a stable upright base; transient fear/sleep offsets never accumulate.
       g.rotation.x = 0
       g.rotation.z = 0
@@ -228,12 +236,21 @@ export function buildCreature3D(creature: Creature): Creature3D {
         arm.rotation.x = swing
       }
 
-      // sleep pose
+      // sleep pose: seated upright — the rig is lowered into a rest, never
+      // rolled onto its side, so a sleeping NPC can't read as collapsed.
       if (c.sleeping) {
-        g.rotation.z = Math.PI / 2 * 0.9
-        g.position.x = 0.35
+        g.rotation.z = 0
+        g.rotation.x = 0
+        g.position.x = 0
+        g.position.z = 0
+        g.position.y = -size * 0.18
         eyeL.scale.y = 0.08
         eyeR2.scale.y = 0.08
+        head.rotation.x = 0.2
+        arms[0].rotation.x = 0.5
+        arms[1].rotation.x = 0.5
+      } else {
+        head.rotation.x = 0
       }
 
       // eating: mouth open-close

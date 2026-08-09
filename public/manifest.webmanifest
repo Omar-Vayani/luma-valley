@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "Luma Valley — Old City",
+  "short_name": "Luma Valley",
+  "description": "An artificial-life sandbox where citizens learn places, form bonds, share, fight, and struggle with their choices.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#79766e",
+  "theme_color": "#30271f",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "categories": ["games"]
+}

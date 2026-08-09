@@ -29,7 +29,8 @@ body {
 .mount canvas { display: block; touch-action: none; }
 
 /* Force UI layers above the WebGL canvas compositing layer (Chrome quirk). */
-.panel, .topbar, .quest-tracker, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .jump-btn {
+.panel, .topbar, .quickbar, .fpv-hint, .overlay, .toast, .joystick, .jump-btn,
+.hud-tabs, .hud-panel, .msg-stack, .interact-btn, .control-tip {
   transform: translateZ(0);
   will-change: transform;
 }
@@ -256,29 +257,6 @@ body {
 .fpv-hint p { margin: 4px 0; }
 .fpv-hint .btn { margin-top: 10px; }
 
-.quest-tracker {
-  position: absolute;
-  top: 56px; left: 50%;
-  transform: translateX(-50%);
-  background: var(--surface);
-  border-radius: 999px;
-  padding: 6px 16px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  box-shadow: var(--card-shadow);
-  z-index: 6;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  max-width: min(520px, calc(100vw - 40px));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.quest-title { overflow: hidden; text-overflow: ellipsis; }
-.quest-progress { background: var(--accent); color: white; border-radius: 999px; padding: 2px 8px; font-size: 0.7rem; }
-.quest-done { background: oklch(0.95 0.08 150); color: oklch(0.45 0.12 150); }
-
 .quickbar {
   position: absolute;
   bottom: 16px; left: 50%;
@@ -405,7 +383,6 @@ body {
   .panel { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 45vh; z-index: 14; }
   .logo { font-size: 1rem; }
   .card { padding: 16px; }
-  .quest-tracker { top: 48px; font-size: 0.72rem; padding: 5px 12px; }
   .quickbar { bottom: 122px; gap: 6px; }
   .quickbar .btn { padding: 8px 10px; font-size: 0.75rem; }
   .joystick { bottom: 12px; left: 12px; width: 96px; height: 96px; }
@@ -420,7 +397,7 @@ body {
 }
 
 /* ── Cohesive field HUD refresh ── */
-button, .btn, input, label.btn { min-height: 44px; }
+button, .btn, input, label.btn { min-height: 48px; }
 .topbar {
   top: env(safe-area-inset-top);
   padding: 8px max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left));
@@ -437,25 +414,7 @@ button, .btn, input, label.btn { min-height: 44px; }
   box-shadow: 0 2px 5px rgba(22, 30, 18, .22);
   white-space: nowrap;
 }
-.icon-btn { width: 44px; height: 44px; border-radius: 8px; background: #f4e8c8; box-shadow: 0 2px 5px rgba(22,30,18,.25); }
-.quest-tracker {
-  top: calc(env(safe-area-inset-top) + 58px);
-  left: max(10px, env(safe-area-inset-left));
-  transform: none;
-  width: min(340px, calc(100vw - 20px));
-  max-width: none;
-  white-space: normal;
-  justify-content: space-between;
-  padding: 9px 10px 9px 12px;
-  border-radius: 9px;
-  border-left: 4px solid #e3ae45;
-  background: #fff7df;
-  box-shadow: 0 3px 9px rgba(38, 50, 28, .25);
-}
-.quest-copy { min-width: 0; display: grid; gap: 1px; }
-.quest-copy strong { font-size: .78rem; color: #4b462f; }
-.quest-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71694c; font-size: .69rem; }
-.quest-progress { flex: none; border-radius: 6px; background: #4f874b; padding: 4px 7px; }
+.icon-btn { width: 48px; height: 48px; border-radius: 8px; background: #f4e8c8; box-shadow: 0 2px 5px rgba(22,30,18,.25); }
 .panel {
   border-radius: 14px;
   border: 1px solid #d9cda9;
@@ -469,7 +428,7 @@ button, .btn, input, label.btn { min-height: 44px; }
 .btn { border-radius: 8px; background: #4f874b; }
 .btn-ghost { background: #eee6d0; color: #3f4334; }
 .chip, .mood, .trust-tag { border-radius: 6px; }
-.panel-close { width: 44px; height: 44px; border-radius: 8px; }
+.panel-close { width: 48px; height: 48px; border-radius: 8px; }
 .interaction-prompt {
   top: calc(50% + 22px);
   padding: 8px 11px;
@@ -517,7 +476,6 @@ button, .btn, input, label.btn { min-height: 44px; }
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
-  .quest-tracker { top: calc(env(safe-area-inset-top) + 50px); width: 280px; }
   .panel { left: auto; width: min(380px, 46vw); max-height: calc(100vh - 16px); }
   .quickbar { left: 42%; bottom: max(8px, env(safe-area-inset-bottom)); }
   .joystick { width: 88px; height: 88px; bottom: 10px; }
@@ -536,8 +494,7 @@ button, .btn, input, label.btn { min-height: 44px; }
 .topbar { background: linear-gradient(180deg, rgba(24, 23, 22, .92), rgba(24, 23, 22, 0)); }
 .logo { color: #ffd88f; text-shadow: 0 1px 4px #120d08; letter-spacing: .04em; }
 .pill { background: rgba(38, 34, 30, .86); border: 1px solid rgba(205, 159, 88, .24); }
-.quest-tracker { background: #e9dfc8; border-left-color: #b77938; }
-.quest-progress, .btn { background: #80532e; }
+.btn { background: #80532e; }
 .btn-active { background: #ba762e; }
 .panel { background: #eee4ce; border-color: #9d8766; }
 .quickbar { background: rgba(30, 28, 26, .78); }
@@ -550,7 +507,6 @@ button, .btn, input, label.btn { min-height: 44px; }
 .city-facts { margin: 6px 0; color: #665d50; font-size: .72rem; }
 
 @media (max-width: 720px) {
-  .quest-tracker { width: min(290px, calc(100vw - 90px)); }
   .quickbar { max-width: calc(100vw - 220px); overflow-x: auto; left: 50%; }
   .panel .emotion-row { max-width: 100%; }
 }
@@ -604,3 +560,280 @@ button, .btn, input, label.btn { min-height: 44px; }
   .panel-compact { max-height: 176px; }
   .drive-chips { display: none; }
 }
+
+/* ── Control/HUD phase: minimal strip, expandable panels, safe messages ── */
+
+/* Expandable HUD tab bar — bottom-anchored above the safe area */
+.hud-tabs {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 6px;
+  z-index: 13;
+  background: rgba(30, 40, 26, .84);
+  border: 1px solid rgba(255, 244, 208, .35);
+  border-radius: 14px;
+  padding: 5px;
+  box-shadow: var(--card-shadow);
+}
+.hud-tab {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #fffaf0;
+  font-size: .78rem;
+  font-weight: 700;
+  min-height: 48px;
+  cursor: pointer;
+}
+.hud-tab-active { background: #80532e; color: #fff7df; }
+
+/* Bottom-sheet panels — above the tab bar, never over the center prompt */
+.hud-panel {
+  position: absolute;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 66px);
+  left: max(10px, env(safe-area-inset-left));
+  width: min(420px, calc(100vw - 20px));
+  max-height: min(42vh, 480px);
+  overflow-y: auto;
+  background: #fffaf0;
+  border: 1px solid #d9cda9;
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 26px rgba(35, 42, 27, .32);
+  z-index: 12;
+  color: var(--ink);
+}
+.hud-panel h2 { margin: 0; font-size: 1.05rem; }
+.hud-panel h3 { margin: 10px 0 6px; font-size: .85rem; color: #4b462f; }
+.hud-panel .hint { text-align: left; margin: 10px 0 0; }
+.hud-panel-compact { max-height: 210px; overflow: hidden; }
+.hud-panel-compact .needs-label,
+.hud-panel-compact > .bar,
+.hud-panel-compact .city-mind,
+.hud-panel-compact .trust,
+.hud-panel-compact .traumas,
+.hud-panel-compact .teach,
+.hud-panel-compact .give,
+.hud-panel-compact .relationships,
+.hud-panel-compact .psyche-actions { display: none; }
+.hud-panel-expanded { max-height: min(46vh, 480px); }
+
+/* People roster */
+.roster { display: grid; gap: 6px; }
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9cda9;
+  border-radius: 10px;
+  background: #fbf4e2;
+  color: var(--ink);
+  font-size: .8rem;
+  min-height: 48px;
+  cursor: pointer;
+  text-align: left;
+}
+.roster-name { font-weight: 800; flex: 0 0 auto; }
+.roster-action { margin-left: auto; color: var(--muted); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+
+/* Society panel */
+.district-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.district-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid oklch(0.93 0.01 100);
+  font-size: .8rem;
+  color: var(--ink);
+}
+.district-row span { color: var(--muted); font-size: .74rem; }
+
+/* Economy panel */
+.item-list { display: grid; gap: 8px; }
+.item-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: .8rem;
+}
+.item-emoji { grid-row: 1 / span 2; font-size: 1.2rem; }
+.item-blurb { grid-column: 2; color: var(--muted); font-size: .72rem; }
+
+/* Tools panel */
+.tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: #f3ecd6;
+  border: 1px solid #d9cda9;
+  color: var(--ink);
+  font-size: .8rem;
+  font-weight: 700;
+  min-height: 64px;
+  cursor: pointer;
+}
+.tool-btn:disabled { opacity: .45; cursor: not-allowed; }
+.tool-emoji { font-size: 1.3rem; }
+.tool-note { font-size: .62rem; color: var(--muted); font-weight: 500; text-align: center; }
+
+/* Segmented settings toggle */
+.seg { display: flex; gap: 6px; }
+.seg .btn { flex: 1; }
+
+/* Dismissible, timed, bottom-anchored status messages — never the center */
+.msg-stack {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 62px);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  width: min(92vw, 440px);
+  max-height: 34vh;
+  overflow: hidden;
+  z-index: 25;
+  pointer-events: none;
+}
+.msg {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(26, 33, 22, .94);
+  color: #fff7df;
+  border: 1px solid rgba(255, 244, 208, .4);
+  border-radius: 12px;
+  padding: 10px 10px 10px 14px;
+  font-size: .84rem;
+  line-height: 1.35;
+  box-shadow: var(--card-shadow);
+  animation: msg-in .22s ease;
+}
+.msg-warn { border-color: rgba(240, 190, 90, .75); }
+.msg-text { flex: 1; min-width: 0; }
+.msg-close {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .14);
+  color: #fff7df;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+@keyframes msg-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 720px) {
+  .hud-panel {
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    width: auto;
+    bottom: calc(max(8px, env(safe-area-inset-bottom)) + 64px);
+    max-height: 38vh;
+  }
+  .hud-panel-compact { max-height: 180px; }
+  .hud-tabs {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: calc(100vw - 16px);
+    justify-content: space-between;
+  }
+  .hud-tab { flex: 1; padding: 10px 4px; font-size: .72rem; }
+  .msg-stack { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 60px); }
+}
+
+@media (pointer: coarse) {
+  .msg-close { width: 40px; height: 40px; }
+  .hud-tab { min-height: 48px; }
+  /* In classic mode the visible joystick owns the bottom-left corner —
+     lift the tab bar above it so the two never overlap. */
+  .app[data-control-mode='classic'] .hud-tabs {
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 118px);
+  }
+}
+
+/* ── Observer UI: society brief, relationships, society pulse data ── */
+
+/* People profile: wallet + the six bounded traits, always visible */
+.society-brief {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+.brief-chip {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: #d8ccb2;
+  border: 1px solid #c8b996;
+  color: #4b4339;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.brief-chip strong { color: #2d2a27; }
+
+/* Relationships (People expandable panel) */
+.relationships { margin-top: 10px; border-top: 1px solid #cabc9f; }
+.rel-list { display: grid; gap: 6px; margin-top: 4px; }
+.rel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #e2d8bd;
+  border-radius: 8px;
+  background: #f7f0dd;
+  font-size: .74rem;
+}
+.rel-name { font-weight: 800; color: #3f4334; flex: none; }
+.rel-facts { color: var(--muted); text-align: right; }
+
+/* Society pulse data rows (market, bonds, fears, events) */
+.market-list, .bond-list, .fear-list, .event-list { display: grid; gap: 6px; margin-top: 4px; }
+.market-row, .bond-row, .fear-row, .event-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #e2d8bd;
+  border-radius: 8px;
+  background: #f7f0dd;
+  font-size: .74rem;
+}
+.market-row .item-name { font-weight: 800; text-transform: capitalize; }
+.market-row .item-stock { color: var(--muted); }
+.market-row .item-price { color: #80532e; font-weight: 700; }
+.bond-trust, .fear-level { color: var(--muted); flex: none; }
+.event-row { justify-content: flex-start; color: #4b4339; }
+.event-row .event-tick { color: var(--muted); margin-right: 6px; flex: none; }
+.society-empty { font-size: .75rem; color: var(--muted); font-style: italic; }
+
+/* Tools: beneficial/harmful grouping keeps the warm dark palette */
+.tool-beneficial { border-color: #9cb87f; }
+.tool-beneficial .tool-emoji { filter: none; }
+.tool-harmful { border-color: #c98a6a; }
+.tool-harmful .tool-note { color: #8a5a3c; }

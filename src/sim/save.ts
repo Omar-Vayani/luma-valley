@@ -5,6 +5,7 @@ import type { WorldState } from './world'
 import { createUrbanState, type UrbanState } from './city'
 import type { ChemicalState } from './biochem'
 import { describeGenome, type Genome } from './genetics'
+import type { SocietySave } from './society'
 
 /**
  * Save — compact serialization for one player's whole world.
@@ -14,12 +15,12 @@ import { describeGenome, type Genome } from './genetics'
 export interface SaveData {
   version: 2
   seed: number
-  settings: { gentle: boolean }
+  settings: { gentle: boolean; societyInterval?: number }
   world: WorldState
   creatures: SavedCreature[]
   nextId: number
   time: number
-  extra?: { carriedId?: number | null }
+  extra?: { carriedId?: number | null; society?: SocietySave }
   player: {
     pos: { x: number; z: number }
     facingYaw: number
@@ -75,6 +76,9 @@ export interface CompactBrain {
 
 const r4 = (x: number) => Math.round(x * 10000) / 10000
 
+/** Journal entries persisted per creature (recent history; runtime keeps 60). */
+const SAVE_JOURNAL_CAP = 12
+
 function compactBrain(b: Brain): CompactBrain {
   return {
     config: { ...b.config },
@@ -127,7 +131,7 @@ export function buildSave(
       sleeping: c.sleeping,
       action: c.action,
       learnedWords: c.learnedWords,
-      journal: c.journal.map((j) => ({ ...j })),
+      journal: c.journal.slice(-SAVE_JOURNAL_CAP).map((j) => ({ ...j })),
       psyche: {
         memories: c.psyche.memories.map((m) => ({ trigger: m.trigger, intensity: Math.round(m.intensity * 100) / 100 })),
         baselineFear: Math.round(c.psyche.baselineFear * 100) / 100,
@@ -136,7 +140,7 @@ export function buildSave(
         lastDose: { ...c.lastDose },
       },
       mind: {
-        episodes: c.mind.episodes.map((e) => ({ id: e.id, kind: e.kind, pos: { ...e.pos }, entityId: e.entityId, valence: Math.round(e.valence * 100) / 100, intensity: Math.round(e.intensity * 100) / 100, tick: e.tick })),
+        episodes: c.mind.episodes.slice(-6).map((e) => ({ id: e.id, kind: e.kind, pos: { ...e.pos }, entityId: e.entityId, valence: Math.round(e.valence * 100) / 100, intensity: Math.round(e.intensity * 100) / 100, tick: e.tick })),
         affinity: { ...c.mind.affinity },
         curiosity: Math.round(c.mind.curiosity * 100) / 100,
       },

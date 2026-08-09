@@ -15,6 +15,7 @@ import { clamp, hashSeed, pick, type RNG } from './rng'
 import { createPsyche, psycheTick, traumatise, trustReaction, type PsycheState, type TraumaTrigger } from './trauma'
 import { applyItem, type ItemDef } from './items'
 import { createMind, dreadAt, remember, wantsToExplore, type MindState } from './mind'
+import type { SocialChoice } from './society'
 import {
   CITY_PLACES,
   createUrbanState,
@@ -41,6 +42,18 @@ export const ACTIONS = [
   'usePlace',
 ] as const
 export type Action = (typeof ACTIONS)[number]
+
+/**
+ * A throttled society decision applied as visible movement. The creature
+ * consumes exactly one intent from the society kernel per decision cycle;
+ * survival instincts and city goals always outrank it. The intent maps onto
+ * existing action labels (social = follow/approach, flee = flee) so the brain
+ * motor count — and therefore existing brains and soaks — stay deterministic.
+ */
+export interface SocietyIntent {
+  choice: SocialChoice
+  targetPos: Vec2 | null
+}
 
 export interface Vec2 {
   x: number
@@ -72,7 +85,10 @@ export interface CreatureCtx {
   discoverPlaces: (pos: Vec2) => CityPlace[]
   findPlace: (id: CityPlaceId) => CityPlace | null
   navigatePlace?: (id: CityPlaceId, pos: Vec2) => Vec2 | null
+  /** Route a movement target around building walls (optional; falls back to direct). */
+  navigateTarget?: (from: Vec2, target: Vec2) => Vec2 | null
   usePlace: (id: CityPlaceId, preferred: CityResource | null) => ItemDef | null
+  societyIntent?: SocietyIntent | null
 }
 
 export interface LearnedWord {
@@ -103,6 +119,8 @@ export class Creature {
   mind: MindState
   urban: UrbanState
   lastDose: Record<string, number> = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999, alcohol: -9999, nicotine: -9999, drug: -9999 }
+  /** Latest society intent (transient, overwritten each society decision). */
+  societyIntent: SocietyIntent | null = null
   private rngStore: RNG
 
   constructor(genome: Genome | null, rng: RNG, id: number, bornTick = 0, name?: string) {
@@ -333,8 +351,12 @@ export class Creature {
     }
     // Instinct overlay: hardwired survival drives guarantee baseline behavior
     // even before the neural net has learned anything. Learning refines it.
+    // Needs are compared by severity, not fixed order: critical thirst must
+    // beat mild hunger (a dying-of-thirst citizen shouldn't detour to eat).
     if (this.chem.fear > 0.6) this.action = 'flee'
     else if (this.chem.hunger > 0.72 && ctx.foodNear > 0.15) this.action = 'eat'
+    else if (this.chem.thirst > 0.85 && this.chem.hunger < 0.85 && ctx.waterNear > 0.15) this.action = 'drink'
+    else if (this.chem.thirst > 0.85 && this.chem.hunger < 0.85) this.action = 'toWater'
     else if (this.chem.hunger > 0.55) this.action = 'toFood'
     else if (this.chem.thirst > 0.72 && ctx.waterNear > 0.15) this.action = 'drink'
     else if (this.chem.thirst > 0.55) this.action = 'toWater'
@@ -354,7 +376,7 @@ export class Creature {
       withdrawal: withdrawalNeed,
     })
     if (!cityGoal && this.urban.currentGoal) cityGoal = this.urban.currentGoal
-    if (!cityGoal && (this.chem.hunger > 0.55 || this.chem.boredom > 0.5 || this.chem.loneliness > 0.5) && ctx.rng() < 0.018) {
+    if (!cityGoal && (this.chem.hunger > 0.55 || this.chem.boredom > 0.5 || this.chem.loneliness > 0.5 || this.chem.health < 0.5) && ctx.rng() < 0.018) {
       const unknown = CITY_PLACES.filter((place) => !this.urban.knownPlaces[place.id])
       if (unknown.length > 0) {
         cityGoal = unknown[Math.floor(ctx.rng() * unknown.length)].id
@@ -364,7 +386,22 @@ export class Creature {
     }
     if (cityGoal) {
       const place = ctx.findPlace(cityGoal)
-      this.action = place && this.dist(place.pos) <= 1.8 ? 'usePlace' : 'toPlace'
+      // A distant goal must not override food/water that is already at hand —
+      // otherwise a hungry citizen walks past a berry bush to reach the market.
+      const localFood = this.action === 'eat' && ctx.foodNear > 0.15
+      const localWater = this.action === 'drink' && ctx.waterNear > 0.15
+      // Near-lethal hunger must not be overridden by rest/water/social intents:
+      // only a destination that actually supplies food may take over a starving
+      // citizen. Critical thirst (with hunger under control) may only be
+      // overridden by a water destination.
+      const urgentHunger = this.chem.hunger > 0.8
+      const urgentThirst = this.chem.thirst > 0.8 && !urgentHunger
+      const goalSatisfiesUrgentNeed =
+        (urgentHunger && place?.provides.includes('bread')) ||
+        (urgentThirst && place?.provides.includes('water'))
+      if (!localFood && !localWater && !((urgentHunger || urgentThirst) && !goalSatisfiesUrgentNeed)) {
+        this.action = place && this.dist(place.pos) <= 1.8 ? 'usePlace' : 'toPlace'
+      }
     }
 
     // terrified creatures flee the player
@@ -373,6 +410,26 @@ export class Creature {
     // curiosity: explore when healthy and no urgent need
     if (this.chem.hunger < 0.5 && this.chem.thirst < 0.5 && this.chem.fatigue < 0.6 && wantsToExplore(this.mind, this.age, ctx.rng, this.chem.health > 0.6)) {
       this.action = 'wander'
+    }
+
+    // ── society intent: visible follow/flee/approach from the society kernel ──
+    // The kernel decides at a throttled cadence (~0.5 Hz); survival instincts,
+    // place goals, and terror of the player always outrank its intent. The
+    // intent persists on the creature until the next society decision.
+    const si = ctx.societyIntent
+    if (
+      si?.targetPos &&
+      this.action !== 'eat' &&
+      this.action !== 'drink' &&
+      this.action !== 'toFood' &&
+      this.action !== 'toWater' &&
+      this.action !== 'sleep' &&
+      this.action !== 'flee' &&
+      this.action !== 'usePlace' &&
+      this.action !== 'toPlace'
+    ) {
+      if (si.choice === 'flee') this.action = 'flee'
+      else this.action = 'social' // follow, share, trade, cooperate, fight all move via 'social'
     }
 
     this.execute(ctx)
@@ -384,8 +441,15 @@ export class Creature {
     const speed = 0.16 + this.traits.energy * 0.12
     switch (this.action) {
       case 'flee': {
-        // panic: run fast, turning hard
-        this.facing += (ctx.rng() - 0.5) * 0.55
+        // panic: run fast, turning hard; a society intent gives a direction (away from the feared npc)
+        const awayFrom = ctx.societyIntent?.targetPos
+        if (awayFrom) {
+          const away = Math.atan2(this.pos.z - awayFrom.z, this.pos.x - awayFrom.x)
+          const delta = Math.atan2(Math.sin(away - this.facing), Math.cos(away - this.facing))
+          this.facing += clamp(delta, -0.8, 0.8)
+        } else {
+          this.facing += (ctx.rng() - 0.5) * 0.55
+        }
         this.move(speed * 1.25, ctx)
         break
       }
@@ -400,7 +464,7 @@ export class Creature {
       case 'toFood': {
         const f = ctx.findFood()
         if (f) {
-          this.turnToward(f)
+          this.turnToward(ctx.navigateTarget?.(this.pos, f) ?? f)
           this.move(speed, ctx)
         } else this.action = 'wander'
         break
@@ -408,7 +472,7 @@ export class Creature {
       case 'eat': {
         const f = ctx.findFood()
         if (f) {
-          this.turnToward(f)
+          this.turnToward(ctx.navigateTarget?.(this.pos, f) ?? f)
           if (this.dist(f) < 1.2) {
             const effect = ctx.eatAt(f)
             if (effect) {
@@ -428,21 +492,25 @@ export class Creature {
       case 'toWater': {
         const w = ctx.findWater()
         if (w) {
-          this.turnToward(w)
+          this.turnToward(ctx.navigateTarget?.(this.pos, w) ?? w)
           this.move(speed, ctx)
         } else this.action = 'wander'
         break
       }
       case 'drink': {
         const w = ctx.findWater()
-        if (w && this.dist(w) < 1.2) {
-          applyFood(this.chem, FOOD_EFFECTS.water)
-          this.brain.reinforce(0.3)
-          this.action = 'wander'
-          this.actionTimer = 0
-        } else {
-          this.move(speed, ctx)
-        }
+        if (w) {
+          this.turnToward(ctx.navigateTarget?.(this.pos, w) ?? w)
+          if (this.dist(w) < 1.2) {
+            applyFood(this.chem, FOOD_EFFECTS.water)
+            this.brain.reinforce(0.3)
+            this.action = 'wander'
+            this.actionTimer = 0
+            this.log('drinks from the fountain')
+          } else {
+            this.move(speed, ctx)
+          }
+        } else this.action = 'wander'
         break
       }
       case 'sleep': {
@@ -499,6 +567,21 @@ export class Creature {
         break
       }
       case 'social': {
+        // a society intent supplies the target; otherwise approach a friend
+        const siTarget = ctx.societyIntent?.targetPos
+        if (siTarget) {
+          this.turnToward(siTarget)
+          const d = this.dist(siTarget)
+          if (ctx.societyIntent?.choice === 'follow') {
+            this.move(d > 2 ? speed * 0.9 : speed * 0.35, ctx)
+          } else if (d > 1.6) {
+            this.move(speed, ctx)
+          } else {
+            this.action = 'wander'
+            this.actionTimer = 0
+          }
+          break
+        }
         const friend = ctx.findFriend()
         if (friend) {
           this.turnToward(friend)

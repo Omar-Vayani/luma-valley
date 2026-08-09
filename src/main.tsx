@@ -7,3 +7,16 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 )
+
+// Installable PWA shell: register the service worker only in production
+// builds. The worker precaches the built shell and never sees Vite's dev/HMR
+// traffic, so development keeps working exactly as before.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register(`${import.meta.env.BASE_URL}sw.js`)
+      .catch((error: unknown) => {
+        console.warn('Service worker registration failed:', error)
+      })
+  })
+}

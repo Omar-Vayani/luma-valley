@@ -1,24 +1,55 @@
-import { useEffect, useRef, useState } from 'react'
-import { Game } from './sim/game'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Game, type OverseerTool, type SocietyEventView } from './sim/game'
 import { GameView } from './render/gameview'
 import type { InteractEvent } from './render/gameview'
 import { SoundEngine } from './audio/sfx'
 import { idbLoad, idbSave, exportSave } from './game/storage'
-import { activeQuest, questProgress } from './sim/quests'
 import { toggleTorch as toggleTorchFn } from './sim/player'
-import { ITEMS } from './sim/items'
 import { trustLabel, triggerName } from './sim/trauma'
 import type { SaveData } from './sim/save'
 import { CITY_WORLD_SIZE } from './sim/city-layout'
+import {
+  TOUCH_DEADZONE,
+  applyTouchLook,
+  touchMoveFromOrigin,
+  touchZoneAt,
+  type TouchControlMode,
+  type TouchMoveVec,
+} from './render/fps'
 
 import './index.css'
 
 const AUTOSAVE_KEY = 'autosave'
 const SLOTS = ['slot1', 'slot2', 'slot3']
+const CONTROL_MODE_KEY = 'luma:control-mode'
+const MESSAGE_MS = 5000
 
 type MenuState = 'closed' | 'menu' | 'journal'
+type HudTab = 'people' | 'society' | 'tools'
+type MoodKey = 'happy' | 'scared' | 'unwell' | 'calm'
 
-const MOOD = (pleasure: number, fear: number, health: number): string => {
+const HUD_TABS: ReadonlyArray<{ id: HudTab; label: string }> = [
+  { id: 'people', label: '👥 People' },
+  { id: 'society', label: '🏘 Society' },
+  { id: 'tools', label: '🛠 Tools' },
+]
+
+interface HudMessage {
+  id: number
+  text: string
+  kind: 'info' | 'warn'
+}
+
+/** Observer tool descriptor — each maps 1:1 to Game.useOverseerTool. */
+interface ToolAction {
+  id: OverseerTool
+  label: string
+  emoji: string
+  kind: 'beneficial' | 'harmful'
+  note: string
+}
+
+const MOOD = (pleasure: number, fear: number, health: number): MoodKey => {
   if (fear > 0.5) return 'scared'
   if (pleasure > 0.55) return 'happy'
   if (health < 0.35) return 'unwell'
@@ -40,17 +71,25 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
 
 const trustColor = (t: number): string => `hsl(${Math.round(Math.min(1, Math.max(0, t)) * 120)} 70% 45%)`
 
-const STORY_LINES: Record<string, string> = {
-  q1_feed: 'Warden: "Start at the Old Market. Every place in this city has a purpose."',
-  q2_teach: 'Warden: "Meet a citizen. Their choices come from needs, feelings, memory, and relationships."',
-  q3_berry: 'Warden: "Share market bread with a citizen and watch how trust changes."',
-  q4_torch: 'Warden: "Lantern Park offers rest, water, and company without a hidden cost."',
-  q5_light: 'Warden: "The Crooked Cup sells relief. Ale and cigarettes also damage judgment and create dependence."',
-  q6_adult: 'Warden: "The apothecary sells medicine. Citizens can learn to seek it when hurt."',
-  q7_shadow: 'Warden: "The back alley trades dream-dust. Citizens may learn to seek or avoid it from experience."',
-  q8_shrine: 'Warden: "The Watch Yard is a refuge. Frightened citizens remember safe places too."',
-  q9_birth: 'Warden: "Now observe. Citizens may share, argue, fight, reconcile, and raise a new generation."',
-  all: 'Omar: "You did it, Guardian. The old city lives again."',
+/** Map one society event to a readable observer line (Society tab). */
+function describeSocietyEvent(ev: SocietyEventView): string {
+  const act = ev.actor
+  const tgt = ev.target ? ` ${ev.target}` : ''
+  switch (ev.kind) {
+    case 'trade':
+      return ev.direction === 'buy'
+        ? `${act} buys ${ev.item ?? 'goods'}${tgt}${ev.money ? ` (−${Math.abs(ev.money)})` : ''}`
+        : `${act} sells ${ev.item ?? 'goods'}${tgt}${ev.money ? ` (+${ev.money})` : ''}`
+    case 'share': return `${act} shares ${ev.item ?? 'goods'} with ${ev.target ?? 'another citizen'}`
+    case 'cooperate': return `${act} cooperates with ${ev.target ?? 'another citizen'}`
+    case 'fight': return `${act} fights ${ev.target ?? 'another citizen'}`
+    case 'follow': return `${act} follows ${ev.target ?? 'another citizen'}`
+    case 'flee': return `${act} flees ${ev.target ?? 'a threat'}`
+    case 'hoard': return `${act} hoards goods`
+    case 'work': return `${act} works the yard`
+    case 'death': return `${act} has died`
+    default: return `${act} ${ev.kind}${tgt}`
+  }
 }
 
 export default function App() {
@@ -58,6 +97,8 @@ export default function App() {
   const gameRef = useRef<Game | null>(null)
   const viewRef = useRef<GameView | null>(null)
   const soundRef = useRef<SoundEngine | null>(null)
+  const msgIdRef = useRef(0)
+  const deathPushedRef = useRef<Set<number>>(new Set())
 
   const [started, setStarted] = useState(false)
   const [locked, setLocked] = useState(false)
@@ -67,14 +108,20 @@ export default function App() {
   const [gentle, setGentle] = useState(false)
   const [soundOn, setSoundOn] = useState(true)
   const [names, setNames] = useState(true)
-  const [toast, setToast] = useState<string | null>(null)
   const [word, setWord] = useState('')
   const [hasSave, setHasSave] = useState(false)
-  const [questText, setQuestText] = useState('')
-  const [storyDone, setStoryDone] = useState(false)
   const [exploring, setExploring] = useState(false)
   const [hasLooked, setHasLooked] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [hudTab, setHudTab] = useState<HudTab | null>(null)
+  const [messages, setMessages] = useState<HudMessage[]>([])
+  const [controlMode, setControlMode] = useState<TouchControlMode>(() => {
+    try {
+      return localStorage.getItem(CONTROL_MODE_KEY) === 'classic' ? 'classic' : 'split'
+    } catch {
+      return 'split'
+    }
+  })
   const isTouch = typeof window !== 'undefined' && (
     navigator.maxTouchPoints > 0 ||
     'ontouchstart' in window ||
@@ -82,6 +129,27 @@ export default function App() {
   )
 
   const inGame = locked || isTouch || exploring
+
+  const pushMessage = useCallback((text: string, kind: 'info' | 'warn' = 'info'): void => {
+    const id = ++msgIdRef.current
+    setMessages((prev) => [...prev.slice(-2), { id, text, kind }])
+    window.setTimeout(() => {
+      setMessages((prev) => prev.filter((m) => m.id !== id))
+    }, MESSAGE_MS)
+  }, [])
+
+  const dismissMessage = useCallback((id: number): void => {
+    setMessages((prev) => prev.filter((m) => m.id !== id))
+  }, [])
+
+  const changeControlMode = (mode: TouchControlMode): void => {
+    setControlMode(mode)
+    try {
+      localStorage.setItem(CONTROL_MODE_KEY, mode)
+    } catch {
+      /* noop */
+    }
+  }
 
   useEffect(() => {
     void idbLoad(AUTOSAVE_KEY).then((data) => setHasSave(!!data))
@@ -102,14 +170,15 @@ export default function App() {
 
     if (viewRef.current) viewRef.current.dispose()
     const view = new GameView(mountRef.current!, g, sound, {
-      onSelect: (id) => { setSelectedId(id); setDetailsOpen(false) },
+      onSelect: (id) => { setSelectedId(id); setDetailsOpen(false); if (id !== null) setHudTab('people') },
       onInteract: (ev) => handleInteract(ev),
       onLockChange: (l) => setLocked(l),
-      onQuestHint: (t) => setToast(t),
+      onQuestHint: (t) => pushMessage(t),
     })
     viewRef.current = view
     // Keep the mobile playfield unobstructed until the player selects a Luma.
     setSelectedId(null)
+    setHudTab(null)
     setHasLooked(false)
     setStarted(true)
     setTick((t) => t + 1)
@@ -156,36 +225,20 @@ export default function App() {
   const game = gameRef.current
   const selected = selectedId !== null ? game?.selectedCreature(selectedId) ?? null : null
   const alive = game?.creatures.filter((c) => c.alive).length ?? 0
-  const q = game?.quests
-  const quest = q ? activeQuest(q) : null
-  const progress = quest && q ? questProgress(q, quest.id) : 0
+  const profile = selectedId !== null ? game?.societyProfile(selectedId) ?? null : null
+  const summary = game?.societySummary() ?? null
+  const nameOf = (id: number): string => game?.creatures.find((c) => c.id === id)?.name ?? `citizen ${id}`
 
-  // quest text updates
-  useEffect(() => {
-    if (!quest) {
-      if (q?.completed.includes('q9_birth')) setQuestText(STORY_LINES.all)
-      else setQuestText('Free play — the old city is yours to explore.')
-      return
-    }
-    setQuestText(`${quest.title} — ${progress}/${quest.goal}${quest.blurb ? ` · ${quest.blurb}` : ''}`)
-    const line = STORY_LINES[quest.id]
-    if (line && !storyDone) {
-      setToast(line)
-      setStoryDone(true)
-    }
-  }, [quest?.id, progress, tick, q])
-
-  // death toast
+  // death messages (once per citizen)
   useEffect(() => {
     if (!game) return
-    const dead = game.creatures.filter((c) => !c.alive && c.journal.some((j) => j.text.includes('passes away')))
-    if (dead.length > 0) {
-      const last = dead[dead.length - 1]
-      if (last.journal[last.journal.length - 1]?.text.includes('passes away')) {
-        setToast(`${last.name} has passed away… the city mourns.`)
+    for (const c of game.creatures) {
+      if (!c.alive && c.journal.some((j) => j.text.includes('passes away')) && !deathPushedRef.current.has(c.id)) {
+        deathPushedRef.current.add(c.id)
+        pushMessage(`${c.name} has passed away… the city mourns.`, 'warn')
       }
     }
-  }, [tick, game])
+  }, [tick, game, pushMessage])
 
   const handleInteract = (ev: InteractEvent): void => {
     const g = gameRef.current
@@ -194,15 +247,11 @@ export default function App() {
       g.emit('lightShrine', 1)
       viewRef.current?.lightShrine()
       soundRef.current?.voice(0.8, 'happy')
-      setToast('You light the old watch fire. The city glows. ✨')
-    } else if (ev.kind === 'pickup' && ev.itemId) {
-      const item = ITEMS[ev.itemId as keyof typeof ITEMS]
-      setToast(`+1 ${item?.name ?? ev.itemId}`)
-      soundRef.current?.click()
+      pushMessage('You light the old watch fire. The city glows. ✨')
     } else if (ev.kind === 'creature' && ev.creatureId != null) {
       const c = g.selectedCreature(ev.creatureId)
       g.emit('meetCitizen', 1)
-      if (c?.alive) setToast(`${c.name} is ${MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}. Care actions are now open.`)
+      if (c?.alive) pushMessage(`${c.name} is ${MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}. Care actions are now open.`)
     } else if (ev.kind === 'place' && ev.placeId) {
       const result = g.visitPlace(ev.placeId)
       if (ev.placeId === 'market') g.emit('visitMarket', 1)
@@ -211,12 +260,11 @@ export default function App() {
       else if (ev.placeId === 'apothecary') g.emit('visitApothecary', 1)
       else if (ev.placeId === 'back-alley') g.emit('visitAlley', 1)
       else if (ev.placeId === 'watch') g.emit('visitWatch', 1)
-      setToast(result.msg)
+      pushMessage(result.msg)
       soundRef.current?.click()
     }
     setTick((t) => t + 1)
   }
-
 
   const act = (fn: () => boolean | void, snd?: () => void): void => {
     fn()
@@ -224,11 +272,16 @@ export default function App() {
     setTick((t) => t + 1)
   }
 
-  const feedSelected = (): void => {
+  /** Apply one of the six overseer tools to the focused citizen. */
+  const useTool = (tool: OverseerTool): void => {
     if (!game || !selected) return
-    const result = game.giveItem(selected.id, 'bread')
-    setToast(result.msg)
-    if (result.ok) soundRef.current?.munch()
+    const result = game.useOverseerTool(selected.id, tool)
+    pushMessage(result.msg)
+    if (result.ok) {
+      if (tool === 'feed' || tool === 'heal' || tool === 'amuse') soundRef.current?.munch()
+      else if (tool === 'comfort') soundRef.current?.voice(selected.traits.voicePitch, 'happy')
+      else soundRef.current?.voice(selected.traits.voicePitch, 'sad')
+    }
     setTick((t) => t + 1)
   }
 
@@ -236,21 +289,40 @@ export default function App() {
     viewRef.current?.interact()
   }
 
+  const applyMoveVec = (vec: TouchMoveVec): void => {
+    const fps = viewRef.current?.fps
+    if (!fps) return
+    fps.setInput('KeyW', vec.fwd > 0)
+    fps.setInput('KeyS', vec.fwd < 0)
+    fps.setInput('KeyA', vec.side < 0)
+    fps.setInput('KeyD', vec.side > 0)
+  }
+
+  const handleTouchLook = (dx: number, dy: number): void => {
+    const delta = applyTouchLook(dx, dy)
+    viewRef.current?.fps.applyLook(delta.dx, delta.dy)
+    if (!hasLooked) setHasLooked(true)
+  }
+
+  const joystickMove = (x: number, y: number): void => {
+    const fps = viewRef.current?.fps
+    if (!fps) return
+    // y: -1 (up/forward) .. 1 (down/back), x: -1 (left) .. 1 (right)
+    const fwd = y < 0 ? -y : 0
+    const back = y > 0 ? y : 0
+    fps.setInput('KeyW', fwd > TOUCH_DEADZONE)
+    fps.setInput('KeyS', back > TOUCH_DEADZONE)
+    fps.setInput('KeyA', x < -TOUCH_DEADZONE)
+    fps.setInput('KeyD', x > TOUCH_DEADZONE)
+  }
+
+  const closeHud = (): void => setHudTab(null)
+
   const dayLabel =
     game && game.world.state.dayTime > 0.75 ? '🌙 night'
     : game && game.world.state.dayTime > 0.35 ? '🌞 day'
       : '🌅 dawn'
 
-  const inventory = game?.player.inventory
-  const ownedItems = game ? Object.values(ITEMS).filter((item) => (game.player.inventory.items[item.id] ?? 0) > 0) : []
-
-  const itemCounts =
-    inventory?.items
-      ? (Object.keys(ITEMS) as (keyof typeof ITEMS)[])
-          .filter((id) => (inventory.items[id] ?? 0) > 0)
-          .map((id) => `${ITEMS[id].emoji}${inventory.items[id]}`)
-          .join(' ')
-      : ''
   const selectedNeeds = selected ? [
     { label: 'hunger', value: selected.chem.hunger, color: '#e8876a' },
     { label: 'thirst', value: selected.chem.thirst, color: '#64aeca' },
@@ -268,13 +340,34 @@ export default function App() {
     judgment?: number
   } }).urban : undefined
 
+  const moodCounts: Record<string, number> = { happy: 0, scared: 0, unwell: 0, calm: 0 }
+  for (const c of game?.creatures ?? []) {
+    if (!c.alive) continue
+    moodCounts[MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)] += 1
+  }
+
+  const toolActions: ToolAction[] = [
+    { id: 'feed', label: 'Feed', emoji: '🍞', kind: 'beneficial', note: 'eases hunger, builds trust' },
+    { id: 'heal', label: 'Heal', emoji: '💊', kind: 'beneficial', note: 'restores health, eases pain' },
+    { id: 'comfort', label: 'Comfort', emoji: '💛', kind: 'beneficial', note: 'calms fear and loneliness' },
+    { id: 'amuse', label: 'Amuse', emoji: '🎵', kind: 'beneficial', note: 'lifts boredom and gloom' },
+    { id: 'stick', label: 'Stick', emoji: '🪵', kind: 'harmful', note: 'pain and fear — witnesses remember' },
+    { id: 'whip', label: 'Whip', emoji: '⚡', kind: 'harmful', note: 'severe harm; repeated lashing can kill' },
+  ]
+
+  const closePeople = (): void => {
+    setHudTab(null)
+    setSelectedId(null)
+    viewRef.current?.select(null)
+  }
+
   return (
-    <div className="app">
+    <div className="app" data-game data-control-mode={controlMode}>
       <div className="mount" ref={mountRef} />
 
       {/* FPV intro overlay */}
       {started && !inGame && (
-        <div className="fpv-hint">
+        <div className="fpv-hint" data-fpv-hint>
           <p><strong>Click to enter the old city</strong></p>
           <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · move mouse to look · arrows/Q/E also look · Space to jump'}</p>
           <button className="btn" onClick={() => {
@@ -291,196 +384,384 @@ export default function App() {
         </div>
       )}
 
-      <header className="topbar">
+      {/* Minimal top status strip */}
+      <header className="topbar" data-status-strip>
         <h1 className="logo">Luma · Old City</h1>
         <div className="topbar-right">
-          <span className="pill">🕊 {alive}</span>
-          <span className="pill">{dayLabel}</span>
-          <span className="pill">🧺 {itemCounts || 'empty'} · 🔥 {inventory?.torch ?? 0}</span>
-          <button className="icon-btn" onClick={() => setMenu('menu')} aria-label="Menu">☰</button>
+          <span className="pill" data-status="population">🕊 {alive}</span>
+          <span className="pill" data-status="day">{dayLabel}</span>
+          <button className="icon-btn" onClick={() => setMenu('menu')} aria-label="Menu" data-hud="menu">☰</button>
         </div>
       </header>
 
-      {/* Quest tracker */}
-      {started && quest && (
-        <div className="quest-tracker">
-          <span className="quest-copy"><strong>{quest.title}</strong><small>{quest.blurb}</small></span>
-          <span className="quest-progress">{progress}/{quest.goal}</span>
+      {/* Crosshair — the center camera prompt; notifications never cover it */}
+      {inGame && <div className={`crosshair ${interactionFocus ? `has-focus focus-${interactionFocus.kind}` : ''}`} data-crosshair data-focus={interactionFocus?.kind ?? 'none'} />}
+
+      {interactionHint && (
+        <div className="interaction-prompt focus-chip" data-focus-chip>
+          ✦ {interactionHint} · {Math.round(interactionFocus?.distance ?? 0)}m · {isTouch ? 'tap or use hand' : 'click or F'}
         </div>
       )}
-      {started && !quest && <div className="quest-tracker quest-done">✦ {questText}</div>}
 
-      {/* Crosshair — always visible so the player can see where they're looking */}
-      {inGame && <div className={`crosshair ${interactionFocus ? `has-focus focus-${interactionFocus.kind}` : ''}`} />}
+      {/* Invisible split touch controls (default): left half moves from
+          touch-origin displacement, right half looks. No joystick clutter. */}
+      {isTouch && inGame && controlMode === 'split' && (
+        <TouchSplitSurface onMoveVec={applyMoveVec} onLook={handleTouchLook} onTap={interact} />
+      )}
 
-      {/* Full-screen LOOK SURFACE (touch): same synthetic events as the joystick.
-          Drag anywhere to move the world under your finger; tap to interact. */}
-      {isTouch && inGame && (
-        <LookSurface
-          onLook={(dx, dy) => {
-            // Touch uses direct manipulation: dragging right pans the world right.
-            // Desktop input still routes directly to FPSControls unchanged.
-            viewRef.current?.fps.applyLook(-dx * 1.6, dy * 1.6)
-            if (!hasLooked) setHasLooked(true)
-          }}
-          onTap={interact}
-        />
+      {/* Classic fallback: visible joystick + full-screen look surface */}
+      {isTouch && inGame && controlMode === 'classic' && (
+        <>
+          <LookSurface marker="classic" onLook={handleTouchLook} onTap={interact} />
+          <Joystick onMove={joystickMove} />
+        </>
       )}
 
       {isTouch && inGame && !hasLooked && (
-        <div className="control-tip">Drag the street to look around<br /><span>The city follows your finger</span></div>
+        <div className="control-tip" data-control-tip>Drag the street to look around<br /><span>The city follows your finger</span></div>
       )}
 
-      {interactionHint && <div className="interaction-prompt focus-chip">✦ {interactionHint} · {Math.round(interactionFocus?.distance ?? 0)}m · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
-
-      {/* City survival quick actions */}
-      {started && inGame && !toast && (
-        <div className="quickbar">
-          <button
-            className={`btn btn-small ${game?.player.torchLit ? 'btn-active' : ''}`}
-            onClick={() => act(() => { if (game) toggleTorchFn(game.player) })}
-          >
-            🔥 {game?.player.torchLit ? 'Torch on' : 'Torch off'}
-          </button>
-          <button className="btn btn-small" onClick={() => setToast('Districts: Market = food · Park = recovery · Tavern = substances · Apothecary = medicine · Alley = danger · Watch = safety')}>🗺 City guide</button>
-        </div>
+      {/* Touch action buttons — 48px targets, above the gesture surface */}
+      {isTouch && inGame && (
+        <button className="interact-btn" data-touch-btn="interact" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label="Interact">
+          🤲<span>{interactionFocus ? `${interactionFocus.kind === 'creature' ? 'Meet' : 'Visit'} ${interactionFocus.name}` : 'Walk closer'}</span>
+        </button>
+      )}
+      {isTouch && inGame && (
+        <button
+          className="jump-btn"
+          data-touch-btn="jump"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            viewRef.current?.fps.jump()
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            viewRef.current?.fps.jump()
+          }}
+        >
+          ⬆
+        </button>
       )}
 
-      {/* Selected creature panel */}
-      {started && selected && (
-        <aside className={`panel action-palette ${detailsOpen ? 'panel-expanded' : 'panel-compact'}`}>
-          <div className="panel-head">
-            <h2>{selected.name}</h2>
-            <span className={`mood mood-${MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}`}>
-              {MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}
-            </span>
-            <button className="panel-close" aria-label="Close creature care" onClick={() => { setSelectedId(null); viewRef.current?.select(null) }}>×</button>
-          </div>
-          <p className="age">age {Math.floor(selected.age / 100)} · {selected.alive ? selected.action : 'deceased'}</p>
-          {selected.alive && <div className="drive-chips">
-            {selectedNeeds.slice(0, 3).map((need) => <span className="drive-chip" key={need.label}>{need.label} {Math.round(need.value * 100)}</span>)}
-            {urban?.currentGoal && <span className="drive-chip">goal {urban.currentGoal}</span>}
-          </div>}
-          {selected.alive && <button className="details-toggle" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'Hide mind & memories' : 'Mind, memories & teaching'}</button>}
-          {selected.alive && (
+      {/* Expandable HUD tabs */}
+      {started && inGame && (
+        <nav className="hud-tabs" data-hud-tabs aria-label="HUD panels">
+          {HUD_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              className={`hud-tab ${hudTab === tab.id ? 'hud-tab-active' : ''}`}
+              data-hud-tab={tab.id}
+              aria-pressed={hudTab === tab.id}
+              onClick={() => setHudTab(hudTab === tab.id ? null : tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* Expandable HUD panels */}
+      {started && inGame && hudTab === 'people' && (
+        <section className={`hud-panel ${detailsOpen ? 'hud-panel-expanded' : 'hud-panel-compact'}`} data-panel="people">
+          {selected ? (
             <>
-              <p className="needs-label">Needs · most urgent first</p>
-              {selectedNeeds.map((need) => <Bar key={need.label} {...need} />)}
-              <Bar label="health" value={selected.chem.health} color="#7fc27a" />
-              {urban && (
-                <section className="city-mind" aria-label="City cognition">
-                  <span className="psyche-sub">city cognition</span>
-                  <div className="emotion-row">
-                    {Object.entries(urban.emotions ?? {}).map(([name, value]) => (
-                      <span className="emotion-chip" key={name}>{name} {Math.round((value ?? 0) * 100)}</span>
-                    ))}
-                  </div>
-                  <p className="city-facts">
-                    goal <strong>{urban.currentGoal ?? 'none'}</strong> · judgment <strong>{Math.round((urban.judgment ?? 1) * 100)}</strong> · knows <strong>{Object.keys(urban.knownPlaces ?? {}).length}</strong> places · carrying <strong>{urban.carriedItem ?? 'nothing'}</strong>
-                  </p>
-                </section>
+              <div className="panel-head">
+                <h2>{selected.name}</h2>
+                <span className={`mood mood-${MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}`}>
+                  {MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}
+                </span>
+                <button className="panel-close" aria-label="Close citizen panel" onClick={closePeople}>×</button>
+              </div>
+              <p className="age">age {Math.floor(selected.age / 100)} · {selected.alive ? selected.action : 'deceased'}</p>
+              {selected.alive && profile && (
+                <div className="society-brief" data-society-brief>
+                  <span className="brief-chip">🪙 {profile.wallet}</span>
+                  <span className="brief-chip">trust <strong>{Math.round(profile.traits.trust * 100)}</strong></span>
+                  <span className="brief-chip">attach <strong>{Math.round(profile.traits.attachment * 100)}</strong></span>
+                  <span className="brief-chip">love <strong>{Math.round(profile.traits.love * 100)}</strong></span>
+                  <span className="brief-chip">betrayal <strong>{Math.round(profile.traits.betrayal * 100)}</strong></span>
+                  <span className="brief-chip">fear <strong>{Math.round(profile.traits.fear * 100)}</strong></span>
+                  <span className="brief-chip">greed <strong>{Math.round(profile.traits.greed * 100)}</strong></span>
+                </div>
               )}
-              <div className="trust">
-                <span className={`trust-tag trust-${trustLabel(selected.psyche.trust)}`}>❤ {trustLabel(selected.psyche.trust)}</span>
-                <div className="bar-track trust-track">
-                  <div className="bar-fill" style={{ width: `${Math.round(Math.min(1, Math.max(0, selected.psyche.trust)) * 100)}%`, background: trustColor(selected.psyche.trust) }} />
-                </div>
-              </div>
-              <div className="traumas">
-                <span className="psyche-sub">traumas</span>
-                {selected.psyche.memories.length > 0 ? (
-                  <div className="trauma-list">
-                    {selected.psyche.memories.map((m) => (
-                      <span key={m.id} className="chip trauma-chip">😱 {triggerName(m.trigger)} · {Math.round(m.intensity * 100)}%</span>
-                    ))}
+              {selected.alive && <div className="drive-chips">
+                {selectedNeeds.slice(0, 3).map((need) => <span className="drive-chip" key={need.label}>{need.label} {Math.round(need.value * 100)}</span>)}
+                {urban?.currentGoal && <span className="drive-chip">goal {urban.currentGoal}</span>}
+              </div>}
+              {selected.alive && <button className="details-toggle" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'Hide mind, memories & relationships' : 'Mind, memories & relationships'}</button>}
+              {selected.alive && (
+                <>
+                  {profile && profile.relationships.length > 0 && (
+                    <section className="relationships" aria-label="Relationships">
+                      <span className="psyche-sub">relationships</span>
+                      <div className="rel-list">
+                        {profile.relationships.map((r) => (
+                          <div key={r.otherId} className="rel-row" data-rel={r.otherName}>
+                            <span className="rel-name">{r.otherName}</span>
+                            <span className="rel-facts">trust {Math.round(r.trust * 100)} · attach {Math.round(r.attachment * 100)} · love {Math.round(r.love * 100)} · betrayal {Math.round(r.betrayal * 100)} · fear {Math.round(r.fear * 100)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                  {profile && profile.relationships.length === 0 && (
+                    <span className="trauma-empty">no bonds yet — relationships form as citizens meet.</span>
+                  )}
+                  <p className="needs-label">Needs · most urgent first</p>
+                  {selectedNeeds.map((need) => <Bar key={need.label} {...need} />)}
+                  <Bar label="health" value={selected.chem.health} color="#7fc27a" />
+                  {urban && (
+                    <section className="city-mind" aria-label="City cognition">
+                      <span className="psyche-sub">city cognition</span>
+                      <div className="emotion-row">
+                        {Object.entries(urban.emotions ?? {}).map(([name, value]) => (
+                          <span className="emotion-chip" key={name}>{name} {Math.round((value ?? 0) * 100)}</span>
+                        ))}
+                      </div>
+                      <p className="city-facts">
+                        goal <strong>{urban.currentGoal ?? 'none'}</strong> · judgment <strong>{Math.round((urban.judgment ?? 1) * 100)}</strong> · knows <strong>{Object.keys(urban.knownPlaces ?? {}).length}</strong> places · carrying <strong>{urban.carriedItem ?? 'nothing'}</strong>
+                      </p>
+                    </section>
+                  )}
+                  <div className="trust">
+                    <span className={`trust-tag trust-${trustLabel(selected.psyche.trust)}`}>❤ {trustLabel(selected.psyche.trust)}</span>
+                    <div className="bar-track trust-track">
+                      <div className="bar-fill" style={{ width: `${Math.round(Math.min(1, Math.max(0, selected.psyche.trust)) * 100)}%`, background: trustColor(selected.psyche.trust) }} />
+                    </div>
                   </div>
-                ) : (
-                  <span className="trauma-empty">no lasting fears yet</span>
-                )}
-              </div>
-              <div className="actions">
-                <button className="btn" onClick={() => {
-                  const result = game?.greet(selected.id)
-                  if (result) setToast(result.msg)
-                  soundRef.current?.voice(selected.traits.voicePitch, 'happy')
-                  setTick((t) => t + 1)
-                }}>👋 Greet</button>
-                <button className="btn" onClick={feedSelected}>🍞 Share bread ({game?.player.inventory.items.bread ?? 0})</button>
-                <button className="btn" onClick={() => act(() => game?.tickle(selected.id), () => soundRef.current?.voice(selected.traits.voicePitch, 'happy'))}>💛 Comfort / play</button>
-                <button
-                  className={`btn ${game?.carriedId === selected.id ? 'btn-active' : ''}`}
-                  onClick={() => {
-                    const next = game?.carriedId === selected.id ? null : selected.id
-                    if (next === null && game) {
-                      act(() => {
-                        const r = game.dropCarried()
-                        setToast(r.msg)
-                      })
-                    } else {
-                      game?.setCarried(next ?? null)
-                    }
-                    viewRef.current?.select(next)
-                    setTick((t) => t + 1)
-                  }}
-                >
-                  {game?.carriedId === selected.id ? '🧺 Put down' : '🤲 Carry'}
-                </button>
-              </div>
-              <div className="teach">
-                <input
-                  value={word}
-                  onChange={(e) => setWord(e.target.value)}
-                  placeholder="teach a word…"
-                  maxLength={20}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && word.trim()) {
-                      act(() => game?.speak(selected.id, word.trim()))
-                      setWord('')
-                    }
-                  }}
-                />
-                <button className="btn btn-small" onClick={() => { act(() => game?.speak(selected.id, word.trim() || 'come')); setWord('') }}>Speak</button>
-                <div className="teach-hints">
-                  {['food', 'water', 'come'].map((w) => (
-                    <button key={w} className="chip" onClick={() => act(() => game?.teach(selected.id, w, w === 'food' ? 'food' : w === 'water' ? 'water' : 'come'))}>+ {w}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="give">
-                <span className="psyche-sub">give</span>
-                <div className="give-list">
-                  {ownedItems.map((item) => (
+                  <div className="traumas">
+                    <span className="psyche-sub">traumas</span>
+                    {selected.psyche.memories.length > 0 ? (
+                      <div className="trauma-list">
+                        {selected.psyche.memories.map((m) => (
+                          <span key={m.id} className="chip trauma-chip">😱 {triggerName(m.trigger)} · {Math.round(m.intensity * 100)}%</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="trauma-empty">no lasting fears yet</span>
+                    )}
+                  </div>
+                  <div className="actions">
+                    <button className="btn" onClick={() => {
+                      const result = game?.greet(selected.id)
+                      if (result) pushMessage(result.msg)
+                      soundRef.current?.voice(selected.traits.voicePitch, 'happy')
+                      setTick((t) => t + 1)
+                    }}>👋 Greet</button>
+                    <button className="btn" onClick={() => useTool('comfort')}>💛 Comfort</button>
                     <button
-                      key={item.id}
-                      className="btn btn-small give-btn"
-                      onClick={() => act(() => {
-                        const r = game?.giveItem(selected.id, item.id)
-                        if (r) setToast(r.msg)
-                      }, () => soundRef.current?.munch())}
+                      className={`btn ${game?.carriedId === selected.id ? 'btn-active' : ''}`}
+                      onClick={() => {
+                        const next = game?.carriedId === selected.id ? null : selected.id
+                        if (next === null && game) {
+                          act(() => {
+                            const r = game.dropCarried()
+                            pushMessage(r.msg)
+                          })
+                        } else {
+                          game?.setCarried(next ?? null)
+                        }
+                        viewRef.current?.select(next)
+                        setTick((t) => t + 1)
+                      }}
                     >
-                      {item.emoji} {item.name} ({game?.player.inventory.items[item.id] ?? 0})
+                      {game?.carriedId === selected.id ? '🧺 Put down' : '🤲 Carry'}
                     </button>
-                  ))}
-                  {ownedItems.length === 0 && <span className="trauma-empty">your pouch is empty — search the city</span>}
-                </div>
+                  </div>
+                  <div className="teach">
+                    <input
+                      value={word}
+                      onChange={(e) => setWord(e.target.value)}
+                      placeholder="teach a word…"
+                      maxLength={20}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && word.trim()) {
+                          act(() => game?.speak(selected.id, word.trim()))
+                          setWord('')
+                        }
+                      }}
+                    />
+                    <button className="btn btn-small" onClick={() => { act(() => game?.speak(selected.id, word.trim() || 'come')); setWord('') }}>Speak</button>
+                    <div className="teach-hints">
+                      {['food', 'water', 'come'].map((w) => (
+                        <button key={w} className="chip" onClick={() => act(() => game?.teach(selected.id, w, w === 'food' ? 'food' : w === 'water' ? 'water' : 'come'))}>+ {w}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="psyche-actions">
+                    <button className="btn btn-ghost" onClick={() => setMenu('journal')}>📖 Life journal</button>
+                  </div>
+                </>
+              )}
+              {!selected.alive && <p className="grave-note">Resting in the old city. Their life is remembered.</p>}
+            </>
+          ) : (
+            <>
+              <div className="panel-head">
+                <h2>People</h2>
+                <button className="panel-close" aria-label="Close people panel" onClick={closeHud}>×</button>
               </div>
-              <div className="psyche-actions">
-                <button
-                  className="btn btn-danger btn-small"
-                  onClick={() => act(() => {
-                    const r = game?.scareCreature(selected.id)
-                    if (r) setToast(r.msg)
-                  }, () => soundRef.current?.voice(selected.traits.voicePitch, 'sad'))}
-                >
-                  😱 Scare
-                </button>
-                <button className="btn btn-ghost" onClick={() => setMenu('journal')}>📖 Life journal</button>
+              <div className="roster" data-roster>
+                {(game?.creatures.filter((c) => c.alive) ?? []).map((c) => (
+                  <button
+                    key={c.id}
+                    className="roster-row"
+                    data-roster-id={c.id}
+                    onClick={() => {
+                      viewRef.current?.select(c.id)
+                      setSelectedId(c.id)
+                      setDetailsOpen(false)
+                    }}
+                  >
+                    <span className="roster-name">{c.name}</span>
+                    <span className={`mood mood-${MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}`}>{MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}</span>
+                    <span className={`trust-tag trust-${trustLabel(c.psyche.trust)}`}>{trustLabel(c.psyche.trust)}</span>
+                    <span className="roster-action">{c.action}</span>
+                  </button>
+                ))}
+                {(game?.creatures.filter((c) => c.alive) ?? []).length === 0 && (
+                  <p className="trauma-empty">No living citizens yet — the city is still quiet.</p>
+                )}
               </div>
             </>
           )}
-          {!selected.alive && <p className="grave-note">Resting in the old city. Their life is remembered.</p>}
-        </aside>
+        </section>
       )}
+
+      {started && inGame && hudTab === 'society' && (
+        <section className="hud-panel" data-panel="society">
+          <div className="panel-head">
+            <h2>Society</h2>
+            <button className="panel-close" aria-label="Close society panel" onClick={closeHud}>×</button>
+          </div>
+          <p className="city-facts" data-society="pulse">🕊 {alive} living · {summary?.population ?? game?.creatures.length ?? 0} remembered · {dayLabel}</p>
+          <h3 className="psyche-sub">city pulse</h3>
+          <div className="emotion-row">
+            {(['happy', 'scared', 'unwell', 'calm'] as const).map((m) => (
+              <span key={m} className={`emotion-chip mood-${m}`} data-society-mood={m}>{m} {moodCounts[m]}</span>
+            ))}
+          </div>
+          <h3 className="psyche-sub">market</h3>
+          {(summary?.market.length ?? 0) > 0 ? (
+            <div className="market-list" data-society="market">
+              {summary!.market.map((m) => (
+                <div key={m.item} className="market-row" data-market-item={m.item}>
+                  <span className="item-name">{m.item}</span>
+                  <span className="item-stock">{m.stock}/{m.maxStock}</span>
+                  <span className="item-price">{m.price}¢</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="society-empty">market quiet — citizens are trading.</span>
+          )}
+          <h3 className="psyche-sub">strongest bonds</h3>
+          {(summary?.bonds.length ?? 0) > 0 ? (
+            <div className="bond-list" data-society="bonds">
+              {summary!.bonds.map((b) => (
+                <div key={`${b.a}-${b.b}`} className="bond-row">
+                  <span>{nameOf(b.a)} ↔ {nameOf(b.b)}</span>
+                  <span className="bond-trust">trust {Math.round(b.trust * 100)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="society-empty">no strong bonds yet.</span>
+          )}
+          <h3 className="psyche-sub">fears & conflicts</h3>
+          {(summary?.fears.length ?? 0) > 0 ? (
+            <div className="fear-list" data-society="fears">
+              {summary!.fears.map((f) => (
+                <div key={`${f.a}-${f.b}`} className="fear-row">
+                  <span>{nameOf(f.a)} fears {nameOf(f.b)}</span>
+                  <span className="fear-level">fear {Math.round(f.fear * 100)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="society-empty">no active feuds.</span>
+          )}
+          <h3 className="psyche-sub">recent events</h3>
+          {(summary?.recentEvents.length ?? 0) > 0 ? (
+            <div className="event-list" data-society="events">
+              {[...summary!.recentEvents].reverse().map((ev, i) => (
+                <div key={`${ev.tick}-${i}`} className="event-row" data-event={ev.kind}>
+                  <span className="event-tick">t{ev.tick}</span>
+                  <span>{describeSocietyEvent(ev)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="society-empty">the city is still settling in.</span>
+          )}
+        </section>
+      )}
+
+      {started && inGame && hudTab === 'tools' && (
+        <section className="hud-panel" data-panel="tools">
+          <div className="panel-head">
+            <h2>Tools</h2>
+            <button className="panel-close" aria-label="Close tools panel" onClick={closeHud}>×</button>
+          </div>
+          <h3 className="psyche-sub">utility</h3>
+          <div className="tool-grid">
+            <button className="tool-btn" data-tool="torch" data-tool-ready="true" onClick={() => act(() => { if (game) toggleTorchFn(game.player) })}>
+              <span className="tool-emoji">🔥</span>
+              <span className="tool-label">{game?.player.torchLit ? 'Torch on' : 'Torch off'}</span>
+            </button>
+          </div>
+          {selected?.alive ? (
+            <>
+              <h3 className="psyche-sub">beneficial</h3>
+              <div className="tool-grid" data-tools="beneficial">
+                {toolActions.filter((tool) => tool.kind === 'beneficial').map((tool) => (
+                  <button
+                    key={tool.id}
+                    className="tool-btn tool-beneficial"
+                    data-tool={tool.id}
+                    data-tool-ready="true"
+                    onClick={() => useTool(tool.id)}
+                  >
+                    <span className="tool-emoji">{tool.emoji}</span>
+                    <span className="tool-label">{tool.label}</span>
+                    <span className="tool-note">{tool.note}</span>
+                  </button>
+                ))}
+              </div>
+              <h3 className="psyche-sub">harmful</h3>
+              <div className="tool-grid" data-tools="harmful">
+                {toolActions.filter((tool) => tool.kind === 'harmful').map((tool) => (
+                  <button
+                    key={tool.id}
+                    className="tool-btn tool-harmful"
+                    data-tool={tool.id}
+                    data-tool-ready="true"
+                    onClick={() => useTool(tool.id)}
+                  >
+                    <span className="tool-emoji">{tool.emoji}</span>
+                    <span className="tool-label">{tool.label}</span>
+                    <span className="tool-note">{tool.note}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="hint" data-tools="empty">Focus a citizen to open tools — feed, heal, comfort, amuse, and the harsher overseer actions.</p>
+          )}
+          <p className="hint">Tools report immediate effect and social consequence. Cruelty is remembered by witnesses.</p>
+        </section>
+      )}
+
+      {/* Dismissible, timed, bottom-anchored status messages — never on the crosshair */}
+      <div className="msg-stack" data-msg-stack>
+        {messages.map((m) => (
+          <div key={m.id} className={`msg msg-${m.kind}`} data-message data-message-kind={m.kind}>
+            <span className="msg-text">{m.text}</span>
+            <button className="msg-close" aria-label="Dismiss message" onClick={() => dismissMessage(m.id)}>×</button>
+          </div>
+        ))}
+      </div>
 
       {/* Start overlay */}
       {!started && (
@@ -516,11 +797,29 @@ export default function App() {
               <span>Show name labels</span>
               <input type="checkbox" checked={names} onChange={(e) => { setNames(e.target.checked); viewRef.current?.setShowNames(e.target.checked) }} />
             </label>
+            {isTouch && (
+              <div className="row" data-setting="control-mode">
+                <span>Touch controls</span>
+                <div className="seg" role="group" aria-label="Touch controls">
+                  <button
+                    className={`btn btn-small ${controlMode === 'split' ? 'btn-active' : 'btn-ghost'}`}
+                    data-value="split"
+                    onClick={() => changeControlMode('split')}
+                  >Invisible split</button>
+                  <button
+                    className={`btn btn-small ${controlMode === 'classic' ? 'btn-active' : 'btn-ghost'}`}
+                    data-value="classic"
+                    onClick={() => changeControlMode('classic')}
+                  >Classic joystick</button>
+                </div>
+              </div>
+            )}
+            {isTouch && <p className="hint">Split: left thumb walks, right thumb looks. Classic shows the joystick ring.</p>}
             <h3>Saves</h3>
             <div className="save-rows">
               {SLOTS.map((slot, i) => (
                 <div className="save-row" key={slot}>
-                  <button className="btn btn-small" onClick={() => game && void idbSave(slot, game.save()).then(() => setToast(`saved to slot ${i + 1}`))}>Save {i + 1}</button>
+                  <button className="btn btn-small" onClick={() => game && void idbSave(slot, game.save()).then(() => pushMessage(`saved to slot ${i + 1}`))}>Save {i + 1}</button>
                   <button className="btn btn-small btn-ghost" onClick={() => void idbLoad(slot).then((d) => d && loadGame(d))}>Load {i + 1}</button>
                 </div>
               ))}
@@ -532,12 +831,13 @@ export default function App() {
                     const f = e.target.files?.[0]
                     if (!f) return
                     const reader = new FileReader()
-                    reader.onload = () => { try { loadGame(JSON.parse(String(reader.result))) } catch { setToast('Could not read that save file') } }
+                    reader.onload = () => { try { loadGame(JSON.parse(String(reader.result))) } catch { pushMessage('Could not read that save file') } }
                     reader.readAsText(f)
                   }} />
                 </label>
               </div>
             </div>
+            <p className="hint">Install: use your browser's Add to Home Screen for fullscreen play.</p>
             <button className="btn btn-ghost" onClick={() => setMenu('closed')}>Close</button>
           </div>
         </div>
@@ -558,58 +858,82 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* Touch joystick */}
-      {isTouch && inGame && (
-        <Joystick
-          onMove={(x, y) => {
-            const fps = viewRef.current?.fps
-            if (!fps) return
-            // y: -1 (up/forward) .. 1 (down/back), x: -1 (left) .. 1 (right)
-            const fwd = y < 0 ? -y : 0
-            const back = y > 0 ? y : 0
-            fps.setInput('KeyW', fwd > 0.3)
-            fps.setInput('KeyS', back > 0.3)
-            fps.setInput('KeyA', x < -0.3)
-            fps.setInput('KeyD', x > 0.3)
-          }}
-        />
-      )}
-
-      {/* Touch look-stick REMOVED — the whole screen is the look surface now */}
-      {/* One joystick (left thumb) for movement; drag anywhere else to look */}
-
-      {/* Touch jump button */}
-      {isTouch && inGame && (
-        <button className="interact-btn" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label="Interact">
-          🤲<span>{interactionFocus ? `${interactionFocus.kind === 'creature' ? 'Meet' : 'Visit'} ${interactionFocus.name}` : 'Walk closer'}</span>
-        </button>
-      )}
-
-      {isTouch && inGame && (
-        <button
-          className="jump-btn"
-          onPointerDown={(e) => {
-            e.preventDefault()
-            viewRef.current?.fps.jump()
-          }}
-          onTouchStart={(e) => {
-            e.preventDefault()
-            viewRef.current?.fps.jump()
-          }}
-        >
-          ⬆
-        </button>
-      )}
-
-      {toast && <div className="toast" onClick={() => setToast(null)}>{toast}</div>}
     </div>
   )
 }
 
-/** Full-screen LOOK SURFACE — one isolated gesture owner for mobile look.
- * Pointer Events are preferred; Touch Events are used only as an old-browser fallback. */
-function LookSurface({ onLook, onTap }: { onLook: (dx: number, dy: number) => void; onTap: () => void }) {
+/** Invisible split touch surface — one gesture owner for two simultaneous
+ * pointers: left half = movement pad (touch-origin displacement), right
+ * half = look. No visible joystick ring. Buttons/panels sit above this
+ * surface and keep their own gestures. */
+function TouchSplitSurface({
+  onMoveVec,
+  onLook,
+  onTap,
+}: {
+  onMoveVec: (vec: TouchMoveVec) => void
+  onLook: (dx: number, dy: number) => void
+  onTap: () => void
+}) {
+  const movePointer = useRef<number | null>(null)
+  const lookPointer = useRef<number | null>(null)
+  const moveOrigin = useRef({ x: 0, y: 0 })
+  const lookLast = useRef({ x: 0, y: 0 })
+  const lookDown = useRef({ x: 0, y: 0 })
+  const lookMoved = useRef(false)
+
+  const endPointer = (pointerId: number): void => {
+    if (pointerId === movePointer.current) {
+      movePointer.current = null
+      onMoveVec({ fwd: 0, side: 0 })
+    } else if (pointerId === lookPointer.current) {
+      lookPointer.current = null
+      if (!lookMoved.current) onTap()
+    }
+  }
+
+  return (
+    <div
+      className="look-surface"
+      data-touch-surface="split"
+      aria-label="Left side moves, right side looks"
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse') return
+        const zone = touchZoneAt(e.clientX, e.currentTarget.clientWidth, 'split')
+        if (zone === 'move' && movePointer.current === null) {
+          movePointer.current = e.pointerId
+          e.currentTarget.setPointerCapture(e.pointerId)
+          moveOrigin.current = { x: e.clientX, y: e.clientY }
+          onMoveVec({ fwd: 0, side: 0 })
+        } else if (zone === 'look' && lookPointer.current === null) {
+          lookPointer.current = e.pointerId
+          e.currentTarget.setPointerCapture(e.pointerId)
+          lookLast.current = { x: e.clientX, y: e.clientY }
+          lookDown.current = { x: e.clientX, y: e.clientY }
+          lookMoved.current = false
+        }
+      }}
+      onPointerMove={(e) => {
+        if (e.pointerId === movePointer.current) {
+          onMoveVec(touchMoveFromOrigin(moveOrigin.current, { x: e.clientX, y: e.clientY }))
+        } else if (e.pointerId === lookPointer.current) {
+          const dx = e.clientX - lookLast.current.x
+          const dy = e.clientY - lookLast.current.y
+          lookLast.current = { x: e.clientX, y: e.clientY }
+          if (Math.abs(e.clientX - lookDown.current.x) + Math.abs(e.clientY - lookDown.current.y) > 10) lookMoved.current = true
+          if (dx !== 0 || dy !== 0) onLook(dx, dy)
+        }
+      }}
+      onPointerUp={(e) => endPointer(e.pointerId)}
+      onPointerCancel={(e) => endPointer(e.pointerId)}
+    />
+  )
+}
+
+/** Full-screen LOOK SURFACE — classic fallback. One isolated gesture owner
+ * for mobile look. Pointer Events are preferred; Touch Events are used only
+ * as an old-browser fallback. */
+function LookSurface({ onLook, onTap, marker = 'classic' }: { onLook: (dx: number, dy: number) => void; onTap: () => void; marker?: string }) {
   const activePointer = useRef<number | null>(null)
   const activeTouch = useRef<number | null>(null)
   const last = useRef({ x: 0, y: 0 })
@@ -647,6 +971,7 @@ function LookSurface({ onLook, onTap }: { onLook: (dx: number, dy: number) => vo
   return (
     <div
       className="look-surface"
+      data-touch-surface={marker}
       aria-label="Drag to look around"
       onPointerDown={(e) => {
         if (e.pointerType === 'mouse' || activePointer.current !== null) return
@@ -721,6 +1046,7 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
     <div
       ref={baseRef}
       className="joystick"
+      data-joystick
       onPointerDown={(e) => {
         active.current = true
         const rect = baseRef.current!.getBoundingClientRect()
