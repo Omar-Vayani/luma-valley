@@ -22,8 +22,11 @@ export function createEconomy(): Economy {
     goods: {
       bread: { id: 'bread', basePrice: 3, stock: 12, maxStock: 12, restockEvery: 6, restockTimer: 0 },
       medicine: { id: 'medicine', basePrice: 7, stock: 8, maxStock: 8, restockEvery: 10, restockTimer: 0 },
-      drink: { id: 'drink', basePrice: 4, stock: 10, maxStock: 10, restockEvery: 8, restockTimer: 0 },
+      brew: { id: 'brew', basePrice: 4, stock: 10, maxStock: 10, restockEvery: 8, restockTimer: 0 },
       weapon: { id: 'weapon', basePrice: 15, stock: 4, maxStock: 4, restockEvery: 30, restockTimer: 0 },
+      herb: { id: 'herb', basePrice: 5, stock: 8, maxStock: 8, restockEvery: 10, restockTimer: 0 },
+      spark: { id: 'spark', basePrice: 9, stock: 5, maxStock: 5, restockEvery: 14, restockTimer: 0 },
+      tonic: { id: 'tonic', basePrice: 6, stock: 8, maxStock: 8, restockEvery: 10, restockTimer: 0 },
     },
   }
 }
@@ -47,25 +50,26 @@ export function tickEconomy(e: Economy): void {
 }
 
 /** A creature pays and receives a good from the tower. Nothing is free. */
-export function buyFromTower(e: Economy, towerId: string, buyer: { wallet: number }): boolean {
+export function buyFromTower(e: Economy, towerId: string, buyer: { wallet: number }): string | null {
   const goodId = towerId === 'food' ? 'bread'
     : towerId === 'pharmacy' ? 'medicine'
-      : towerId === 'tavern' ? 'drink'
+      : towerId === 'tavern' ? 'brew'
         : towerId === 'tools' ? 'weapon'
-          : null
-  if (!goodId) return false
+          : towerId === 'den' ? (Math.random() < 0.4 ? 'spark' : 'herb')
+            : null
+  if (!goodId) return null
   const g = e.goods[goodId]
-  if (!g || g.stock <= 0) return false
+  if (!g || g.stock <= 0) return null
   const price = marketPrice(e, goodId)
-  if (buyer.wallet < price) return false
+  if (buyer.wallet < price) return null
   buyer.wallet -= price
   g.stock -= 1
-  return true
+  return goodId
 }
 
 /** How many ticks a work shift lasts, and the pay. */
 export const WORK_SHIFT_TICKS = 24
-export const WORK_PAY = 5
+export const WORK_PAY = 8 // a shift buys more than a meal — real progress
 
 /**
  * Advance a creature's work shift. Returns true when the shift completes and

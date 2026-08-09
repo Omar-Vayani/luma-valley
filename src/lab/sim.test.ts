@@ -42,7 +42,7 @@ describe('sim — decisions and movement', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 0.15
-    c.pos = { x: -28, z: -28 } // at food tower
+    c.pos = { x: -32, z: -32 } // at food tower
     s.tick()
     expect(c.chem.hunger).toBeGreaterThan(0.2)
   })
@@ -103,14 +103,19 @@ describe('sim — economy and stealing', () => {
 })
 
 describe('sim — gangs and fighting', () => {
-  it('an aggressive creature with loyalty joins the gang', () => {
-    const s = makeSim(1)
-    const c = s.creatures[0]
-    c.genome.aggression = 0.9
-    c.genome.loyalty = 0.9
-    c.pos = { x: 0, z: 32 } // at gang tower
-    s.tick()
-    expect(c.gangId).not.toBeNull()
+  it('tribal creatures form a gang together (group, not building)', () => {
+    const s = makeSim(2)
+    const a = s.creatures[0]
+    const b = s.creatures[1]
+    a.genome.aggression = 0.9
+    a.genome.loyalty = 0.9
+    b.genome.aggression = 0.9
+    b.genome.loyalty = 0.9
+    a.pos = { x: 0, z: 0 }
+    b.pos = { x: 2, z: 0 }
+    for (let i = 0; i < 10; i++) s.tick()
+    expect(a.gangId).not.toBeNull()
+    expect(b.gangId).toBe(a.gangId)
   })
 
   it('a vendetta causes a fight', () => {
@@ -202,8 +207,8 @@ describe('sim — love, procreation, sleep, addiction', () => {
     c.genome.addictionProne = 0.95
     c.chem.pleasure = 0.1 // sad — the tavern is the rational escape
     c.wallet = 10 // can afford a drink
-    c.pos = { x: -28, z: 28 } // at tavern
+    c.pos = { x: -32, z: 32 } // at tavern
     for (let i = 0; i < 10; i++) s.tick()
-    expect(c.chem.addiction.drink ?? 0).toBeGreaterThan(0)
+    expect(c.chem.addiction.brew ?? 0).toBeGreaterThan(0)
   })
 })

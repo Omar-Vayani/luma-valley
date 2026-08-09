@@ -60,7 +60,7 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
 
   it('a weak creature rates gym/play above wandering', () => {
     const s = createSim(6)
-    const c = s.spawnCreature(GEN(), 28, 28) // at play/gym
+    const c = s.spawnCreature(GEN(), 0, 32) // at play/gym
     c.chem.strength = 0.1
     c.chem.pleasure = 0.9
     c.chem.hunger = 0.9

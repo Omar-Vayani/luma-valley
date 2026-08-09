@@ -8,18 +8,21 @@ import { createCreature } from './creature'
 import { createChem, type ChemState } from './chem'
 import { createMemory, type MemoryState } from './memory'
 import { createEconomy, type Economy } from './economy'
+import { createDrives, type Drives } from './drives'
+import type { ActionName } from './mind'
 import type { Genome } from './genetics'
 import { mulberry32 } from './rng'
 
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 
 export interface LabSave {
-  version: 3
+  version: 4
   seed: number
   time: number
   nextId: number
   creatures: SavedCreature[]
   drops: { kind: 'food' | 'money'; x: number; z: number; amount: number }[]
+  graves: { creatureId: number; name: string; x: number; z: number; tick: number }[]
   economy: Economy
 }
 
@@ -45,6 +48,12 @@ interface SavedCreature {
   fightCooldown: number
   workProgress: number
   gratitude: Record<number, number>
+  intention: ActionName | null
+  intentionTicks: number
+  education: number
+  buried: boolean
+  jealousy: number
+  drives: Drives
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -70,14 +79,21 @@ export function saveSim(sim: Sim): LabSave {
     fightCooldown: c.fightCooldown,
     workProgress: c.workProgress,
     gratitude: { ...c.gratitude },
+    intention: c.intention,
+    intentionTicks: c.intentionTicks,
+    education: c.education,
+    buried: c.buried,
+    jealousy: c.jealousy,
+    drives: { ...c.drives },
   }))
   return {
-    version: 3,
+    version: 4,
     seed: sim.seed,
     time: sim.time,
     nextId: sim.nextId,
     creatures,
     drops: sim.drops.map((d) => ({ ...d })),
+    graves: sim.graves.map((g) => ({ ...g })),
     economy: JSON.parse(JSON.stringify(sim.economy)),
   }
 }
@@ -108,10 +124,17 @@ export function loadSim(data: LabSave): Sim {
     c.fightCooldown = sc.fightCooldown ?? 0
     c.workProgress = sc.workProgress ?? 0
     c.gratitude = { ...sc.gratitude }
+    c.intention = sc.intention ?? null
+    c.intentionTicks = sc.intentionTicks ?? 0
+    c.education = sc.education ?? 0
+    c.buried = sc.buried ?? false
+    c.jealousy = sc.jealousy ?? 0
+    c.drives = { ...(sc.drives ?? createDrives()) }
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)
   sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
+  sim.graves = (data.graves ?? []).map((g) => ({ ...g }))
   sim.economy = data.economy ? JSON.parse(JSON.stringify(data.economy)) : createEconomy()
   return sim
 }

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { LabView } from './render/labview'
 import { createSim, type Sim } from './lab/sim'
 import { deriveEmotion, type EmotionType } from './lab/emotion'
+import { DRIVE_KEYS, driveTitles, type DriveKey } from './lab/drives'
 
 import './lab.css'
 
@@ -57,6 +58,20 @@ const EMOJI: Record<EmotionType, string> = {
   loving: '😍',
 }
 
+// Compact drive labels for the drives row (full titles live in the tooltip).
+const DRIVE_SHORT: Record<DriveKey, string> = {
+  importance: 'Im',
+  approval: 'Ap',
+  ego: 'Eg',
+  tribalism: 'Tr',
+  conformity: 'Co',
+  reciprocity: 'Re',
+  lossAversion: 'Lo',
+  greed: 'Gr',
+  curiosity: 'Cu',
+  legacy: 'Le',
+}
+
 function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100)
   return (
@@ -83,6 +98,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState<1 | 2 | 10>(1)
+  const [showMore, setShowMore] = useState(false)
 
   // Boot the sim + renderer exactly once. StrictMode double-mounts in dev:
   // the cleanup disposes the previous view before the effect re-runs, and the
@@ -141,6 +157,11 @@ export default function App() {
       simRef.current = null
     }
   }, [])
+
+  // Collapse the chip's expanded details whenever a different creature is selected.
+  useEffect(() => {
+    setShowMore(false)
+  }, [selectedId])
 
   const setToolMode = useCallback((mode: ToolMode): void => {
     toolRef.current = mode
@@ -248,7 +269,11 @@ export default function App() {
       </header>
 
       {selected && selected.alive && emotion && (
-        <section className="chip" data-chip aria-label={`${selected.name} details`}>
+        <section
+          className={`chip ${showMore ? 'chip-expanded' : ''}`}
+          data-chip
+          aria-label={`${selected.name} details`}
+        >
           <header className="chip-head">
             <h2>{selected.name}</h2>
             <button
@@ -265,13 +290,11 @@ export default function App() {
             <span className="chip-emoji">{EMOJI[emotion.type]}</span>
             <span className="chip-dot" style={{ background: emotion.color }} />
             <span className="chip-mood-label">{emotion.type}</span>
-            {selected.gangId !== null && <span className="chip-gang">⚔️ gang</span>}
           </div>
           <div className="chip-bars">
             <Bar label="hunger" value={selected.chem.hunger} color="#e8876a" />
             <Bar label="energy" value={selected.chem.energy} color="#e0b46a" />
             <Bar label="strength" value={selected.chem.strength} color="#c96f3d" />
-            <Bar label="fear" value={selected.chem.fear} color="#9fc7e8" />
           </div>
           <div className="chip-stats">
             <span>🪙 {Math.round(selected.wallet)}</span>
@@ -279,8 +302,54 @@ export default function App() {
             {selected.weapon && <span>🪓 {selected.weapon}</span>}
             <span className="chip-action">{selected.action}</span>
           </div>
-          {selected.gratitude[0] > 0.2 && <p className="chip-grateful">💛 grateful to you</p>}
-          {partner && <p className="chip-partner">💛 {partner.name}</p>}
+          <button
+            type="button"
+            className="show-more-btn"
+            data-show-more
+            aria-expanded={showMore}
+            aria-controls="chip-extra"
+            onClick={() => setShowMore((s) => !s)}
+          >
+            {showMore ? '▲ show less' : '▼ show more'}
+          </button>
+          {showMore && (
+            <div className="chip-extra" id="chip-extra">
+              <div className="chip-bars">
+                <Bar label="health" value={selected.chem.health} color="#7fb57f" />
+                <Bar label="pleasure" value={selected.chem.pleasure} color="#c98ae0" />
+                <Bar label="social" value={selected.chem.social} color="#7fc4d9" />
+                <Bar label="fear" value={selected.chem.fear} color="#9fc7e8" />
+              </div>
+              <div className="chip-meta">
+                {selected.chem.grief > 0.05 && (
+                  <span className="chip-pill">🕯️ grief {Math.round(selected.chem.grief * 100)}</span>
+                )}
+                {selected.jealousy > 0.05 && (
+                  <span className="chip-pill">💚 jealousy {Math.round(selected.jealousy * 100)}</span>
+                )}
+                <span className="chip-pill">🎓 {Math.round(selected.education)}</span>
+                {selected.gangId !== null && <span className="chip-pill">⚔️ gang</span>}
+                <span className="chip-pill">💞 bonds: {Object.keys(selected.bonds).length}</span>
+              </div>
+              {selected.gratitude[0] > 0.2 && <p className="chip-grateful">💛 grateful to you</p>}
+              {partner && <p className="chip-partner">💛 {partner.name}</p>}
+              <div className="drives-row" role="group" aria-label="drives">
+                {DRIVE_KEYS.map((k) => (
+                  <span
+                    key={k}
+                    className="drive-item"
+                    title={`${k}: ${driveTitles[k]} (${Math.round(selected.drives[k] * 100)})`}
+                  >
+                    <span
+                      className="drive-dot"
+                      style={{ opacity: 0.15 + selected.drives[k] * 0.85 }}
+                    />
+                    <span className="drive-key">{DRIVE_SHORT[k]}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 

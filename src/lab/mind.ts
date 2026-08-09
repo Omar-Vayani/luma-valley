@@ -23,7 +23,9 @@ export type ActionName =
   | 'work'     // go to work tower, stay for a shift
   | 'sleep'    // go home and sleep
   | 'heal'     // go to pharmacy and buy medicine
-  | 'drink'    // go to tavern and buy a drink
+  | 'drink'    // go to tavern and buy brew
+  | 'den'      // go to the den and buy herb/spark
+  | 'school'   // go to school and learn (raises future earnings)
   | 'buyWeapon' // go to tools and buy a stick
   | 'deposit'  // go to bank and store money
   | 'play'     // go to gym/play and train strength
@@ -77,14 +79,18 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
   const moneyDrop = nearestMoneyDrop(sim, c, 40)
 
   const breadPrice = marketPrice(sim.economy, 'bread')
+  const breadInStock = (sim.economy.goods.bread?.stock ?? 0) > 0
   const medPrice = marketPrice(sim.economy, 'medicine')
   const canAffordFood = c.wallet >= breadPrice
   const hungry = 1 - h
   const wounded = 1 - hp
 
+  // craving: how strongly this creature's personality pulls toward substances
+  const cravingBias = Math.min(1, g.addictionProne * 0.8 + (c.chem.addiction.brew ?? 0) * 0.5 + (c.chem.addiction.herb ?? 0) * 0.5 + (c.chem.addiction.spark ?? 0) * 0.6)
+
   // ── base pressures (0..1) ──
   const press = {
-    hungry: Math.max(0, (1 - h - 0.25) / 0.75),
+    hungry: Math.max(0, (1 - h - 0.45) / 0.55), // only urgent once below ~0.45
     tired: Math.max(0, (1 - e - 0.35) / 0.65),
     wounded: Math.max(0, (1 - hp - 0.35) / 0.65),
     bored: Math.max(0, (1 - p - 0.45) / 0.55),
@@ -100,7 +106,8 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
 
   const scores: ActionScores = {
     // food: urgent when hungry AND affordable; a broke creature knows it cannot buy
-    food: press.hungry * (0.9 + g.greed * 0.3) * (canAffordFood ? 1 : 0.25) + (canAffordFood ? starving : 0),
+    // (and when the shelf is empty, food loses its pull — go earn/steal instead)
+    food: press.hungry * (0.9 + g.greed * 0.3) * (canAffordFood ? 1 : 0.25) * (breadInStock ? 1 : 0.2) + (canAffordFood ? starving : 0) * (breadInStock ? 1 : 0.1),
     // work: needed to afford food/medicine; honest creatures work, thieves prefer other means
     work: (hungry > 0 ? (canAffordFood ? 0.15 : 1) : 0) * (0.6 + g.greed * 0.4) + starving * (canAffordFood ? 0.4 : (1 - g.theft) * 1.6) + bleedingOut * 0.6,
     // sleep: tired or at home
@@ -108,25 +115,33 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // heal: wounded, only if affordable
     heal: wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut,
     // drink: sad + pleasure-seeking / addictive personality — stronger when AT the tavern
-    drink: (press.bored * 0.6 + (c.chem.addiction.drink ?? 0) * 1.6) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9),
+    drink: (0.65 * g.addictionProne + press.bored * 0.7 + (c.chem.addiction.brew ?? 0) * 1.8) * (0.6 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 1.0),
+    // den: craving herb/spark is a strong pull for addicts (base attraction for prone types)
+    den: ((0.6 * g.addictionProne + (c.chem.addiction.herb ?? 0) * 2.0 + (c.chem.addiction.spark ?? 0) * 2.6 + press.bored * 0.5) * (0.5 + g.addictionProne * 1.3)) * (at?.id === 'den' ? 1.7 : 1.0),
+    // school: curious, ambitious creatures learn to earn more later (a modest want)
+    school: (0.15 + g.learning * 0.9 + c.drives.importance * 0.4) * (c.education < 3 ? 1 : 0.1) * (c.wallet > 3 ? 1 : 0.4) * (at?.id === 'school' ? 1.5 : 0.7),
     // weapon: aggressive creatures want one (non-aggressive barely care)
     buyWeapon: g.aggression * 0.9 * (c.weapon ? 0 : 1) * (c.wallet >= 10 ? 1 : 0.3),
     // bank: cautious creatures deposit surplus (strong once they learned safety)
-    deposit: (c.memory.facts.bankIsSafe ? 1.4 : 0.15) * (c.wallet > 6 ? 1.0 : c.wallet > 3 ? 0.4 : 0) * (0.4 + (1 - g.greed) * 0.8),
+    deposit: (c.memory.facts.bankIsSafe ? 1.4 : 0.15) * (c.wallet > 6 ? 1.0 : c.wallet > 3 ? 0.4 : 0) * (0.4 + (1 - g.greed) * 0.8 + c.drives.lossAversion * 0.4),
     // play: bored or weak, and at/near the gym — a leisure want, not a need
-    play: (press.bored * 0.55 + press.weak * 0.85) * (at?.id === 'play' ? 1.2 : 0.7),
+    play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.2 : 0.7),
     // social: lonely + sociable + opportunity
     social: press.lonely * (0.3 + g.sociability * 1.4) * (near ? 1.3 : 0.2),
-    // steal: desperate + thief genes + target with money
-    steal: (press.hungry * 0.9 + (canAffordFood ? 0 : 0.5)) * (0.2 + g.theft * 1.6) * (near && near.wallet > 0 ? 1.4 : 0.05),
-    // share: grateful + social conscience + wealth
-    share: (c.gratitude[near?.id ?? 0] ?? 0) * 1.2 * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
-    // fight: angry + vendetta + aggression
-    fight: (c.memory.vendettas[near?.id ?? 0] ?? 0) * 1.8 + g.aggression * (press.bored * 0.5) * (near ? 1.4 : 0.1),
-    // collect: poor/greedy and a pile nearby
-    collect: ((c.wallet < 4 ? 0.8 : 0) + g.greed * 0.4) * (moneyDrop ? 1.3 : 0.05),
-    // wander: curious creatures explore the unknown
-    wander: (0.25 + g.curiosity * 0.6) * (grief > 0.4 ? 1.3 : 1),
+    // steal: desperate + thief genes + greed drive + target with money
+    steal: (press.hungry * 0.9 + (canAffordFood ? 0 : 0.5) + c.drives.greed * 0.5) * (0.2 + g.theft * 1.6) * (near && near.wallet > 0 ? 1.4 : 0.05),
+    // share: grateful + social conscience + reciprocity drive + wealth
+    share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6) * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
+    // fight: angry + vendetta + aggression + tribal defense of gangmates
+    fight: (c.memory.vendettas[near?.id ?? 0] ?? 0) * 1.8
+      + g.aggression * (press.bored * 0.5) * (near ? 1.4 : 0.1)
+      + tribalDefense(sim, c, near),
+    // collect: poor/greedy + hoarding drive and a pile nearby (hoarders grab
+    // free money even when they already have some)
+    collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8) * (moneyDrop ? 1.4 : 0.05),
+    // wander: curious creatures explore the unknown (curiosity drive) — but
+    // a creature with a specific craving wanders less (it knows what it wants)
+    wander: (0.25 + g.curiosity * 0.6 + c.drives.curiosity * 0.5) * (1 - cravingBias) * (grief > 0.4 ? 1.3 : 1),
   }
 
   // grief dominates: a mourning creature cannot socialize or love
@@ -141,6 +156,25 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
 
 function canAffordMed(c: Creature, medPrice: number): boolean {
   return c.wallet >= medPrice
+}
+
+/** Tribal drive: defend a gangmate who is being hurt by the nearby creature. */
+function tribalDefense(sim: Sim, c: Creature, near: Creature | null): number {
+  if (!near || c.gangId === null || near.gangId === c.gangId) return 0
+  // is any gangmate near this outsider and wounded recently?
+  for (const o of sim.creatures) {
+    if (o.id === c.id || !o.alive || o.gangId !== c.gangId) continue
+    const d = dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z)
+    if (d < 6 && o.chem.health < 0.85) {
+      return 2.2 // protect the pack
+    }
+  }
+  // an outsider in gang territory is enough for tribal types
+  if (c.genome.aggression > 0.7 && c.genome.loyalty > 0.6) {
+    const d = dist(c.pos.x, c.pos.z, near.pos.x, near.pos.z)
+    if (d < 3) return 0.9
+  }
+  return 0
 }
 
 function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
@@ -203,6 +237,8 @@ export function towerIdForAction(action: ActionName): string | null {
     case 'sleep': return 'homes'
     case 'heal': return 'pharmacy'
     case 'drink': return 'tavern'
+    case 'den': return 'den'
+    case 'school': return 'school'
     case 'buyWeapon': return 'tools'
     case 'deposit': return 'bank'
     case 'play': return 'play'

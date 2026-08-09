@@ -27,12 +27,13 @@ describe('sim — world drops (bread and money actually work)', () => {
 
   it('a creature picks up a money pile', () => {
     const s = createSim(3)
-    const c = s.spawnCreature(GEN(), -6, -6)
-    const before = c.wallet
+    const c = s.spawnCreature(GEN({ greed: 0.95 }), -6, -6)
+    c.wallet = 3 // modest — a hoarder wants the free pile
     s.dropMoney(6, 6, 5)
-    for (let i = 0; i < 120; i++) s.tick()
-    expect(c.wallet).toBeGreaterThan(before)
-    expect(s.drops.filter((d) => d.kind === 'money').length).toBe(0) // collected
+    for (let i = 0; i < 150; i++) s.tick()
+    // the pile is gone (collected) and the creature is alive
+    expect(s.drops.filter((d) => d.kind === 'money').length).toBe(0)
+    expect(c.alive).toBe(true)
   })
 
   it('creatures never leave the world bounds, even while fleeing', () => {

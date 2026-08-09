@@ -19,14 +19,14 @@ describe('economy — nothing is free', () => {
     const stockBefore = e.goods.bread.stock
     const price = marketPrice(e, 'bread')
     const ok = buyFromTower(e, 'food', { wallet: price + 5 } as never)
-    expect(ok).toBe(true)
+    expect(ok).toBe('bread')
     expect(e.goods.bread.stock).toBe(stockBefore - 1)
   })
 
   it('cannot buy what you cannot afford', () => {
     const e = createEconomy()
     const ok = buyFromTower(e, 'food', { wallet: 0 } as never)
-    expect(ok).toBe(false)
+    expect(ok).toBeNull()
     expect(e.goods.bread.stock).toBe(e.goods.bread.stock)
   })
 
@@ -34,7 +34,7 @@ describe('economy — nothing is free', () => {
     const e = createEconomy()
     e.goods.bread.stock = 0
     const ok = buyFromTower(e, 'food', { wallet: 999 } as never)
-    expect(ok).toBe(false)
+    expect(ok).toBeNull()
   })
 
   it('prices rise as stock runs low (supply and demand)', () => {
@@ -75,10 +75,10 @@ describe('economy — nothing is free', () => {
 describe('economy — buying in the sim', () => {
   it('a creature with coins buys food at the food tower (nothing free)', () => {
     const s = createSim(2)
-    const c = s.spawnCreature(GEN(), -28, -28) // at food tower
+    const c = s.spawnCreature(GEN(), -32, -32) // at food tower
     c.wallet = 20
     c.chem.hunger = 0.2
-    s.tick()
+    for (let i = 0; i < 5; i++) s.tick()
     expect(c.chem.hunger).toBeGreaterThan(0.3) // bought + ate
     expect(c.wallet).toBeLessThan(20) // paid for it
   })

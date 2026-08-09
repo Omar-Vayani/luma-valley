@@ -16,7 +16,7 @@ const populated = () => {
   a.banked = 30
   a.weapon = 'stick'
   a.gangId = 1
-  a.chem.addiction.drink = 0.6
+  a.chem.addiction.brew = 0.6
   a.memory.vendettas[2] = 0.9
   a.memory.facts.bankIsSafe = 1
   for (let i = 0; i < 20; i++) s.tick()
@@ -44,7 +44,7 @@ describe('save — deep state round-trip', () => {
     expect(a2.banked).toBe(30)
     expect(a2.weapon).toBe('stick')
     expect(a2.gangId).toBe(1)
-    expect(a2.chem.addiction.drink).toBeCloseTo(0.6)
+    expect(a2.chem.addiction.brew).toBeCloseTo(0.6)
     expect(a2.memory.vendettas[2]).toBeCloseTo(0.9)
     expect(a2.memory.facts.bankIsSafe).toBe(1)
     expect(s2.time).toBe(s.time)

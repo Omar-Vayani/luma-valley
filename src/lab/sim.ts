@@ -10,19 +10,22 @@ import { tickChem, applyPlay } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
-import { createEconomy, tickEconomy, buyFromTower, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { createEconomy, tickEconomy, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
+import { tickRelationships } from './relationships'
+import { tickDrives, applySocialFeedback } from './drives'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 
-export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
+export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
 export interface SimEvent {
   type: SimEventType
-  aId: number
-  bId?: number
+  aId: number | undefined
+  bId: number | undefined
   x: number
   z: number
+  tick: number
 }
 
 export interface SimDrop {
@@ -30,6 +33,14 @@ export interface SimDrop {
   x: number
   z: number
   amount: number
+}
+
+export interface SimGrave {
+  creatureId: number
+  name: string
+  x: number
+  z: number
+  tick: number
 }
 
 export interface Sim {
@@ -40,6 +51,7 @@ export interface Sim {
   rng: () => number
   events: SimEvent[]
   drops: SimDrop[]
+  graves: SimGrave[]
   economy: Economy
   spawnCreature(genome?: Genome, x?: number, z?: number): Creature
   tick(): void
@@ -76,13 +88,14 @@ export function createSim(seed = 1): Sim {
     rng: mulberry32(seed),
     events: [],
     drops: [],
+    graves: [],
     economy: createEconomy(),
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
       const c = createCreature(sim.nextId++, randomName(sim.rng), g, cx, cz)
-      c.wallet = 2 + Math.floor(sim.rng() * 6)
+      c.wallet = 6 + Math.floor(sim.rng() * 8) // enough for a few meals — room to experiment
       sim.creatures.push(c)
       return c
     },
@@ -183,6 +196,7 @@ export function createSim(seed = 1): Sim {
       for (const c of sim.creatures) {
         tickChem(c.chem, sim.time)
         decayMemory(c.memory)
+        tickDrives(c.drives, c.chem, c.genome)
         c.age++
         if (c.fightCooldown > 0) c.fightCooldown--
         if (c.chem.health <= 0 && c.action !== 'dead') {
@@ -193,6 +207,7 @@ export function createSim(seed = 1): Sim {
         }
       }
       tickEconomy(sim.economy)
+      tickRelationships(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
     },
@@ -208,6 +223,7 @@ export function emit(sim: Sim, type: SimEventType, a: Creature | undefined, b: C
     bId: b?.id,
     x,
     z,
+    tick: sim.time,
   })
 }
 
@@ -244,6 +260,57 @@ function decide(sim: Sim, c: Creature): void {
     return
   }
 
+  // HARD SURVIVAL: starving creatures go to food — nothing may override this.
+  // A creature with money buys at the tower; a broke one works or takes the
+  // nearest free drop first. (Prevents dying of hunger while holding coins.)
+  if (c.chem.hunger < 0.15) {
+    const foodDrop = nearestDrop(sim, c, 'food', 40)
+    if (foodDrop) {
+      goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+      c.intention = null
+      return
+    }
+    const breadPrice = marketPrice(sim.economy, 'bread')
+    if (c.wallet >= breadPrice && (sim.economy.goods.bread?.stock ?? 0) > 0) {
+      const atTower = towerAt(c.pos.x, c.pos.z)
+      if (atTower?.id === 'food') {
+        // already here: actually BUY and eat, don't just stand around
+        if (buyFromTower(sim.economy, 'food', c)) {
+          c.eat()
+          emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'eat'
+          c.intention = null
+        }
+        return
+      }
+      goTo(sim, c, 'food')
+      c.intention = 'food'
+      return
+    }
+    // broke and starving: steal if a wallet is near, otherwise work
+    const near = nearestOther(sim, c, 2.5)
+    if (near && near.wallet > 0 && c.genome.theft > 0.3) {
+      steal(sim, c, near)
+      c.intention = null
+      return
+    }
+    const atWork = towerAt(c.pos.x, c.pos.z)
+    if (atWork?.id === 'work') {
+      c.workProgress += 1
+      c.action = 'work'
+      if (c.workProgress >= WORK_SHIFT_TICKS) {
+        c.wallet += WORK_PAY + c.education
+        c.workProgress = 0
+        emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'work done'
+      }
+      return
+    }
+    goTo(sim, c, 'work')
+    c.intention = 'work'
+    return
+  }
+
   // Emergent bonds: a partnered creature at home with a strong bond procreates.
   const at = towerAt(c.pos.x, c.pos.z)
   if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
@@ -257,11 +324,9 @@ function decide(sim: Sim, c: Creature): void {
     }
   }
 
-  // Aggressive + loyal creatures join the gang when they find it.
-  if (at?.id === 'gang' && c.gangId === null && c.genome.aggression > 0.6 && c.genome.loyalty > 0.5) {
-    c.gangId = 1
-    emit(sim, 'joinGang', c, undefined, c.pos.x, c.pos.z)
-    c.action = 'gang'
+  // A mourning creature carrying a loved body is driven by duty, not the mind.
+  if (c.chem.grief > 0.4 && hasUnburiedLovedOne(sim, c)) {
+    carryCorpseDirect(sim, c)
     return
   }
 
@@ -270,6 +335,18 @@ function decide(sim: Sim, c: Creature): void {
     c.intentionTicks--
     execute(sim, c, c.intention)
     return
+  }
+
+  // A tower-bound action the creature is still walking toward: stay committed
+  // until arrival (no flip-flopping mid-journey).
+  if (c.intention && c.goalTowerId !== null && c.goalTowerId !== 'none' && actionValid(sim, c, c.intention)) {
+    const goal = towerAt(c.pos.x, c.pos.z)
+    if (goal?.id !== c.goalTowerId) {
+      execute(sim, c, c.intention)
+      return
+    }
+    // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
+    c.goalTowerId = 'none'
   }
 
   // Re-score and pick a fresh action (mind + free will).
@@ -308,7 +385,8 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         c.workProgress += 1
         c.action = 'work'
         if (c.workProgress >= WORK_SHIFT_TICKS) {
-          c.wallet += WORK_PAY
+          // educated creatures earn a little more every time they learn
+          c.wallet += WORK_PAY + c.education
           c.workProgress = 0
           emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
           c.action = 'work done'
@@ -316,6 +394,17 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         return
       }
       goTo(sim, c, 'work')
+      return
+    }
+    case 'school': {
+      if (at?.id === 'school' && c.wallet >= 2) {
+        c.wallet -= 2 // tuition — nothing is free
+        c.education = Math.min(5, c.education + 1)
+        emit(sim, 'school', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'school'
+        return
+      }
+      goTo(sim, c, 'school')
       return
     }
     case 'sleep': {
@@ -342,17 +431,33 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'drink': {
-      if (at?.id === 'tavern' && buyFromTower(sim.economy, 'tavern', c)) {
+      const good = at?.id === 'tavern' ? buyFromTower(sim.economy, 'tavern', c) : null
+      if (good) {
         c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
         c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
         const dose = 0.06 + c.genome.addictionProne * 0.2
-        c.chem.addiction.drink = clamp01((c.chem.addiction.drink ?? 0) + dose)
-        c.chem.lastDose.drink = sim.time
+        c.chem.addiction.brew = clamp01((c.chem.addiction.brew ?? 0) + dose)
+        c.chem.lastDose.brew = sim.time
         emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
         c.action = 'drink'
         return
       }
       goTo(sim, c, 'tavern')
+      return
+    }
+    case 'den': {
+      const good = at?.id === 'den' ? buyFromTower(sim.economy, 'den', c) : null
+      if (good === 'herb' || good === 'spark') {
+        c.chem.pleasure = clamp01(c.chem.pleasure + (good === 'spark' ? 0.55 : 0.3))
+        c.chem.fear = clamp01(c.chem.fear + (good === 'spark' ? 0.15 : -0.25))
+        const dose = 0.08 + c.genome.addictionProne * 0.25
+        c.chem.addiction[good] = clamp01((c.chem.addiction[good] ?? 0) + dose)
+        c.chem.lastDose[good] = sim.time
+        emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
+        c.action = good
+        return
+      }
+      goTo(sim, c, 'den')
       return
     }
     case 'buyWeapon': {
@@ -420,6 +525,11 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'fight': {
       const near = nearestOther(sim, c, FIGHT_RANGE)
       if (near && c.fightCooldown <= 0) {
+        // gangmates never fight each other; they defend one another
+        if (c.gangId !== null && near.gangId === c.gangId) {
+          wander(sim, c)
+          return
+        }
         fight(sim, c, near)
         return
       }
@@ -522,10 +632,59 @@ function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
   return best
 }
 
+/** Is there an unburied body this creature loved? (partner or strong bond) */
+function hasUnburiedLovedOne(sim: Sim, c: Creature): boolean {
+  if (c.partnerId !== null) {
+    const p = sim.creatures.find((o) => o.id === c.partnerId)
+    if (p && !p.alive && !p.buried) return true
+  }
+  for (const o of sim.creatures) {
+    if (!o.alive && !o.buried && (c.bonds[o.id] ?? 0) > 0.5) return true
+  }
+  return false
+}
+
+/** Carry a loved body to the graveyard and bury it — duty overrides the mind. */
+function carryCorpseDirect(sim: Sim, c: Creature): void {
+  let loved: Creature | undefined
+  if (c.partnerId !== null) {
+    const p = sim.creatures.find((o) => o.id === c.partnerId)
+    if (p && !p.alive && !p.buried) loved = p
+  }
+  if (!loved) {
+    for (const o of sim.creatures) {
+      if (!o.alive && !o.buried && (c.bonds[o.id] ?? 0) > 0.5) {
+        loved = o
+        break
+      }
+    }
+  }
+  if (!loved) return
+  const gy = findTower('graveyard')
+  if (!gy) return
+  const d = dist(c.pos.x, c.pos.z, gy.x, gy.z)
+  if (d <= gy.radius + 2) {
+    loved.buried = true
+    sim.graves.push({ creatureId: loved.id, name: loved.name, x: gy.x + (sim.rng() - 0.5) * 4, z: gy.z + (sim.rng() - 0.5) * 4, tick: sim.time })
+    emit(sim, 'bury', c, loved, gy.x, gy.z)
+    c.chem.grief = clamp01(c.chem.grief - 0.35) // closure helps
+    c.action = 'bury'
+    c.intention = null
+    return
+  }
+  const step = Math.min(0.7, d)
+  c.pos.x += ((gy.x - c.pos.x) / d) * step
+  c.pos.z += ((gy.z - c.pos.z) / d) * step
+  c.action = 'carry'
+  c.intention = null
+}
+
 function steal(sim: Sim, thief: Creature, victim: Creature): void {
   const amount = Math.min(victim.wallet, 2 + Math.floor(thief.genome.greed * 4))
   victim.wallet -= amount
   thief.wallet += amount
+  applySocialFeedback(thief.drives, 'theft')
+  applySocialFeedback(victim.drives, 'theft')
   learnFact(victim.memory, 'bankIsSafe', 0.6 + amount * 0.05)
   addVendetta(victim.memory, thief.id, 0.8)
   preferPlace(victim.memory, 'bank')
@@ -538,6 +697,9 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   const dmgB = 0.05 + (b.weapon === 'stick' ? 0.1 : 0) + b.genome.aggression * 0.04 + b.chem.strength * 0.06
   b.hurt(dmgA)
   a.hurt(dmgB)
+  // ego + reciprocity respond to the exchange
+  applySocialFeedback(a.drives, a.chem.health > b.chem.health ? 'victory' : 'defeat')
+  applySocialFeedback(b.drives, b.chem.health > a.chem.health ? 'victory' : 'defeat')
   // loser drops money
   if (b.chem.health < a.chem.health && b.wallet > 0) {
     const dropped = Math.min(b.wallet, 2)
@@ -582,7 +744,7 @@ function grieve(sim: Sim, dead: Creature): void {
     const isPartner = c.partnerId === dead.id
     const bond = c.bonds[dead.id] ?? 0
     if (isPartner) {
-      c.partnerId = null
+      // keep partnerId pointing at the dead so the survivor can carry them to the grave
       c.chem.grief = clamp01(c.chem.grief + 1)
       c.chem.bond = clamp01(c.chem.bond - 0.3)
       c.action = 'mourn'

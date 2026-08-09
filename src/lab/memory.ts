@@ -2,7 +2,7 @@
  * memory — episodic memory + learned facts + vendettas + place preferences.
  * Small, capped, JSON-safe. Drives utility bias and fight targets.
  */
-export type FactKey = 'bankIsSafe' | 'someoneStoleFromMe' | 'iAmInAGang' | 'partnerIsHere'
+export type FactKey = 'bankIsSafe' | 'someoneStoleFromMe' | 'hasGang' | 'partnerIsHere' | 'placeIsNice'
 
 export interface Episode {
   kind: string

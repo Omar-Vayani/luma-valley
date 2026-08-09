@@ -61,8 +61,9 @@ export function tickChem(c: ChemState, tick = 1): void {
   c.strength = clamp01(c.strength - 0.0003)
 
   // starvation: an empty belly slowly damages health — food is not optional
+  // (slow enough that a creature with money can cross the world to the food tower)
   if (c.hunger < 0.05) {
-    c.health = clamp01(c.health - 0.003)
+    c.health = clamp01(c.health - 0.0015)
   }
 
   // withdrawal: addicted creatures panic when deprived (timer via lastDose)

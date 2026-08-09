@@ -29,6 +29,8 @@ interface CreatureRig {
   nameLabel: THREE.Sprite
   stick: THREE.Mesh
   hair: THREE.Group
+  emotionBadge: THREE.Mesh
+  emotionBadgeGroup: THREE.Group
   phase: number
   targetX: number
   targetZ: number
@@ -98,6 +100,7 @@ export class LabView {
   private knownIds = new Set<number>()
   private towerMeshes: THREE.Object3D[] = []
   private dropMarkers: { drop: { kind: string; x: number; z: number }; mesh: THREE.Object3D }[] = []
+  private graveMarkers: { id: number; mesh: THREE.Object3D }[] = []
   private particles: { mesh: THREE.Mesh | THREE.Sprite; life: number; max: number; vy: number; vx: number; vz: number }[] = []
 
   private raycaster = new THREE.Raycaster()
@@ -163,10 +166,34 @@ export class LabView {
   }
 
   // ── towers: classic houses — cube walls, slanted triangle roof, gable ends,
-  //    windows, a door, and a hanging sign with the label. Simple shapes. ──
+  //    windows, a door, and a hanging sign with the label. Simple shapes.
+  //    graveyard / den / school get their own themed builds. ──
   private buildTower(t: Tower): void {
     const group = new THREE.Group()
     const color = new THREE.Color(t.color)
+
+    if (t.id === 'graveyard') {
+      this.buildGraveyard(group)
+    } else if (t.id === 'den') {
+      this.buildDen(group)
+    } else if (t.id === 'school') {
+      this.buildSchool(group)
+    } else {
+      this.buildHouse(group, t, color)
+    }
+
+    // hanging sign with the label — big, readable, above the door
+    const label = makeTextSprite(`${t.icon} ${t.label}`, { color: '#1c1a14', bg: '#fff4d8', size: 44 })
+    label.position.set(0, 7.4, 0)
+    group.add(label)
+
+    group.position.set(t.x, 0, t.z)
+    this.scene.add(group)
+    this.towerMeshes.push(group)
+  }
+
+  /** The standard tower: cube walls, slanted triangle roof, windows, door. */
+  private buildHouse(group: THREE.Group, t: Tower, color: THREE.Color): void {
     const wallMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.9 })
     const roofMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(1.25), roughness: 0.55 })
 
@@ -268,84 +295,285 @@ export class LabView {
         group.add(crate)
       }
     }
-
-    // hanging sign with the label — big, readable, above the door
-    const label = makeTextSprite(`${t.icon} ${t.label}`, { color: '#1c1a14', bg: '#fff4d8', size: 44 })
-    label.position.set(0, 7.4, 0)
-    group.add(label)
-
-    group.position.set(t.x, 0, t.z)
-    this.scene.add(group)
-    this.towerMeshes.push(group)
   }
 
-  // ── creatures: bigger ball + eyes + brows + mouth + carried stick ──
+  /** Graveyard: dark stone chapel + tombstones + fence around the plot. */
+  private buildGraveyard(group: THREE.Group): void {
+    const stone = new THREE.MeshStandardMaterial({ color: 0x7a7a86, roughness: 0.95 })
+    const darkRoof = new THREE.MeshStandardMaterial({ color: 0x3a3a42, roughness: 0.9 })
+    const darkTrim = new THREE.MeshStandardMaterial({ color: 0x2e2e34, roughness: 0.9 })
+
+    // walls + flat dark roof (with overhang)
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4, 6.5), stone)
+    walls.position.y = 2
+    group.add(walls)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.4, 7.6), darkRoof)
+    roof.position.y = 4.2
+    group.add(roof)
+
+    // door (dark)
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.1), darkTrim)
+    door.position.set(0, 1, 2.3)
+    group.add(door)
+
+    // tombstones: rounded-top slabs + a couple with a carved cross
+    const tombMat = new THREE.MeshStandardMaterial({ color: 0xb4b4be, roughness: 0.85 })
+    const makeTomb = (x: number, z: number, rounded: boolean): void => {
+      const tomb = new THREE.Group()
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.22), tombMat)
+      slab.position.y = 0.375
+      tomb.add(slab)
+      if (rounded) {
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), tombMat)
+        cap.scale.y = 0.72
+        cap.position.y = 0.75
+        tomb.add(cap)
+      } else {
+        const v = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.07), tombMat)
+        v.position.set(0, 0.55, 0.14)
+        const h = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.07), tombMat)
+        h.position.set(0, 0.62, 0.14)
+        tomb.add(v, h)
+      }
+      tomb.position.set(x, 0, z)
+      group.add(tomb)
+    }
+    makeTomb(-2.2, -2.3, true)
+    makeTomb(0.5, -2.5, false)
+    makeTomb(2.6, -1.7, true)
+    makeTomb(-1.0, 2.0, false)
+
+    // fence: thin posts + two rails around the plot
+    const fenceMat = new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 0.9 })
+    const R = 6.2
+    const posts = 12
+    for (let i = 0; i < posts; i++) {
+      const a = (i / posts) * Math.PI * 2
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.1, 0.16), fenceMat)
+      post.position.set(Math.cos(a) * R, 0.55, Math.sin(a) * R)
+      group.add(post)
+    }
+    for (let i = 0; i < posts; i++) {
+      const a0 = (i / posts) * Math.PI * 2
+      const a1 = ((i + 1) / posts) * Math.PI * 2
+      const dx = Math.cos(a1) - Math.cos(a0)
+      const dz = Math.sin(a1) - Math.sin(a0)
+      const len = Math.hypot(dx, dz) * R
+      const mx = (Math.cos(a0) + Math.cos(a1)) / 2
+      const mz = (Math.sin(a0) + Math.sin(a1)) / 2
+      const rotY = -Math.atan2(dz, dx)
+      for (const ry of [0.5, 0.95]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.08), fenceMat)
+        rail.position.set(mx * R, ry, mz * R)
+        rail.rotation.y = rotY
+        group.add(rail)
+      }
+    }
+  }
+
+  /** Den: shady low hideout — dark green walls, hanging herbs, amber window. */
+  private buildDen(group: THREE.Group): void {
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.95 })
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x2a3320, roughness: 0.85 })
+
+    // low walls + a low-pitched slanted roof
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 3.2, 6.5), wallMat)
+    walls.position.y = 1.6
+    group.add(walls)
+    const slope = 0.45
+    const half = 3.45
+    const roofH = half * slope
+    const wallTop = 3.2
+    const plane = (rotX: number, y: number): THREE.Mesh => {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(7.4, Math.hypot(half, roofH)), roofMat)
+      p.rotation.x = rotX
+      p.position.y = y
+      return p
+    }
+    group.add(plane(Math.PI / 2 - Math.atan(slope), roofH / 2 + wallTop))
+    group.add(plane(-(Math.PI / 2 - Math.atan(slope)), roofH / 2 + wallTop))
+    const gable = (rotY: number): THREE.Mesh => {
+      const shape = new THREE.Shape()
+      shape.moveTo(-half, 0)
+      shape.lineTo(half, 0)
+      shape.lineTo(0, roofH)
+      shape.closePath()
+      const g = new THREE.Mesh(new THREE.ShapeGeometry(shape), roofMat)
+      g.rotation.y = rotY
+      g.position.y = wallTop
+      return g
+    }
+    group.add(gable(0))
+    group.add(gable(Math.PI))
+    const ridge = new THREE.Mesh(new THREE.BoxGeometry(7.4, 0.25, 0.25), roofMat)
+    ridge.position.y = wallTop + roofH
+    group.add(ridge)
+
+    // glowing amber window
+    const amber = new THREE.MeshStandardMaterial({ color: 0xffb24d, emissive: 0xffa93d, emissiveIntensity: 1.6, roughness: 0.3 })
+    const win = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.08), amber)
+    win.position.set(0, 2.2, 2.3)
+    group.add(win)
+
+    // door (dark wood)
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 0.1), new THREE.MeshStandardMaterial({ color: 0x241c12 }))
+    door.position.set(0, 0.9, 2.3)
+    group.add(door)
+
+    // hanging herbs dangling from under the roof edge
+    const herbMat = new THREE.MeshStandardMaterial({ color: 0x4f9a3d, roughness: 0.7 })
+    const herbMat2 = new THREE.MeshStandardMaterial({ color: 0x6abf4f, roughness: 0.7 })
+    const hang = (x: number, z: number, len: number, r: number, mat: THREE.Material): void => {
+      const herb = new THREE.Group()
+      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.06, len, 0.06), herbMat)
+      stem.position.y = -len / 2
+      const bulb = new THREE.Mesh(new THREE.ConeGeometry(r, r * 1.8, 6), mat)
+      bulb.rotation.x = Math.PI
+      bulb.position.y = -len - r * 0.9
+      herb.add(stem, bulb)
+      herb.position.set(x, wallTop + 0.1, z)
+      group.add(herb)
+    }
+    hang(-2.4, -2.5, 0.5, 0.22, herbMat)
+    hang(-1.5, -2.6, 0.65, 0.28, herbMat2)
+    hang(2.3, -2.5, 0.45, 0.2, herbMat)
+    hang(2.9, -1.8, 0.6, 0.26, herbMat2)
+    hang(-2.8, 1.9, 0.55, 0.24, herbMat)
+  }
+
+  /** School: light blue-gray hall with a flat roof, a bell, and a book at the door. */
+  private buildSchool(group: THREE.Group): void {
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xa8b6c9, roughness: 0.9 })
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x5a6a80, roughness: 0.6 })
+
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4, 6.5), wallMat)
+    walls.position.y = 2
+    group.add(walls)
+
+    // flat roof with a slight overhang
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.35, 7.6), roofMat)
+    roof.position.y = 4.15
+    group.add(roof)
+
+    // small bell on the ridge: post + sphere + cone clapper
+    const bellMat = new THREE.MeshStandardMaterial({ color: 0xd8b04a, roughness: 0.4, metalness: 0.3 })
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.8, 0.14), bellMat)
+    post.position.y = 4.65
+    const bell = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), bellMat)
+    bell.position.y = 5.0
+    const bellTop = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 8), bellMat)
+    bellTop.position.y = 5.4
+    group.add(post, bell, bellTop)
+
+    // windows (light panes)
+    const winMat = new THREE.MeshStandardMaterial({ color: 0xdfe8f2, roughness: 0.3 })
+    for (const [wx, wz] of [[-2.3, 0], [2.3, 0], [0, -2.3]] as const) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.08), winMat)
+      win.position.set(wx, 2.6, wz)
+      group.add(win)
+    }
+
+    // door
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.1), new THREE.MeshStandardMaterial({ color: 0x4a3a28 }))
+    door.position.set(0, 1, 2.3)
+    group.add(door)
+
+    // book icon at the door: two open pages
+    const bookMat = new THREE.MeshStandardMaterial({ color: 0xf0e8d0, roughness: 0.7 })
+    const book = new THREE.Group()
+    const pageL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.34), bookMat)
+    pageL.rotation.z = 0.35
+    pageL.position.set(-0.24, 0, 0)
+    const pageR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.34), bookMat)
+    pageR.rotation.z = -0.35
+    pageR.position.set(0.24, 0, 0)
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.34), new THREE.MeshStandardMaterial({ color: 0x8a4a2a }))
+    book.add(pageL, pageR, spine)
+    book.position.set(0, 2.35, 2.42)
+    group.add(book)
+  }
+
+  // ── creatures: big ball + eyes + brows + mouth + carried stick + emotion badge ──
   private addCreature(c: Creature): void {
     const group = new THREE.Group()
     const hue = (c.id * 47) % 360
     const body = new THREE.Mesh(
-      new THREE.SphereGeometry(1.05, 22, 18),
+      new THREE.SphereGeometry(1.45, 24, 20),
       new THREE.MeshStandardMaterial({ color: `hsl(${hue} 40% 70%)`, roughness: 0.55 })
     )
-    body.position.y = 1.05
+    body.position.y = 1.45
     group.add(body)
 
     const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff })
     const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
     const makeEye = (x: number, z: number): THREE.Mesh => {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), eyeWhite)
-      eye.position.set(x, 1.42, z)
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), pupilMat)
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.39, 12, 10), eyeWhite)
+      eye.position.set(x, 1.95, z)
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), pupilMat)
       pupil.position.set(0, 0, 0.2)
       eye.add(pupil)
       group.add(eye)
       return eye
     }
-    const leftEye = makeEye(-0.4, 0.75)
-    const rightEye = makeEye(0.4, 0.75)
+    const leftEye = makeEye(-0.55, 1.0)
+    const rightEye = makeEye(0.55, 1.0)
 
     const browMat = new THREE.MeshStandardMaterial({ color: 0x2a2418 })
     const makeBrow = (x: number): THREE.Mesh => {
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.09, 0.09), browMat)
-      brow.position.set(x, 1.85, 0.75)
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.12, 0.12), browMat)
+      brow.position.set(x, 2.45, 1.0)
       group.add(brow)
       return brow
     }
-    const leftBrow = makeBrow(-0.4)
-    const rightBrow = makeBrow(0.4)
+    const leftBrow = makeBrow(-0.55)
+    const rightBrow = makeBrow(0.55)
 
     // mouth: a small flattened box that the emotion shapes (smile / frown / O)
     const mouth = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.09, 0.08),
+      new THREE.BoxGeometry(0.44, 0.12, 0.1),
       new THREE.MeshStandardMaterial({ color: 0x2a2418 })
     )
-    mouth.position.set(0, 1.05, 0.77)
+    mouth.position.set(0, 1.45, 1.5)
     group.add(mouth)
 
     // genetics-based hair — each ball looks different, children inherit
     const hair = this.buildHair(c, hue)
     group.add(hair)
 
-    // carried stick: a simple rectangle on the creature's side (visible when equipped)
+    // carried stick: a simple baton on the creature's side (visible when equipped)
     const stick = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.16, 1.7),
+      new THREE.BoxGeometry(0.2, 0.2, 2.2),
       new THREE.MeshStandardMaterial({ color: 0x76502f, roughness: 0.9 })
     )
-    stick.position.set(1.4, 1.05, 0)
+    stick.position.set(1.9, 1.45, 0)
     stick.rotation.z = Math.PI / 2
     stick.visible = false
     group.add(stick)
 
     // sleeping Zzz
     const sleepZ = makeTextSprite('💤', { size: 34 })
-    sleepZ.position.set(1.2, 2.7, 0.2)
+    sleepZ.position.set(1.6, 3.4, 0.2)
     sleepZ.visible = false
     group.add(sleepZ)
 
     // name label (small, toggle via opacity)
     const nameLabel = makeTextSprite(c.name, { size: 24, color: '#fff', bg: 'rgba(20,20,16,0.7)', radius: 10 })
-    nameLabel.position.set(0, 3.3, 0)
+    nameLabel.position.set(0, 4.2, 0)
     group.add(nameLabel)
+
+    // emotion badge: a tiny disc above the head that shows the mood color to everyone
+    const emotionBadgeGroup = new THREE.Group()
+    const badgeRing = new THREE.Mesh(
+      new THREE.CircleGeometry(0.42, 20),
+      new THREE.MeshBasicMaterial({ color: 0x1a1a16, side: THREE.DoubleSide, depthTest: false })
+    )
+    const emotionBadge = new THREE.Mesh(
+      new THREE.CircleGeometry(0.35, 20),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false })
+    )
+    emotionBadgeGroup.add(badgeRing, emotionBadge)
+    emotionBadgeGroup.position.set(0, 5.2, 0)
+    group.add(emotionBadgeGroup)
 
     group.position.set(c.pos.x, GROUND_Y, c.pos.z)
     this.scene.add(group)
@@ -363,6 +591,8 @@ export class LabView {
       nameLabel,
       stick,
       hair,
+      emotionBadge,
+      emotionBadgeGroup,
       phase: Math.random() * Math.PI * 2,
       targetX: c.pos.x,
       targetZ: c.pos.z,
@@ -375,15 +605,16 @@ export class LabView {
     const g = new THREE.Group()
     const h = hairStyle(c.genome, idHue)
     const mat = new THREE.MeshStandardMaterial({ color: h.color, roughness: 0.8 })
-    const topY = 1.3
-    const size = 0.55 + h.size * 0.3
+    const topY = 1.85
+    const S = 1.38 // body grew from radius 1.05 → 1.45
+    const size = (0.55 + h.size * 0.3) * S
 
     switch (h.style) {
       case 'spiky': {
         for (let i = 0; i < 7; i++) {
           const a = (i / 7) * Math.PI * 2
-          const spike = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.5 * h.size + 0.3, 5), mat)
-          spike.position.set(Math.cos(a) * 0.62, topY + 0.35, Math.sin(a) * 0.62)
+          const spike = new THREE.Mesh(new THREE.ConeGeometry(0.14 * S, (0.5 * h.size + 0.3) * S, 5), mat)
+          spike.position.set(Math.cos(a) * 0.62 * S, topY + 0.35 * S, Math.sin(a) * 0.62 * S)
           spike.rotation.x = Math.cos(a) * 0.5
           spike.rotation.z = -Math.sin(a) * 0.5
           g.add(spike)
@@ -391,16 +622,16 @@ export class LabView {
         break
       }
       case 'tuft': {
-        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6 * size, 6), mat)
-        tuft.position.set(0, topY + 0.4, 0)
+        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.28 * S, 0.6 * size, 6), mat)
+        tuft.position.set(0, topY + 0.4 * S, 0)
         g.add(tuft)
         break
       }
       case 'curly': {
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2
-          const curl = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), mat)
-          curl.position.set(Math.cos(a) * 0.76, topY + 0.22, Math.sin(a) * 0.76)
+          const curl = new THREE.Mesh(new THREE.SphereGeometry(0.2 * S, 8, 6), mat)
+          curl.position.set(Math.cos(a) * 0.76 * S, topY + 0.22 * S, Math.sin(a) * 0.76 * S)
           g.add(curl)
         }
         break
@@ -408,16 +639,16 @@ export class LabView {
       case 'long': {
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * Math.PI * 2
-          const strand = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.85, 0.12), mat)
-          strand.position.set(Math.cos(a) * 0.74, topY - 0.12, Math.sin(a) * 0.74)
+          const strand = new THREE.Mesh(new THREE.BoxGeometry(0.12 * S, 0.85 * S, 0.12 * S), mat)
+          strand.position.set(Math.cos(a) * 0.74 * S, topY - 0.12 * S, Math.sin(a) * 0.74 * S)
           g.add(strand)
         }
         break
       }
       case 'buzz': {
-        const cap = new THREE.Mesh(new THREE.SphereGeometry(1.06, 16, 8), mat)
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(1.06 * S, 16, 8), mat)
         cap.scale.y = 0.55
-        cap.position.y = topY - 0.18
+        cap.position.y = topY - 0.18 * S
         g.add(cap)
         break
       }
@@ -464,6 +695,30 @@ export class LabView {
       mesh.position.set(d.x, 0.5, d.z)
       this.scene.add(mesh)
       this.dropMarkers.push({ drop: { kind: d.kind, x: d.x, z: d.z }, mesh })
+    }
+  }
+
+  /** Keep a tiny gray slab at every grave so buried creatures stay visible. */
+  private syncGraves(): void {
+    const live = new Set(this.sim.graves.map((g) => g.creatureId))
+    for (let i = this.graveMarkers.length - 1; i >= 0; i--) {
+      if (!live.has(this.graveMarkers[i].id)) {
+        this.scene.remove(this.graveMarkers[i].mesh)
+        this.graveMarkers.splice(i, 1)
+      }
+    }
+    const slabMat = new THREE.MeshStandardMaterial({ color: 0x9a9aa4, roughness: 0.85 })
+    for (const g of this.sim.graves) {
+      if (this.graveMarkers.some((m) => m.id === g.creatureId)) continue
+      const mesh = new THREE.Group()
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.14, 0.5), slabMat)
+      slab.position.y = 0.07
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.12), slabMat)
+      head.position.y = 0.29
+      mesh.add(slab, head)
+      mesh.position.set(g.x, 0, g.z)
+      this.scene.add(mesh)
+      this.graveMarkers.push({ id: g.creatureId, mesh })
     }
   }
 
@@ -621,6 +876,7 @@ export class LabView {
     this.consumeEvents()
     this.syncNewCreatures()
     this.syncDrops()
+    this.syncGraves()
     this.syncRigs(dt)
     this.updateParticles(dt)
     this.updateCamera(dt)
@@ -636,15 +892,19 @@ export class LabView {
       const body = rig.body.material as THREE.MeshStandardMaterial
       body.color.lerp(new THREE.Color(emo.color), 1 - Math.pow(0.001, dt))
 
-      // position
+      // position — slower follow while hauling a corpse
       rig.targetX = c.pos.x
       rig.targetZ = c.pos.z
-      rig.group.position.x += (rig.targetX - rig.group.position.x) * 0.35
-      rig.group.position.z += (rig.targetZ - rig.group.position.z) * 0.35
+      const hauling = c.action === 'carry' || c.action === 'bury'
+      const follow = hauling ? 0.16 : 0.35
+      rig.group.position.x += (rig.targetX - rig.group.position.x) * follow
+      rig.group.position.z += (rig.targetZ - rig.group.position.z) * follow
 
-      // carried stick: visible when the creature owns a weapon, swings during fights
+      // carried stick: visible when the creature owns a weapon, swings during fights,
+      // flicks once when darting off with stolen goods
       rig.stick.visible = c.weapon === 'stick'
       if (c.action === 'fight') rig.swing = 1
+      if (c.action === 'steal' && rig.stick.visible) rig.swing = 1
       if (rig.swing > 0) {
         rig.swing = Math.max(0, rig.swing - dt * 3)
         rig.stick.rotation.z = Math.PI / 2 + Math.sin((1 - rig.swing) * Math.PI) * 1.4
@@ -652,7 +912,7 @@ export class LabView {
         rig.stick.rotation.z = Math.PI / 2
       }
 
-      // bob / hop / tremble / sleep / dead
+      // bob / hop / lunge / tremble / sleep / dead
       const baseY = 0
       let y = baseY
       if (!c.alive) {
@@ -663,6 +923,30 @@ export class LabView {
         y = baseY + 0.02
         rig.group.rotation.x = 0.9
         rig.sleepZ.visible = true
+      } else if (c.action === 'fight') {
+        // lunge: fast y-bob + a slight tilt into the facing direction
+        rig.group.rotation.x = 0
+        rig.group.rotation.z = 0
+        rig.sleepZ.visible = false
+        const lunge = Math.sin(t * 15 + rig.phase)
+        y = baseY + Math.abs(lunge) * 0.3
+        rig.group.rotation.x = lunge * 0.18 * Math.cos(c.facing)
+        rig.group.rotation.z = -lunge * 0.18 * Math.sin(c.facing)
+      } else if (c.action === 'steal') {
+        // dart: quick sideways hop perpendicular to the facing direction
+        rig.group.rotation.x = 0
+        rig.group.rotation.z = 0
+        rig.sleepZ.visible = false
+        const dart = Math.sin(t * 20 + rig.phase)
+        y = baseY + Math.abs(dart) * 0.2
+        rig.group.position.x += dart * 0.3 * -Math.sin(c.facing)
+        rig.group.position.z += dart * 0.3 * Math.cos(c.facing)
+      } else if (hauling) {
+        // carrying a corpse: hunched low, no bounce
+        rig.group.rotation.x = 0
+        rig.group.rotation.z = 0
+        rig.sleepZ.visible = false
+        y = baseY - 0.3
       } else {
         rig.group.rotation.x = 0
         rig.sleepZ.visible = false
@@ -681,6 +965,10 @@ export class LabView {
       // face: brows + eye size + mouth
       this.applyFace(rig, emo.type, emo.intensity)
 
+      // emotion badge: tint the disc with the mood color, keep it facing the camera
+      ;(rig.emotionBadge.material as THREE.MeshBasicMaterial).color.set(emo.color)
+      rig.emotionBadgeGroup.lookAt(this.camera.position)
+
       // name label subtle
       rig.nameLabel.material.opacity = 0.85
     }
@@ -691,71 +979,69 @@ export class LabView {
     const scale = 1 + (intensity - 0.5) * 0.2
     rig.leftEye.scale.setScalar(scale)
     rig.rightEye.scale.setScalar(scale)
-    rig.leftEye.position.z = 0.75 + (0.55 - scale) * 0.6
-    rig.rightEye.position.z = 0.75 + (0.55 - scale) * 0.6
 
     const mouth = rig.mouth
     switch (emo) {
       case 'happy':
         rig.leftBrow.rotation.z = -0.35 * tilt
         rig.rightBrow.rotation.z = 0.35 * tilt
-        rig.leftBrow.position.y = 1.93
-        rig.rightBrow.position.y = 1.93
+        rig.leftBrow.position.y = 2.53
+        rig.rightBrow.position.y = 2.53
         mouth.scale.set(1.2, 0.5, 1) // wide smile
-        mouth.position.y = 0.98
+        mouth.position.y = 1.38
         break
       case 'angry':
         rig.leftBrow.rotation.z = 0.5 * tilt
         rig.rightBrow.rotation.z = -0.5 * tilt
-        rig.leftBrow.position.y = 1.85
-        rig.rightBrow.position.y = 1.85
+        rig.leftBrow.position.y = 2.45
+        rig.rightBrow.position.y = 2.45
         mouth.scale.set(1.1, 0.5, 1) // gritted
-        mouth.position.y = 1.0
+        mouth.position.y = 1.4
         break
       case 'afraid':
         rig.leftBrow.rotation.z = -0.2
         rig.rightBrow.rotation.z = 0.2
-        rig.leftBrow.position.y = 2.05
-        rig.rightBrow.position.y = 2.05
+        rig.leftBrow.position.y = 2.65
+        rig.rightBrow.position.y = 2.65
         mouth.scale.set(0.7, 1.4, 1) // small O
-        mouth.position.y = 0.98
+        mouth.position.y = 1.38
         break
       case 'sad':
         rig.leftBrow.rotation.z = 0.22
         rig.rightBrow.rotation.z = -0.22
-        rig.leftBrow.position.y = 1.78
-        rig.rightBrow.position.y = 1.78
+        rig.leftBrow.position.y = 2.38
+        rig.rightBrow.position.y = 2.38
         mouth.scale.set(0.9, 0.5, 1) // small frown
         mouth.rotation.x = 0.5
-        mouth.position.y = 0.9
+        mouth.position.y = 1.3
         break
       case 'sleepy':
         rig.leftBrow.rotation.z = 0.1
         rig.rightBrow.rotation.z = -0.1
-        rig.leftBrow.position.y = 1.85
-        rig.rightBrow.position.y = 1.85
+        rig.leftBrow.position.y = 2.45
+        rig.rightBrow.position.y = 2.45
         rig.leftEye.scale.y = 0.35
         rig.rightEye.scale.y = 0.35
         mouth.scale.set(0.8, 0.4, 1)
         mouth.rotation.x = 0
-        mouth.position.y = 1.0
+        mouth.position.y = 1.4
         break
       case 'loving':
         rig.leftBrow.rotation.z = -0.25
         rig.rightBrow.rotation.z = 0.25
-        rig.leftBrow.position.y = 1.95
-        rig.rightBrow.position.y = 1.95
+        rig.leftBrow.position.y = 2.55
+        rig.rightBrow.position.y = 2.55
         mouth.scale.set(1.1, 0.6, 1) // warm smile
-        mouth.position.y = 1.0
+        mouth.position.y = 1.4
         break
       default: // content
         rig.leftBrow.rotation.z = 0
         rig.rightBrow.rotation.z = 0
-        rig.leftBrow.position.y = 1.85
-        rig.rightBrow.position.y = 1.85
+        rig.leftBrow.position.y = 2.45
+        rig.rightBrow.position.y = 2.45
         mouth.scale.set(1, 0.6, 1)
         mouth.rotation.x = 0
-        mouth.position.y = 1.05
+        mouth.position.y = 1.45
     }
   }
 
@@ -879,10 +1165,10 @@ export class LabView {
     let best: { id: number; dist: number; x: number; z: number } | null = null
     for (const rig of this.rigs) {
       if (!rig.creature.alive) continue
-      const p = new THREE.Vector3(rig.group.position.x, 0.55, rig.group.position.z)
+      const p = new THREE.Vector3(rig.group.position.x, 1.2, rig.group.position.z)
       const ray = this.raycaster.ray
       const t0 = ray.distanceToPoint(p)
-      if (t0 < 1.4) {
+      if (t0 < 1.9) {
         const dx = rig.group.position.x - this.camera.position.x
         const dz = rig.group.position.z - this.camera.position.z
         const d = Math.hypot(dx, dz)

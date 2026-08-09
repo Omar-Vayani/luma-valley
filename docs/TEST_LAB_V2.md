@@ -213,3 +213,35 @@ For each candidate action, score = need deficit × personality weight × prefere
 3. Renderer — ball creatures + eyes/emotions, towers+labels, events
 4. App/UI — observer cam, dock, chip, no messages
 5. Gates + viewport QA + deploy (rsync/nginx) + verify HTTPS prod
+
+## Changelog — iteration 2026-08-09 (economy + emotions + society depth)
+
+- **Economy made complex**: work tower (timed shifts, stay to earn), priced
+  goods (bread/medicine/brew/weapon/herb/spark/tonic), supply & demand +
+  scarcity (stock drains, prices rise, slow restock), nothing free. Broke
+  creatures work before buying; starving damages health.
+- **Utility mind** (src/lab/mind.ts): all actions scored by need × gene ×
+  memory × opportunity + free-will noise; committed for a few ticks.
+- **Substances** (src/lab/substances.ts): brew (tavern), herb + spark (den),
+  tonic (pharmacy) — distinct effects, per-substance addiction + withdrawal.
+- **Gangs are groups, not a building**: tribal creatures who meet cooperate
+  (gangId); gangmates defend each other, never fight each other. Gentle
+  loners stay solo.
+- **Meaningful love**: partners follow each other, get jealous when the
+  partner bonds elsewhere; lover death → grief → carry body to graveyard →
+  grave stone persists. Burial duty overrides the mind.
+- **School** (-32,44): education raises work earnings a little per level.
+- **Graveyard** (32,44): graves for buried creatures; renderer shows
+  tombstones.
+- **Human drives** (src/lab/drives.ts): importance, approval, ego, tribalism,
+  conformity, reciprocity, loss aversion, greed, curiosity, legacy — shape
+  utility weights; respond to praise/shame/victory/defeat/gift/theft.
+- **World grid**: food bank pharmacy / homes tools / tavern gym den /
+  school work graveyard (11 towers).
+- **Renderer**: bigger creatures (r1.45), emotion badges (feelings readable),
+  fight lunge / steal dart / carry-bury animations, den/school/graveyard
+  building themes.
+- **UI**: chip compact by default + "show more" for full stats (drives,
+  bonds, education, jealousy, addiction).
+- **Save**: version 4 (graves, drives, education, intentions, jealousy,
+  buried).

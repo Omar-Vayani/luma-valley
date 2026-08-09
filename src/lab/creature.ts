@@ -5,6 +5,7 @@
  */
 import { createChem, applyFood, applySleep, applySocial, type ChemState } from './chem'
 import { createMemory, type MemoryState } from './memory'
+import { createDrives, type Drives } from './drives'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -33,6 +34,10 @@ export interface Creature {
   gratitude: Record<number, number> // creatureId -> gratitude toward them
   intention: ActionName | null // the action the mind is committed to
   intentionTicks: number // ticks remaining on the current commitment
+  education: number // schooling level — raises work earnings a little each time
+  buried: boolean // true when carried to the graveyard
+  jealousy: number // 0..1 — how much the partner's outside bonds sting
+  drives: Drives
   hurt(amount: number): void
   pay(amount: number): boolean
   deposit(amount: number): void
@@ -72,6 +77,10 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     gratitude: {},
     intention: null,
     intentionTicks: 0,
+    education: 0,
+    buried: false,
+    jealousy: 0,
+    drives: createDrives(),
     hurt(amount: number): void {
       if (!c.alive) return
       c.chem.health = clamp01(c.chem.health - amount)

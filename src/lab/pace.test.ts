@@ -27,7 +27,7 @@ describe('play/exercise tower — strength and joy', () => {
     expect(TOWER_IDS).toContain('play')
     const play = TOWERS.find((t) => t.id === 'play')
     expect(play).toBeDefined()
-    expect(play?.label).toBe('play')
+    expect(play?.label).toBe('gym')
   })
 
   it('playing raises pleasure and strength', () => {
@@ -44,7 +44,7 @@ describe('play/exercise tower — strength and joy', () => {
     const c = s.spawnCreature(GEN(), 28, 28) // at play tower in the new grid
     c.chem.hunger = 0.4
     c.chem.pleasure = 0.2 // bored → seeks play
-    c.pos = { x: 28, z: 28 }
+    c.pos = { x: 0, z: 32 }
     s.tick()
     expect(c.action).toBe('play')
     expect(c.chem.strength).toBeGreaterThan(0)
