@@ -6,7 +6,7 @@
  */
 import { clamp, type RNG } from './rng'
 
-export type TraumaTrigger = 'shadow' | 'player' | 'drop' | 'fire' | 'noise' | 'poison' | 'abandonment'
+export type TraumaTrigger = 'shadow' | 'player' | 'stick' | 'drop' | 'fire' | 'noise' | 'poison' | 'abandonment'
 
 export interface TraumaMemory {
   id: number
@@ -39,6 +39,7 @@ export function createPsyche(): PsycheState {
 const TRIGGER_NAMES: Record<TraumaTrigger, string> = {
   shadow: 'the Shadow Beast',
   player: 'you',
+  stick: 'your raised stick',
   drop: 'falling from the sky',
   fire: 'fire',
   noise: 'a terrible noise',

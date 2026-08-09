@@ -46,6 +46,7 @@ export interface GameSettings {
  * action on a focused citizen — it never draws from or adds to an inventory.
  */
 export type OverseerTool = 'stick' | 'whip' | 'heal' | 'feed' | 'comfort' | 'amuse'
+export type EquippedTool = 'stick'
 
 export interface GameView {
   world: World
@@ -125,6 +126,8 @@ export class Game {
   world: World
   creatures: Creature[] = []
   player: PlayerState
+  /** A held observer tool is a stance, not an inventory item. */
+  equippedTool: EquippedTool | null = null
   shadowBeasts: ShadowBeast[] = []
   quests: QuestLogState
   society: SocietyState
@@ -721,6 +724,40 @@ export class Game {
   }
 
   /**
+   * Equip or holster a held observer tool. This is a stance, never inventory.
+   * Citizens who personally survived a stick blow recognise it when raised
+   * nearby; untouched citizens and distant survivors do not react.
+   */
+  setEquippedTool(tool: EquippedTool | null): { equipped: EquippedTool | null; scaredIds: number[] } {
+    const changed = this.equippedTool !== tool
+    this.equippedTool = tool
+    const scaredIds: number[] = []
+    if (!changed || tool !== 'stick') return { equipped: this.equippedTool, scaredIds }
+
+    for (const c of this.creatures) {
+      if (!c.alive || Math.hypot(c.pos.x - this.player.pos.x, c.pos.z - this.player.pos.z) > 12) continue
+      const memory = c.psyche.memories.find((candidate) => candidate.trigger === 'stick')
+      if (!memory) continue
+      c.chem.fear = Math.max(c.chem.fear, clamp(0.32 + memory.intensity * 0.45, 0, 1))
+      c.psyche.flashbackTimer = Math.max(c.psyche.flashbackTimer, 45)
+      c.log('sees you raise the stick and recoils — it remembers the blows')
+      scaredIds.push(c.id)
+    }
+    return { equipped: this.equippedTool, scaredIds }
+  }
+
+  /** Strike only a living citizen within physical reach of the held stick. */
+  strikeWithEquippedStick(creatureId: number): { ok: boolean; msg: string } {
+    if (this.equippedTool !== 'stick') return { ok: false, msg: 'Equip the stick first.' }
+    const c = this.creatures.find((candidate) => candidate.id === creatureId && candidate.alive)
+    if (!c) return { ok: false, msg: 'No one is there.' }
+    if (Math.hypot(c.pos.x - this.player.pos.x, c.pos.z - this.player.pos.z) > 4) {
+      return { ok: false, msg: `${c.name} is out of reach.` }
+    }
+    return this.useOverseerTool(creatureId, 'stick')
+  }
+
+  /**
    * Apply one overseer tool to a focused living citizen (SOCIETY_REBUILD.md).
    * Tools are inexhaustible observer actions — never inventory. Beneficial
    * tools ease needs and build trust; stick/whip deal bounded harm, fear,
@@ -785,7 +822,9 @@ export class Game {
         c.chem.pain = clamp(c.chem.pain + 0.18, 0, 1)
         c.chem.fear = clamp(c.chem.fear + 0.22, 0, 1)
         c.psyche.trust = clamp(c.psyche.trust - 0.12, 0, 1)
-        c.scare('player', 0.24, 'your raised stick')
+        // Cross the trauma threshold so a citizen who personally experiences
+        // a blow recognises the stick when it is equipped again later.
+        c.scare('stick', 0.32, 'your raised stick')
         this.emit('terrorised', 1)
         this.teachWitnesses(c, 'cruel')
         return { ok: true, msg: `${c.name} flinches — pain and fear, and trust in you fades. Witnesses remember.` }
@@ -892,8 +931,9 @@ export class Game {
     // floats rounded, market maps reconstructed from market on load)
     data.extra = {
       carriedId: this.carriedId ?? undefined,
+      equippedTool: this.equippedTool ?? undefined,
       society: compactSociety(this.society, 4),
-    } as any
+    }
     return data
   }
 
@@ -908,6 +948,7 @@ export class Game {
     this.seedCityFood()
     this.installCityCollision()
     this.carriedId = (data as any).extra?.carriedId ?? null
+    this.equippedTool = (data as any).extra?.equippedTool === 'stick' ? 'stick' : null
     if (data.player) {
       this.player = {
         pos: { ...data.player.pos },

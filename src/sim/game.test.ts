@@ -729,6 +729,84 @@ describe('game observer tools', () => {
   })
 })
 
+describe('equipped stick', () => {
+  it('starts empty and can equip or holster the stick without inventory', () => {
+    const g = new Game(340)
+    expect(g.equippedTool).toBeNull()
+    expect(g.setEquippedTool('stick').equipped).toBe('stick')
+    expect(g.equippedTool).toBe('stick')
+    expect(g.setEquippedTool(null).equipped).toBeNull()
+  })
+
+  it('only strikes a nearby living citizen while the stick is equipped', () => {
+    const g = new Game(341)
+    g.spawnInitial(2)
+    const target = g.creatures[0]
+    target.pos = { x: 0, z: 0 }
+    g.player.pos = { x: 0, z: 2 }
+    expect(g.strikeWithEquippedStick(target.id).ok).toBe(false)
+    g.setEquippedTool('stick')
+    const health = target.chem.health
+    const result = g.strikeWithEquippedStick(target.id)
+    expect(result.ok).toBe(true)
+    expect(target.chem.health).toBeLessThan(health)
+    expect(target.psyche.memories.some((memory) => memory.trigger === 'stick')).toBe(true)
+    target.pos = { x: 20, z: 20 }
+    expect(g.strikeWithEquippedStick(target.id).ok).toBe(false)
+  })
+
+  it('re-equipping the stick scares nearby citizens who previously experienced it', () => {
+    const g = new Game(342)
+    g.spawnInitial(4)
+    const survivor = g.creatures[0]
+    const untouched = g.creatures[1]
+    const farSurvivor = g.creatures[2]
+    const otherPlayerTrauma = g.creatures[3]
+    g.player.pos = { x: 0, z: 0 }
+    survivor.pos = { x: 0, z: 2 }
+    untouched.pos = { x: 2, z: 0 }
+    farSurvivor.pos = { x: 20, z: 20 }
+    otherPlayerTrauma.pos = { x: 1, z: 1 }
+    otherPlayerTrauma.scare('player', 0.9, 'your looming hand')
+    g.setEquippedTool('stick')
+    expect(g.strikeWithEquippedStick(survivor.id).ok).toBe(true)
+    // Give the distant citizen the same lived experience, then move them away.
+    farSurvivor.pos = { x: 0, z: 2 }
+    expect(g.strikeWithEquippedStick(farSurvivor.id).ok).toBe(true)
+    farSurvivor.pos = { x: 20, z: 20 }
+    g.setEquippedTool(null)
+    survivor.chem.fear = 0
+    untouched.chem.fear = 0
+    farSurvivor.chem.fear = 0
+    otherPlayerTrauma.chem.fear = 0
+    const reaction = g.setEquippedTool('stick')
+    expect(reaction.scaredIds).toContain(survivor.id)
+    expect(reaction.scaredIds).not.toContain(untouched.id)
+    expect(reaction.scaredIds).not.toContain(farSurvivor.id)
+    expect(reaction.scaredIds).not.toContain(otherPlayerTrauma.id)
+    expect(survivor.chem.fear).toBeGreaterThan(0.3)
+    expect(untouched.chem.fear).toBe(0)
+    expect(farSurvivor.chem.fear).toBe(0)
+    expect(otherPlayerTrauma.chem.fear).toBe(0)
+  })
+
+  it('round-trips the equipped stance and treats old saves as holstered', () => {
+    const g = new Game(343)
+    g.setEquippedTool('stick')
+    const save = g.save()
+    expect((save.extra as { equippedTool?: string }).equippedTool).toBe('stick')
+
+    const restored = new Game(344)
+    restored.load(save)
+    expect(restored.equippedTool).toBe('stick')
+
+    delete (save.extra as { equippedTool?: string }).equippedTool
+    const legacy = new Game(345)
+    legacy.load(save)
+    expect(legacy.equippedTool).toBeNull()
+  })
+})
+
 describe('game observer tools — society end-to-end', () => {
   it('beneficial tools raise the target society NPC trust and warm witness memories', () => {
     const g = new Game(320)

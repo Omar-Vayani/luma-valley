@@ -6,6 +6,7 @@ import { createUrbanState, type UrbanState } from './city'
 import type { ChemicalState } from './biochem'
 import { describeGenome, type Genome } from './genetics'
 import type { SocietySave } from './society'
+import type { TraumaTrigger } from './trauma'
 
 /**
  * Save — compact serialization for one player's whole world.
@@ -20,7 +21,7 @@ export interface SaveData {
   creatures: SavedCreature[]
   nextId: number
   time: number
-  extra?: { carriedId?: number | null; society?: SocietySave }
+  extra?: { carriedId?: number | null; equippedTool?: 'stick'; society?: SocietySave }
   player: {
     pos: { x: number; z: number }
     facingYaw: number
@@ -175,7 +176,7 @@ export function applySave(data: SaveData, world: World, creatures: Creature[]): 
     if (sc.psyche) {
       c.psyche.memories = sc.psyche.memories.map((m, i) => ({
         id: i + 1,
-        trigger: m.trigger as 'shadow' | 'player' | 'drop' | 'fire' | 'noise' | 'poison' | 'abandonment',
+        trigger: m.trigger as TraumaTrigger,
         intensity: m.intensity,
         createdAt: c.age,
         healTimer: 0,

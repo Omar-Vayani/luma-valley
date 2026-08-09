@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync('src/App.tsx', 'utf8')
+const gameview = readFileSync('src/render/gameview.ts', 'utf8')
 
 describe('App observer UI', () => {
   it('wires all six overseer tools to useOverseerTool', () => {
@@ -64,11 +65,25 @@ describe('App observer UI', () => {
     expect(app).toContain('rel-row')
   })
 
-  it('keeps dismissible bottom-safe messages and the minimal top strip', () => {
+  it('keeps one dismissible message and a combined minimal top strip', () => {
     expect(app).toContain('dismissMessage')
     expect(app).toContain('msg-close')
     expect(app).toContain('data-msg-stack')
-    expect(app).toContain('data-status="population"')
-    expect(app).toContain('data-status="day"')
+    expect(app).toContain('setMessages([{ id, text, kind }])')
+    expect(app).toContain('data-status="city"')
+    expect(app).not.toContain('data-status="population"')
+    expect(app).not.toContain('data-status="day"')
+  })
+
+  it('keeps the city panels behind one dock button and exposes an equippable stick slot', () => {
+    expect(app).toContain('data-hud-dock')
+    expect(app).toContain('data-hud="city"')
+    expect(app).toContain('data-equipped={game?.equippedTool')
+    expect(app).toContain('toggleStick')
+    expect(app).toContain('handleStrike')
+    expect(app).toContain('onToggleStick: () => toggleStick()')
+    expect(gameview).toContain("event.code === 'Digit1'")
+    expect(gameview).toContain('this.callbacks.onToggleStick?.()')
+    expect(app).not.toContain('className="hud-tabs"')
   })
 })

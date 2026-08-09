@@ -18,6 +18,7 @@ import {
 } from './render/fps'
 
 import './index.css'
+import './hud-quiet.css'
 
 const AUTOSAVE_KEY = 'autosave'
 const SLOTS = ['slot1', 'slot2', 'slot3']
@@ -69,6 +70,18 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
   )
 }
 
+function HudPanelTabs({ active, onChange }: { active: HudTab; onChange: (tab: HudTab) => void }) {
+  return (
+    <nav className="panel-tabs" aria-label="City information">
+      {HUD_TABS.map((tab) => (
+        <button key={tab.id} className={active === tab.id ? 'panel-tab-active' : ''} data-hud-tab={tab.id} onClick={() => onChange(tab.id)}>
+          {tab.label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
 const trustColor = (t: number): string => `hsl(${Math.round(Math.min(1, Math.max(0, t)) * 120)} 70% 45%)`
 
 /** Map one society event to a readable observer line (Society tab). */
@@ -109,7 +122,7 @@ export default function App() {
   const [menu, setMenu] = useState<MenuState>('closed')
   const [gentle, setGentle] = useState(false)
   const [soundOn, setSoundOn] = useState(true)
-  const [names, setNames] = useState(true)
+  const [names, setNames] = useState(false)
   const [word, setWord] = useState('')
   const [hasSave, setHasSave] = useState(false)
   const [exploring, setExploring] = useState(false)
@@ -134,7 +147,7 @@ export default function App() {
 
   const pushMessage = useCallback((text: string, kind: 'info' | 'warn' = 'info'): void => {
     const id = ++msgIdRef.current
-    setMessages((prev) => [...prev.slice(-2), { id, text, kind }])
+    setMessages([{ id, text, kind }])
     window.setTimeout(() => {
       setMessages((prev) => prev.filter((m) => m.id !== id))
     }, MESSAGE_MS)
@@ -172,12 +185,15 @@ export default function App() {
 
     if (viewRef.current) viewRef.current.dispose()
     const view = new GameView(mountRef.current!, g, sound, {
-      onSelect: (id) => { setSelectedId(id); setDetailsOpen(false); if (id !== null) setHudTab('people') },
+      onSelect: (id) => { setSelectedId(id); setDetailsOpen(false) },
       onInteract: (ev) => handleInteract(ev),
+      onStrike: (id) => handleStrike(id),
+      onToggleStick: () => toggleStick(),
       onLockChange: (l) => setLocked(l),
       onQuestHint: (t) => pushMessage(t),
     })
     viewRef.current = view
+    view.setShowNames(names)
     // Keep the mobile playfield unobstructed until the player selects a Luma.
     setSelectedId(null)
     setHudTab(null)
@@ -266,6 +282,35 @@ export default function App() {
       soundRef.current?.click()
     }
     setTick((t) => t + 1)
+  }
+
+  const handleStrike = (creatureId: number): void => {
+    const g = gameRef.current
+    if (!g) return
+    const target = g.selectedCreature(creatureId)
+    const result = g.strikeWithEquippedStick(creatureId)
+    if (result.ok) {
+      viewRef.current?.swingEquippedTool()
+      soundRef.current?.voice(target?.traits.voicePitch ?? .7, 'sad')
+    }
+    pushMessage(result.msg, result.ok ? 'warn' : 'info')
+    setTick((current) => current + 1)
+  }
+
+  const toggleStick = (): void => {
+    const g = gameRef.current
+    if (!g) return
+    const next = g.equippedTool === 'stick' ? null : 'stick'
+    const result = g.setEquippedTool(next)
+    soundRef.current?.click()
+    if (next === 'stick') {
+      pushMessage(result.scaredIds.length > 0
+        ? `${result.scaredIds.length} ${result.scaredIds.length === 1 ? 'survivor recoils' : 'survivors recoil'} when the stick appears. They remember.`
+        : 'Stick equipped. Get within reach and focus a citizen to swing.', result.scaredIds.length > 0 ? 'warn' : 'info')
+    } else {
+      pushMessage('Stick holstered.')
+    }
+    setTick((current) => current + 1)
   }
 
   const act = (fn: () => boolean | void, snd?: () => void): void => {
@@ -390,8 +435,7 @@ export default function App() {
       <header className="topbar" data-status-strip>
         <h1 className="logo">Luma · Old City</h1>
         <div className="topbar-right">
-          <span className="pill" data-status="population">🕊 {alive}</span>
-          <span className="pill" data-status="day">{dayLabel}</span>
+          <span className="pill" data-status="city">🕊 {alive} · {dayLabel}</span>
           <button className="icon-btn" onClick={() => setMenu('menu')} aria-label="Menu" data-hud="menu">☰</button>
         </div>
       </header>
@@ -399,9 +443,9 @@ export default function App() {
       {/* Crosshair — the center camera prompt; notifications never cover it */}
       {inGame && <div className={`crosshair ${interactionFocus ? `has-focus focus-${interactionFocus.kind}` : ''}`} data-crosshair data-focus={interactionFocus?.kind ?? 'none'} />}
 
-      {interactionHint && (
+      {interactionHint && !hudTab && (
         <div className="interaction-prompt focus-chip" data-focus-chip>
-          ✦ {interactionHint} · {Math.round(interactionFocus?.distance ?? 0)}m · {isTouch ? 'tap or use hand' : 'click or F'}
+          {game?.equippedTool === 'stick' ? '🪵' : '✦'} {interactionHint} · {Math.round(interactionFocus?.distance ?? 0)}m
         </div>
       )}
 
@@ -419,17 +463,20 @@ export default function App() {
         </>
       )}
 
-      {isTouch && inGame && !hasLooked && (
+      {isTouch && inGame && !hasLooked && !hudTab && (
         <div className="control-tip" data-control-tip>Drag the street to look around<br /><span>The city follows your finger</span></div>
       )}
 
       {/* Touch action buttons — 48px targets, above the gesture surface */}
-      {isTouch && inGame && (
-        <button className="interact-btn" data-touch-btn="interact" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label="Interact">
-          🤲<span>{interactionFocus ? `${interactionFocus.kind === 'creature' ? 'Meet' : 'Visit'} ${interactionFocus.name}` : 'Walk closer'}</span>
+      {isTouch && inGame && !hudTab && (
+        <button className={`interact-btn ${game?.equippedTool === 'stick' ? 'interact-btn-danger' : ''}`} data-touch-btn="interact" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label={game?.equippedTool === 'stick' ? 'Swing stick' : 'Interact'}>
+          {game?.equippedTool === 'stick' ? '💥' : '🤲'}
+          <span>{interactionFocus
+            ? `${game?.equippedTool === 'stick' && interactionFocus.kind === 'creature' ? 'Hit' : interactionFocus.kind === 'creature' ? 'Meet' : 'Visit'} ${interactionFocus.name}`
+            : 'Walk closer'}</span>
         </button>
       )}
-      {isTouch && inGame && (
+      {isTouch && inGame && !hudTab && (
         <button
           className="jump-btn"
           data-touch-btn="jump"
@@ -446,26 +493,38 @@ export default function App() {
         </button>
       )}
 
-      {/* Expandable HUD tabs */}
+      {/* Two quiet anchors: city information and the held stick. */}
       {started && inGame && (
-        <nav className="hud-tabs" data-hud-tabs aria-label="HUD panels">
-          {HUD_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`hud-tab ${hudTab === tab.id ? 'hud-tab-active' : ''}`}
-              data-hud-tab={tab.id}
-              aria-pressed={hudTab === tab.id}
-              onClick={() => setHudTab(hudTab === tab.id ? null : tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+        <div className="hud-dock" data-hud-dock>
+          <button
+            className={`dock-btn ${hudTab ? 'dock-btn-active' : ''}`}
+            data-hud="city"
+            aria-label="Open city information"
+            aria-expanded={hudTab !== null}
+            onClick={() => {
+              setMessages([])
+              setHudTab(hudTab ? null : 'people')
+            }}
+          >
+            <span>🏘</span><small>City</small>
+          </button>
+          <button
+            className={`dock-btn stick-slot ${game?.equippedTool === 'stick' ? 'stick-equipped' : ''}`}
+            data-tool="stick"
+            data-tool-ready="true"
+            data-equipped={game?.equippedTool === 'stick'}
+            aria-pressed={game?.equippedTool === 'stick'}
+            onClick={toggleStick}
+          >
+            <span>🪵</span><small>{game?.equippedTool === 'stick' ? 'Holster' : 'Stick'}</small>
+          </button>
+        </div>
       )}
 
-      {/* Expandable HUD panels */}
+      {/* One information sheet at a time. */}
       {started && inGame && hudTab === 'people' && (
         <section className={`hud-panel ${detailsOpen ? 'hud-panel-expanded' : 'hud-panel-compact'}`} data-panel="people">
+          <HudPanelTabs active="people" onChange={setHudTab} />
           {selected ? (
             <>
               <div className="panel-head">
@@ -480,15 +539,17 @@ export default function App() {
                 <div className="society-brief" data-society-brief>
                   <span className="brief-chip">🪙 {profile.wallet}</span>
                   <span className="brief-chip">trust <strong>{Math.round(profile.traits.trust * 100)}</strong></span>
-                  <span className="brief-chip">attach <strong>{Math.round(profile.traits.attachment * 100)}</strong></span>
-                  <span className="brief-chip">love <strong>{Math.round(profile.traits.love * 100)}</strong></span>
-                  <span className="brief-chip">betrayal <strong>{Math.round(profile.traits.betrayal * 100)}</strong></span>
                   <span className="brief-chip">fear <strong>{Math.round(profile.traits.fear * 100)}</strong></span>
-                  <span className="brief-chip">greed <strong>{Math.round(profile.traits.greed * 100)}</strong></span>
+                  {detailsOpen && <>
+                    <span className="brief-chip">attach <strong>{Math.round(profile.traits.attachment * 100)}</strong></span>
+                    <span className="brief-chip">love <strong>{Math.round(profile.traits.love * 100)}</strong></span>
+                    <span className="brief-chip">betrayal <strong>{Math.round(profile.traits.betrayal * 100)}</strong></span>
+                    <span className="brief-chip">greed <strong>{Math.round(profile.traits.greed * 100)}</strong></span>
+                  </>}
                 </div>
               )}
               {selected.alive && <div className="drive-chips">
-                {selectedNeeds.slice(0, 3).map((need) => <span className="drive-chip" key={need.label}>{need.label} {Math.round(need.value * 100)}</span>)}
+                {selectedNeeds.slice(0, 1).map((need) => <span className="drive-chip" key={need.label}>most urgent · {need.label} {Math.round(need.value * 100)}</span>)}
                 {urban?.currentGoal && <span className="drive-chip">goal {urban.currentGoal}</span>}
               </div>}
               {selected.alive && <button className="details-toggle" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'Hide mind, memories & relationships' : 'Mind, memories & relationships'}</button>}
@@ -633,6 +694,7 @@ export default function App() {
 
       {started && inGame && hudTab === 'society' && (
         <section className="hud-panel" data-panel="society">
+          <HudPanelTabs active="society" onChange={setHudTab} />
           <div className="panel-head">
             <h2>Society</h2>
             <button className="panel-close" aria-label="Close society panel" onClick={closeHud}>×</button>
@@ -702,6 +764,7 @@ export default function App() {
 
       {started && inGame && hudTab === 'tools' && (
         <section className="hud-panel" data-panel="tools">
+          <HudPanelTabs active="tools" onChange={setHudTab} />
           <div className="panel-head">
             <h2>Tools</h2>
             <button className="panel-close" aria-label="Close tools panel" onClick={closeHud}>×</button>
@@ -733,7 +796,7 @@ export default function App() {
               </div>
               <h3 className="psyche-sub">harmful</h3>
               <div className="tool-grid" data-tools="harmful">
-                {toolActions.filter((tool) => tool.kind === 'harmful').map((tool) => (
+                {toolActions.filter((tool) => tool.kind === 'harmful' && tool.id !== 'stick').map((tool) => (
                   <button
                     key={tool.id}
                     className="tool-btn tool-harmful"

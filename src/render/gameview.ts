@@ -22,6 +22,8 @@ export interface InteractEvent {
 export interface GameViewCallbacks {
   onSelect: (creatureId: number | null) => void
   onInteract: (ev: InteractEvent) => void
+  onStrike?: (creatureId: number) => void
+  onToggleStick?: () => void
   onLockChange: (locked: boolean) => void
   onQuestHint: (text: string) => void
 }
@@ -47,6 +49,8 @@ export class GameView {
   mentorGroup = new THREE.Group()
   shrineGroup = new THREE.Group()
   torchLight: THREE.PointLight
+  private heldStick = new THREE.Group()
+  private stickSwing = 0
   raycaster = new THREE.Raycaster()
   selectedId: number | null = null
   private raf = 0
@@ -95,6 +99,7 @@ export class GameView {
     this.torchLight = new THREE.PointLight(0xff9a3c, 0, 18, 2)
     this.torchLight.position.set(.5, -.2, -.6)
     this.camera.add(this.torchLight)
+    this.buildHeldStick()
     this.scene.add(this.camera, this.mentorGroup, this.shrineGroup)
     this.buildCity()
     for (const creature of game.creatures) this.addCreature(creature)
@@ -108,6 +113,20 @@ export class GameView {
     this.raf = requestAnimationFrame(this.loop)
     ;(window as unknown as Record<string, unknown>).__luma = { view: this }
   }
+
+  private buildHeldStick(): void {
+    const wood = new THREE.MeshStandardMaterial({ color: 0x76502f, roughness: .92 })
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.035, .052, 1.35, 8), wood)
+    shaft.rotation.z = -.28
+    shaft.position.y = .5
+    this.heldStick.add(shaft)
+    this.heldStick.position.set(.78, -.78, -1.35)
+    this.heldStick.rotation.set(-.18, -.18, -.12)
+    this.heldStick.visible = false
+    this.camera.add(this.heldStick)
+  }
+
+  swingEquippedTool(): void { this.stickSwing = 1 }
 
   private buildCity(): void {
     const city = buildCityStructures()
@@ -168,6 +187,7 @@ export class GameView {
     const isEditing = (element: Element | null): boolean => !!element?.closest('input, textarea, select, button, [contenteditable="true"]')
     if (document.querySelector('.overlay') || isEditing(target) || isEditing(active)) return
     if (event.code === 'KeyF' && !event.repeat) this.interact()
+    if (event.code === 'Digit1' && !event.repeat) this.callbacks.onToggleStick?.()
   }
 
   private interactionTargets(): THREE.Object3D[] {
@@ -223,6 +243,9 @@ export class GameView {
       return place ? `Visit ${place.name} — ${place.purpose}` : `Visit ${focus.name}`
     }
     const creature = this.game.selectedCreature(focus.id as number)
+    if (this.game.equippedTool === 'stick') {
+      return focus.distance <= 4 ? `Hit ${creature?.name ?? focus.name}` : `${creature?.name ?? focus.name} is out of reach`
+    }
     return `Meet ${creature?.name ?? focus.name} · ${creature?.action ?? 'nearby'}`
   }
 
@@ -237,6 +260,10 @@ export class GameView {
     }
     const id = focus.id as number
     this.select(id)
+    if (this.game.equippedTool === 'stick') {
+      this.callbacks.onStrike?.(id)
+      return { kind: 'creature', creatureId: id }
+    }
     const event: InteractEvent = { kind: 'creature', creatureId: id }
     this.callbacks.onInteract(event)
     return event
@@ -292,6 +319,16 @@ export class GameView {
     while (!this.paused && this.simAccum >= step && guard++ < 5) { this.game.tick(); this.simAccum -= step }
     this.world3d.update(this.game.world.state.dayTime)
     this.torchLight.intensity = this.game.player.torchLit ? 1.6 : 0
+    this.heldStick.visible = this.game.equippedTool === 'stick'
+    if (this.stickSwing > 0) {
+      this.stickSwing = Math.max(0, this.stickSwing - dt * 5.5)
+      const arc = Math.sin((1 - this.stickSwing) * Math.PI)
+      this.heldStick.rotation.x = -.18 - arc * 1.05
+      this.heldStick.rotation.z = -.12 + arc * .35
+    } else {
+      this.heldStick.rotation.x = -.18
+      this.heldStick.rotation.z = -.12
+    }
 
     for (const creature of this.game.creatures) if (!this.creatureViews.has(creature.id)) this.addCreature(creature)
     for (const [id, view] of this.creatureViews) {
