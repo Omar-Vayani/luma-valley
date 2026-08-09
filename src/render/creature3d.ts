@@ -219,15 +219,19 @@ export function buildNameLabel(name: string): THREE.Sprite {
   canvas.width = 256
   canvas.height = 64
   const ctx = canvas.getContext('2d')!
-  ctx.font = 'bold 40px system-ui, sans-serif'
+  ctx.font = '700 32px system-ui, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'
-  ctx.fillRect(0, 0, 256, 64)
+  const textWidth = Math.min(228, ctx.measureText(name).width + 30)
+  const left = (256 - textWidth) / 2
+  ctx.fillStyle = 'rgba(35,49,31,0.78)'
+  ctx.beginPath()
+  ctx.roundRect(left, 8, textWidth, 48, 12)
+  ctx.fill()
   ctx.fillStyle = '#ffffff'
   ctx.fillText(name, 128, 34)
   const tex = new THREE.CanvasTexture(canvas)
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }))
-  sprite.scale.set(1.6, 0.4, 1)
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
+  sprite.scale.set(0.96, 0.24, 1)
   return sprite
 }

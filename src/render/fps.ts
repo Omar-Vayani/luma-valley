@@ -25,6 +25,7 @@ export class FPSControls {
   private keys = new Set<string>()
   private locked = false
   private world: World
+  private groundHeight: (x: number, z: number) => number
   private radius = 0.8
   private eyeHeight = 1.5
   private gravity = -28
@@ -43,14 +44,21 @@ export class FPSControls {
   private hasPointerPosition = false
   private lastLockedMove = { dx: 0, dy: 0, at: -Infinity, source: '' }
 
-  constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement, world: World, spawn: { x: number; z: number }) {
+  constructor(
+    camera: THREE.PerspectiveCamera,
+    domElement: HTMLElement,
+    world: World,
+    spawn: { x: number; z: number },
+    groundHeight: (x: number, z: number) => number = (x, z) => world.height(x, z) * 6 - 2.5,
+  ) {
     this.camera = camera
     this.domElement = domElement
     this.world = world
+    this.groundHeight = groundHeight
     // bounds derive from the world size (not hardcoded)
     this.worldMin = -(world.state.size - 2)
     this.worldMax = world.state.size - 2
-    this.position.set(spawn.x, 4, spawn.z)
+    this.position.set(spawn.x, this.groundHeight(spawn.x, spawn.z), spawn.z)
     this.updateCamera(true)
 
     // window-level events: look works no matter what element is under the pointer.
@@ -256,7 +264,7 @@ export class FPSControls {
     this.position.z = resolved.z
 
     // vertical: terrain height (feet rest ON the ground; eye is +eyeHeight)
-    const ground = this.world.height(this.position.x, this.position.z) * 6 - 2.5
+    const ground = this.groundHeight(this.position.x, this.position.z)
     this.position.y += this.jumpVel * dt
     const minY = ground
     if (this.position.y <= minY) {

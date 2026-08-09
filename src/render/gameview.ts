@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import type { Game } from '../sim/game'
 import type { Creature } from '../sim/creature'
-import { buildWorld3D, type World3D } from './world3d'
-import { buildNameLabel } from './creature3d'
+import { buildWorld3D, terrainY, type World3D } from './world3d'
+import { buildCreature3D, buildNameLabel, type Creature3D } from './creature3d'
 import { AssetManager, speciesFromGene } from './assets'
 import { buildDungeonDressing, buildGraveyard, buildStoneHouse } from './structures'
 import { FPSControls } from './fps'
@@ -26,6 +26,8 @@ export interface GameViewCallbacks {
 interface CreatureView {
   group: THREE.Group
   label: THREE.Sprite
+  ring: THREE.Mesh
+  rig: Creature3D
   shadow?: THREE.Mesh
   animMixer?: THREE.AnimationMixer
   animClip?: THREE.AnimationClip
@@ -61,7 +63,6 @@ export class GameView {
   private butterflies: THREE.Group[] = []
   private shrineLit = false
   private mentorShadow: THREE.Mesh | null = null
-  private pondMaterial: THREE.MeshPhongMaterial | null = null
   private contactShadowCount = 0
   private static TICK_RATE = 6
 
@@ -77,6 +78,9 @@ export class GameView {
     this.renderer.setClearColor(0xb8d4ee)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFShadowMap
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.15
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
@@ -84,12 +88,6 @@ export class GameView {
     this.scene.fog = new THREE.Fog(0xb8d4ee, 60, 220)
 
     this.world3d = buildWorld3D(game.world)
-    this.world3d.sun.color.setHex(0xffe8b0)
-    this.world3d.sun.intensity = 1.1
-    this.world3d.sun.position.set(40, 60, 30)
-    this.world3d.ambient.color.setHex(0x8fa8d8)
-    this.world3d.ambient.groundColor.setHex(0x6a7a4a)
-    this.world3d.ambient.intensity = 0.6
     this.scene.add(this.world3d.group)
 
     // FPV controls — spawn near the first alive creature so life is in view
@@ -97,7 +95,7 @@ export class GameView {
     const spawn = firstCreature
       ? { x: firstCreature.pos.x + 4, z: firstCreature.pos.z + 4 }
       : { x: game.world.state.den.x + 4, z: game.world.state.den.z + 4 }
-    this.fps = new FPSControls(this.camera, this.renderer.domElement, game.world, spawn)
+    this.fps = new FPSControls(this.camera, this.renderer.domElement, game.world, spawn, (x, z) => terrainY(game.world, x, z))
     // Spawn already facing the nearest Luma and a little toward the ground.
     // A blank-sky opening makes working look controls appear completely dead.
     if (firstCreature) {
@@ -136,7 +134,7 @@ export class GameView {
       this.spawnMentor()
       this.spawnShrine()
       // village house + dungeon + graveyard structures
-      const gy = (x: number, z: number) => this.game.world.height(x, z) * 6 - 2.5
+      const gy = (x: number, z: number) => this.groundY(x, z)
       void buildStoneHouse(this.scene, -10, 14, gy)
       void buildDungeonDressing(this.scene, -24, -18, gy)
       void buildGraveyard(this.scene, 28, 30, gy)
@@ -158,18 +156,22 @@ export class GameView {
     for (let i = 0; i < 10; i++) {
       const ang = (i / 10) * Math.PI * 2
       const r = new THREE.Mesh(new THREE.DodecahedronGeometry(1.1 + Math.random() * 0.8, 0), stoneMat)
-      r.position.set(cavePos.x + Math.cos(ang) * 3.2, 0.3, cavePos.z + Math.sin(ang) * 3.2)
+      const rockX = cavePos.x + Math.cos(ang) * 3.2
+      const rockZ = cavePos.z + Math.sin(ang) * 3.2
+      r.position.set(rockX, this.groundY(rockX, rockZ) + 0.3, rockZ)
       r.rotation.set(Math.random(), Math.random(), Math.random())
       r.scale.y = 0.7
       this.scene.add(r)
     }
     const mouth = new THREE.Mesh(new THREE.SphereGeometry(1.8, 10, 8), darkMat)
-    mouth.position.set(cavePos.x, 0.2, cavePos.z)
+    mouth.position.set(cavePos.x, this.groundY(cavePos.x, cavePos.z) + 0.2, cavePos.z)
     mouth.scale.set(1, 0.7, 1.3)
     this.scene.add(mouth)
     // crystal glow inside cave
     const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), new THREE.MeshLambertMaterial({ color: 0x6ef0c8, emissive: 0x2a8f6a }))
-    crystal.position.set(cavePos.x - 4, 1.0, cavePos.z - 3)
+    const crystalX = cavePos.x - 4
+    const crystalZ = cavePos.z - 3
+    crystal.position.set(crystalX, this.groundY(crystalX, crystalZ) + 1.0, crystalZ)
     this.scene.add(crystal)
     const caveLight = new THREE.PointLight(0x6ef0c8, 1.2, 14)
     caveLight.position.copy(crystal.position)
@@ -182,7 +184,7 @@ export class GameView {
     const base = { x: w.state.den.x + 6, z: w.state.den.z + 8 }
     const box = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material) => {
       const b = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m)
-      b.position.set(x, y, z)
+      b.position.set(x, this.groundY(x, z) + y, z)
       b.castShadow = true
       cabin.add(b)
     }
@@ -193,15 +195,17 @@ export class GameView {
     this.scene.add(cabin)
     // fire pit
     const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.3, 8), stoneMat)
-    fire.position.set(base.x - 3, 0.1, base.z)
+    fire.position.set(base.x - 3, this.groundY(base.x - 3, base.z) + 0.1, base.z)
     this.scene.add(fire)
     const fireLight = new THREE.PointLight(0xff9a3c, 0.9, 10)
-    fireLight.position.set(base.x - 3, 1.2, base.z)
+    fireLight.position.set(base.x - 3, this.groundY(base.x - 3, base.z) + 1.2, base.z)
     this.scene.add(fireLight)
     // wood piles (collectible)
     for (let i = 0; i < 3; i++) {
       const log = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 1.6, 6), new THREE.MeshLambertMaterial({ color: 0x8a5a30 }))
-      log.position.set(base.x - 1.5 + i * 1.2, 0.25, base.z + 2.4)
+      const logX = base.x - 1.5 + i * 1.2
+      const logZ = base.z + 2.4
+      log.position.set(logX, this.groundY(logX, logZ) + 0.25, logZ)
       log.rotation.z = Math.PI / 2
       log.userData.interact = 'wood'
       log.userData.id = i
@@ -379,29 +383,6 @@ export class GameView {
     this.scene.add(lanternLight)
     w.addCollider(32, -8, 1.0)
 
-    // ── pond at (16,24): the stream widens ──
-    const pondMat = new THREE.MeshPhongMaterial({
-      color: 0x4a9ad0,
-      emissive: 0x1a4a7a,
-      transparent: true,
-      opacity: 0.8,
-      shininess: 70,
-    })
-    this.pondMaterial = pondMat
-    const pond = new THREE.Mesh(new THREE.CircleGeometry(4.5, 12), pondMat)
-    pond.rotation.x = -Math.PI / 2
-    pond.position.set(16, this.groundY(16, 24) - 0.15, 24)
-    this.scene.add(pond)
-    for (let i = 0; i < 8; i++) {
-      const ang = (i / 8) * Math.PI * 2
-      const rx = 16 + Math.cos(ang) * 4.5
-      const rz = 24 + Math.sin(ang) * 4.5
-      const reed = new THREE.Mesh(new THREE.ConeGeometry(0.08, 1.1, 4), new THREE.MeshLambertMaterial({ color: 0x4a7a3a }))
-      reed.position.set(rx, this.groundY(rx, rz) + 0.2, rz)
-      this.scene.add(reed)
-    }
-    w.addCollider(16, 24, 4.2) // pond edge is walkable but the water is there
-
     // ── scattered mushrooms ──
     const shroomCap = new THREE.MeshLambertMaterial({ color: 0xc83030 })
     const shroomStem = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 })
@@ -454,6 +435,34 @@ export class GameView {
       prop('Bush_1.obj', -28, -6, 1.3),
     ])
 
+    // A small curated online CC0 set: a real bridge and lilies make the rebuilt
+    // water legible as a place to visit rather than a decorative blue stripe.
+    const bridgeIndex = Math.floor(w.state.waterPoints.length * 0.46)
+    const bridgePoint = w.state.waterPoints[bridgeIndex]
+    const before = w.state.waterPoints[Math.max(0, bridgeIndex - 1)]
+    const after = w.state.waterPoints[Math.min(w.state.waterPoints.length - 1, bridgeIndex + 1)]
+    void this.assets.loadKenneyNature('bridge_wood').then((bridge) => {
+      bridge.scale.setScalar(4.1)
+      bridge.rotation.y = Math.atan2(after.z - before.z, after.x - before.x)
+      bridge.position.set(bridgePoint.x, this.groundY(bridgePoint.x, bridgePoint.z) + 0.08, bridgePoint.z)
+      this.scene.add(bridge)
+    }).catch((error) => console.warn('Kenney bridge unavailable', error))
+
+    const pondIndex = Math.floor(w.state.waterPoints.length * 0.67)
+    const pondPoint = w.state.waterPoints[pondIndex]
+    for (let i = 0; i < 6; i++) {
+      const lilyName = i % 2 ? 'lily_small' : 'lily_large'
+      void this.assets.loadKenneyNature(lilyName).then((lily) => {
+        const angle = i * 2.27
+        const x = pondPoint.x + Math.cos(angle) * (1.1 + (i % 3) * 0.55)
+        const z = pondPoint.z + Math.sin(angle) * (1.1 + (i % 2) * 0.8)
+        lily.scale.setScalar(1.8 + (i % 2) * 0.35)
+        lily.rotation.y = angle
+        lily.position.set(x, this.groundY(x, z) + 0.13, z)
+        this.scene.add(lily)
+      }).catch((error) => console.warn('Kenney lily unavailable', error))
+    }
+
     // ── butterflies: tiny fluttering ambient sprites ──
     const butterflyGeo = new THREE.BufferGeometry()
     const wingMat = new THREE.MeshLambertMaterial({ color: 0xffcc66, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
@@ -503,6 +512,7 @@ export class GameView {
         const z = -S + rng() * S * 2
         // keep off the stream corridor, structure pads, and other colliders
         if (Math.abs(x + 6) < 2.2 && Math.abs(z) < S) continue
+        if (this.game.creatures.some((creature) => creature.alive && Math.hypot(x - creature.pos.x, z - creature.pos.z) < 3.2)) continue
         if (w.collides({ x, z }, tryRadius)) continue
         const m = make()
         const y = this.groundY(x, z) - 0.3
@@ -593,9 +603,12 @@ export class GameView {
 
   private spawnMentor(): void {
     void this.assets.creatureModel(9).then((m) => {
-      this.assets.tint(m, 0.12, false) // golden spirit
-      m.scale.setScalar(1.4)
-      m.position.set(this.game.world.state.den.x, 2.4, this.game.world.state.den.z + 3)
+      this.assets.tint(m, 0.12, false, 0.72) // warm golden guide, readable at a glance
+      m.scale.setScalar(1.15)
+      const x = this.game.world.state.den.x
+      const z = this.game.world.state.den.z + 3
+      m.position.set(x, this.groundY(x, z), z)
+      m.userData.baseY = m.position.y
       this.mentorGroup.add(m)
       this.mentor = m
       m.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true })
@@ -610,13 +623,14 @@ export class GameView {
 
   private spawnShrine(): void {
     const shrinePos = new THREE.Vector3(-24, 0, -18)
+    const shrineGround = this.groundY(shrinePos.x, shrinePos.z)
     const stoneMat = new THREE.MeshLambertMaterial({ color: 0xb8a888 })
     const altar = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.0, 1.2, 8), stoneMat)
-    altar.position.set(shrinePos.x, 0.6, shrinePos.z)
+    altar.position.set(shrinePos.x, shrineGround + 0.6, shrinePos.z)
     altar.castShadow = true
     this.shrineGroup.add(altar)
     const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), new THREE.MeshLambertMaterial({ color: 0x9ad8ff, emissive: 0x2a6a9a }))
-    orb.position.set(shrinePos.x, 1.6, shrinePos.z)
+    orb.position.set(shrinePos.x, shrineGround + 1.6, shrinePos.z)
     orb.userData.interact = 'shrine'
     this.shrineGroup.add(orb)
     const light = new THREE.PointLight(0x9ad8ff, 0.8, 12)
@@ -644,7 +658,7 @@ export class GameView {
     holder.position.set(c.pos.x, this.groundY(c.pos.x, c.pos.z), c.pos.z)
     this.scene.add(holder)
     const label = buildNameLabel(c.name)
-    label.position.y = 2.4
+    label.position.y = 2.15
     holder.add(label)
     label.visible = this.showNames
     const shadow = this.createContactShadow()
@@ -652,17 +666,31 @@ export class GameView {
       shadow.position.set(c.pos.x, this.groundY(c.pos.x, c.pos.z) + 0.01, c.pos.z)
       this.scene.add(shadow)
     }
-    this.creatureViews.set(c.id, { group: holder, label, shadow })
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.65, 0.82, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.025
+    ring.visible = false
+    holder.add(ring)
+
+    // Put a procedural creature on screen immediately. It remains the guaranteed
+    // fallback if downloading, parsing, geometry validation, or cloning fails.
+    const rig = buildCreature3D(c)
+    rig.group.scale.setScalar(0.9)
+    rig.group.position.y = 0.72
+    holder.add(rig.group)
+    holder.userData.model = rig.group
+    this.creatureViews.set(c.id, { group: holder, label, ring, rig, shadow })
 
     void this.assets.creatureModel(species).then((m) => {
       this.assets.tint(m, c.traits.hue)
-      m.scale.setScalar(1.4)
-      m.rotation.y = c.facing
-      m.userData.baseScale = 1.4
+      m.userData.baseScale = 1
+      holder.remove(rig.group)
       holder.add(m)
       holder.userData.model = m
-      m.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true })
-    })
+    }).catch((error) => console.warn(`Using procedural creature for ${c.name}`, error))
   }
 
   private createContactShadow(): THREE.Mesh | undefined {
@@ -678,7 +706,7 @@ export class GameView {
   }
 
   private groundY(x: number, z: number): number {
-    return this.game.world.height(x, z) * 6 - 2.5 + 0.3
+    return terrainY(this.game.world, x, z)
   }
 
   private onClick = (): void => {
@@ -767,12 +795,20 @@ export class GameView {
     if (this.selectedId === id) return
     if (this.selectedId !== null) {
       const v = this.creatureViews.get(this.selectedId)
-      if (v) v.group.userData.selected = false
+      if (v) {
+        v.group.userData.selected = false
+        v.ring.visible = false
+        v.rig.setSelected(false)
+      }
     }
     this.selectedId = id
     if (id !== null) {
       const v = this.creatureViews.get(id)
-      if (v) v.group.userData.selected = true
+      if (v) {
+        v.group.userData.selected = true
+        v.ring.visible = true
+        v.rig.setSelected(true)
+      }
     }
     this.callbacks.onSelect(id)
   }
@@ -792,7 +828,7 @@ export class GameView {
 
   /** Debug/QA hook: teleport the FPV camera. */
   teleport(x: number, z: number): void {
-    this.fps.position.set(x, 6, z)
+    this.fps.position.set(x, this.groundY(x, z), z)
     this.fps.update(0)
   }
 
@@ -830,29 +866,30 @@ export class GameView {
       v.group.rotation.y = c.facing
       const model = v.group.userData.model as THREE.Group | undefined
       if (model) {
+        if (model === v.rig.group) v.rig.update(dt, now / 1000)
         if (!c.alive) {
           // dead: lying flat (unchanged)
           model.rotation.x = -Math.PI / 2
           model.position.y = 0
-          model.scale.setScalar(1.4)
+          if (model !== v.rig.group) model.scale.setScalar(1)
         } else {
           model.rotation.x = 0
           if (c.sleeping) {
             // gentle breathing: slow bob + subtle scale pulse
             model.position.y = Math.sin(now / 500 + id) * 0.02
-            model.scale.setScalar(1.4 * 0.9 * (1 + Math.sin(now / 900 + id) * 0.03))
+            if (model !== v.rig.group) model.scale.setScalar(0.9 * (1 + Math.sin(now / 900 + id) * 0.03))
           } else if (WALK_ACTIONS.has(c.action)) {
             // walking: subtle hop bounce
             model.position.y = Math.abs(Math.sin(now / 180 + id * 2)) * 0.05
-            model.scale.setScalar(1.4)
+            if (model !== v.rig.group) model.scale.setScalar(1)
           } else {
             // idle sway (unchanged)
             model.position.y = Math.sin(now / 300 + id) * 0.05
-            model.scale.setScalar(1.4)
+            if (model !== v.rig.group) model.scale.setScalar(1)
           }
         }
       }
-      v.label.position.y = 2.4 + (c.sleeping ? 0.4 : 0)
+      v.label.position.y = 2.15 + (c.sleeping ? 0.25 : 0)
       v.label.visible = this.showNames && c.alive
     }
 
@@ -861,14 +898,13 @@ export class GameView {
 
     // mentor float
     if (this.mentor) {
-      this.mentor.position.y = 2.4 + Math.sin(now / 700) * 0.25
+      const mentorBaseY = (this.mentor.userData.baseY as number | undefined) ?? this.groundY(this.mentor.position.x, this.mentor.position.z)
+      this.mentor.position.y = mentorBaseY + 0.12 + Math.sin(now / 700) * 0.12
       this.mentor.rotation.y += dt * 0.6
       if (this.mentorShadow) {
         this.mentorShadow.position.set(this.mentor.position.x, this.groundY(this.mentor.position.x, this.mentor.position.z) + 0.01, this.mentor.position.z)
       }
     }
-    if (this.pondMaterial) this.pondMaterial.opacity = THREE.MathUtils.lerp(0.7, 0.95, (Math.sin(now / 500) + 1) / 2)
-
     // pickup float + spin animation
     for (const p of this.pickups) {
       const baseY = (p.userData.baseY as number | undefined) ?? p.position.y
@@ -887,8 +923,6 @@ export class GameView {
       const c = this.game.creatures.find((x) => x.alive)
       if (c) this.sound.voice(c.traits.voicePitch, 'neutral')
     }
-
-    this.world3d.shimmer(now / 1000)
 
     // butterflies flutter
     const t = now / 1000
@@ -911,14 +945,25 @@ export class GameView {
   }
 
   private beastModel: THREE.Group | null = null
+  private beastModelPromise: Promise<THREE.Group> | null = null
   private async syncBeasts(): Promise<void> {
-    if (!this.beastModel) {
-      this.beastModel = await this.assets.creatureModel(3) // Demon base
-      this.assets.tint(this.beastModel, 0.02, true)
-    }
     const want = this.game.shadowBeasts.length
+    if (want === 0) {
+      for (const view of this.beastViews) view.group.visible = false
+      return
+    }
+    if (!this.beastModel) {
+      this.beastModelPromise ??= this.assets.creatureModel(3).then((model) => {
+        this.assets.tint(model, 0.02, true)
+        this.beastModel = model
+        return model
+      })
+      await this.beastModelPromise
+    }
+    const beastTemplate = this.beastModel
+    if (!beastTemplate) return
     while (this.beastViews.length < want) {
-      const g = this.beastModel.clone(true)
+      const g = beastTemplate.clone(true)
       g.traverse((o: THREE.Object3D) => {
         if (o instanceof THREE.Mesh) o.castShadow = true
       })

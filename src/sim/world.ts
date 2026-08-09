@@ -27,9 +27,20 @@ export interface WorldState {
   colliders: { x: number; z: number; r: number }[]
 }
 
+function latticeNoise(x: number, z: number, seed: number): number {
+  return mulberry32(seed + x * 7349 + z * 9151)()
+}
+
 export function valueNoise(x: number, z: number, seed: number): number {
-  const r = mulberry32(seed + Math.floor(x) * 7349 + Math.floor(z) * 9151)
-  return r()
+  const x0 = Math.floor(x)
+  const z0 = Math.floor(z)
+  const tx = x - x0
+  const tz = z - z0
+  const sx = tx * tx * (3 - 2 * tx)
+  const sz = tz * tz * (3 - 2 * tz)
+  const north = latticeNoise(x0, z0, seed) * (1 - sx) + latticeNoise(x0 + 1, z0, seed) * sx
+  const south = latticeNoise(x0, z0 + 1, seed) * (1 - sx) + latticeNoise(x0 + 1, z0 + 1, seed) * sx
+  return north * (1 - sz) + south * sz
 }
 
 function sampleHeight(x: number, z: number, seed: number): number {

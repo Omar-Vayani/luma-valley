@@ -64,7 +64,8 @@ try {
 
   const cdp = await mobile.newCDPSession(page)
 
-  // Real touch drag right: yaw and rendered camera direction must both turn right.
+  // Direct manipulation: drag right and the world pans right under the finger,
+  // which means camera yaw/rendered direction decrease.
   const rightBefore = await state(page)
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 220, y: 270, id: 11 }] })
   for (let i = 1; i <= 12; i++) {
@@ -72,8 +73,8 @@ try {
   }
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   const rightAfter = await state(page)
-  assert(rightAfter.yaw > rightBefore.yaw + 0.2, 'slide right did not increase yaw')
-  assert(rightAfter.renderedYaw > rightBefore.renderedYaw + 0.2, 'rendered camera did not visibly turn right')
+  assert(rightAfter.yaw < rightBefore.yaw - 0.2, 'drag right did not pan the world right')
+  assert(rightAfter.renderedYaw < rightBefore.renderedYaw - 0.2, 'rendered world did not pan right under the finger')
   assert(Math.abs(rightAfter.renderedYaw - rightAfter.yaw) < 0.001, 'rendered camera yaw diverged from controls')
   results.slideRight = { yawDelta: rightAfter.yaw - rightBefore.yaw, renderedYawDelta: rightAfter.renderedYaw - rightBefore.renderedYaw }
 
@@ -116,7 +117,7 @@ try {
     simultaneousAfter.position[2] - simultaneousBefore.position[2],
   )
   assert(movedDistance > 0.5, 'joystick did not move during simultaneous touch')
-  assert(simultaneousAfter.yaw > simultaneousBefore.yaw + 0.1, 'second finger did not look during simultaneous touch')
+  assert(simultaneousAfter.yaw < simultaneousBefore.yaw - 0.1, 'second finger did not direct-manipulate look during simultaneous touch')
   results.twoThumb = { movedDistance, yawDelta: simultaneousAfter.yaw - simultaneousBefore.yaw }
 
   // Care interaction: selecting opens the panel, feeding consumes inventory,

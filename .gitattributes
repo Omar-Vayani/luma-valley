@@ -1,0 +1,4 @@
+# Preserve upstream Kenney asset text verbatim; OBJ/MTL packs use CRLF and tabs.
+public/models/**/*.obj -whitespace
+public/models/**/*.mtl -whitespace
+public/models/**/LICENSE.txt -whitespace

@@ -251,6 +251,13 @@ export default function App() {
           .map((id) => `${ITEMS[id].emoji}${inventory.items[id]}`)
           .join(' ')
       : ''
+  const selectedNeeds = selected ? [
+    { label: 'hunger', value: selected.chem.hunger, color: '#e8876a' },
+    { label: 'thirst', value: selected.chem.thirst, color: '#64aeca' },
+    { label: 'tired', value: selected.chem.fatigue, color: '#9f91c7' },
+    { label: 'bored', value: selected.chem.boredom, color: '#d9a942' },
+    { label: 'lonely', value: selected.chem.loneliness, color: '#cf82a8' },
+  ].sort((a, b) => b.value - a.value) : []
   const interactionHint = inGame ? viewRef.current?.interactionHint() ?? null : null
 
   return (
@@ -289,7 +296,7 @@ export default function App() {
       {/* Quest tracker */}
       {started && quest && (
         <div className="quest-tracker">
-          <span className="quest-title">{quest.title}</span>
+          <span className="quest-copy"><strong>{quest.title}</strong><small>{quest.blurb}</small></span>
           <span className="quest-progress">{progress}/{quest.goal}</span>
         </div>
       )}
@@ -299,12 +306,13 @@ export default function App() {
       {inGame && <div className="crosshair" />}
 
       {/* Full-screen LOOK SURFACE (touch): same synthetic events as the joystick.
-          Drag anywhere to look (non-inverted); tap to interact. */}
+          Drag anywhere to move the world under your finger; tap to interact. */}
       {isTouch && inGame && (
         <LookSurface
           onLook={(dx, dy) => {
-            // Mobile sensitivity is intentionally higher than desktop mouse.
-            viewRef.current?.fps.applyLook(dx * 1.6, dy * 1.6)
+            // Touch uses direct manipulation: dragging right pans the world right.
+            // Desktop input still routes directly to FPSControls unchanged.
+            viewRef.current?.fps.applyLook(-dx * 1.6, dy * 1.6)
             if (!hasLooked) setHasLooked(true)
           }}
           onTap={interact}
@@ -312,13 +320,13 @@ export default function App() {
       )}
 
       {isTouch && inGame && !hasLooked && (
-        <div className="control-tip">Drag the open screen to look<br /><span>← your view follows your finger →</span></div>
+        <div className="control-tip">Drag the meadow to look around<br /><span>The world follows your finger</span></div>
       )}
 
       {interactionHint && <div className="interaction-prompt">✦ {interactionHint} · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
 
       {/* Torch + pickup quick actions */}
-      {started && inGame && (
+      {started && inGame && !toast && (
         <div className="quickbar">
           <button
             className={`btn btn-small ${game?.player.torchLit ? 'btn-active' : ''}`}
@@ -344,11 +352,8 @@ export default function App() {
           <p className="age">age {Math.floor(selected.age / 100)} · {selected.alive ? selected.action : 'deceased'}</p>
           {selected.alive && (
             <>
-              <Bar label="hunger" value={selected.chem.hunger} color="#e8876a" />
-              <Bar label="thirst" value={selected.chem.thirst} color="#7fb6de" />
-              <Bar label="tired" value={selected.chem.fatigue} color="#b7a7d8" />
-              <Bar label="bored" value={selected.chem.boredom} color="#f0c46a" />
-              <Bar label="lonely" value={selected.chem.loneliness} color="#e0a0c0" />
+              <p className="needs-label">Needs · most urgent first</p>
+              {selectedNeeds.map((need) => <Bar key={need.label} {...need} />)}
               <Bar label="health" value={selected.chem.health} color="#7fc27a" />
               <div className="trust">
                 <span className={`trust-tag trust-${trustLabel(selected.psyche.trust)}`}>❤ {trustLabel(selected.psyche.trust)}</span>
