@@ -17,6 +17,13 @@ export type QuestEvent =
   | 'poisoned'
   | 'gaveItem'
   | 'terrorised'
+  | 'visitMarket'
+  | 'meetCitizen'
+  | 'visitPark'
+  | 'visitTavern'
+  | 'visitApothecary'
+  | 'visitAlley'
+  | 'visitWatch'
 
 export type QuestKind = QuestEvent
 
@@ -39,72 +46,72 @@ export interface QuestLogState {
 export const QUEST_CHAIN: QuestDef[] = [
   {
     id: 'q1_feed',
-    title: 'First Meal',
-    blurb: 'The Luma are hungry. Approach one and feed it a berry.',
-    kind: 'feed',
+    title: 'The Old Market',
+    blurb: 'Find the Old Market and take bread for a citizen.',
+    kind: 'visitMarket',
     goal: 1,
     next: 'q2_teach',
   },
   {
     id: 'q2_teach',
-    title: 'A Word of Friendship',
-    blurb: 'Teach a Luma the word "come". It will follow you forever after.',
-    kind: 'teach',
+    title: 'Meet a Citizen',
+    blurb: 'Approach a visible citizen and inspect their needs and feelings.',
+    kind: 'meetCitizen',
     goal: 1,
     next: 'q3_berry',
   },
   {
     id: 'q3_berry',
-    title: 'Gatherer',
-    blurb: 'Pick 3 berries from the bushes to fill your pouch.',
-    kind: 'pickBerry',
-    goal: 3,
+    title: 'A Shared Meal',
+    blurb: 'Give market bread to a hungry citizen.',
+    kind: 'feed',
+    goal: 1,
     next: 'q4_torch',
   },
   {
     id: 'q4_torch',
-    title: 'Light Against the Dark',
-    blurb: 'Craft a torch (2 wood). Night is when the Shadow walks.',
-    kind: 'craftTorch',
+    title: 'A Quiet Place',
+    blurb: 'Visit Lantern Park, where citizens recover and socialise.',
+    kind: 'visitPark',
     goal: 1,
     next: 'q5_light',
   },
   {
     id: 'q5_light',
-    title: 'Keep it Burning',
-    blurb: 'Light your torch and hold the darkness back.',
-    kind: 'lightTorch',
+    title: 'The Crooked Cup',
+    blurb: 'Visit the tavern. Ale and cigarettes calm briefly but create dependence.',
+    kind: 'visitTavern',
     goal: 1,
     next: 'q6_adult',
   },
   {
     id: 'q6_adult',
-    title: 'Growing Up',
-    blurb: 'Raise a Luma to adulthood (age 600). Feed it, keep it safe.',
-    kind: 'adult',
+    title: 'Remedy and Cost',
+    blurb: 'Find the apothecary and collect medicine.',
+    kind: 'visitApothecary',
     goal: 1,
     next: 'q7_shadow',
   },
   {
     id: 'q7_shadow',
-    title: 'Face the Shadow',
-    blurb: 'Repel a Shadow Beast with your torch. They fear the light.',
-    kind: 'repelShadow',
+    title: 'The Back Alley',
+    blurb: 'Enter the dangerous alley and learn where dream-dust is traded.',
+    kind: 'visitAlley',
     goal: 1,
     next: 'q8_shrine',
   },
   {
     id: 'q8_shrine',
-    title: 'Light the Old Shrine',
-    blurb: 'Deep in the cave, the Old Shrine waits. Bring your torch and light it.',
-    kind: 'lightShrine',
+    title: 'Safety of the Watch',
+    blurb: 'Visit the Watch Yard, a safer refuge after dark.',
+    kind: 'visitWatch',
     goal: 1,
     next: 'q9_birth',
   },
   {
     id: 'q9_birth',
-    title: 'New Life',
-    blurb: 'Two adult Luma will breed. Let the valley grow again.',
+    title: 'A Living City',
+    blurb: 'Keep the citizens alive and social until a new child is born.',
     kind: 'birth',
     goal: 1,
   },

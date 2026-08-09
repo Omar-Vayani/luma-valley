@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-core'
 
 const executablePath = '/root/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome'
-const url = process.env.LUMA_URL ?? 'http://localhost:5210/'
+const url = process.env.LUMA_URL ?? process.env.BASE_URL ?? 'http://localhost:5210/'
 const browser = await chromium.launch({
   executablePath,
   headless: true,
@@ -15,8 +15,10 @@ const assert = (condition, message) => {
 
 async function startGame(page) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-  await page.getByRole('button', { name: /New Valley/ }).click()
+  await page.getByRole('button', { name: /Enter the City|New Valley/ }).first().click()
   await page.waitForFunction(() => window.__luma?.view?.fps, null, { timeout: 20_000 })
+  const explore = page.locator('.fpv-hint button')
+  if (await explore.count()) await explore.click()
   await page.waitForTimeout(800)
 }
 
@@ -120,21 +122,21 @@ try {
   assert(simultaneousAfter.yaw < simultaneousBefore.yaw - 0.1, 'second finger did not direct-manipulate look during simultaneous touch')
   results.twoThumb = { movedDistance, yawDelta: simultaneousAfter.yaw - simultaneousBefore.yaw }
 
-  // Care interaction: selecting opens the panel, feeding consumes inventory,
+  // Care interaction: selecting opens the panel, sharing bread consumes inventory,
   // and the close button restores the unobstructed playfield.
-  const berriesBefore = await page.evaluate(() => {
+  const breadBefore = await page.evaluate(() => {
     const view = window.__luma.view
     const firstId = view.game.creatures.find((creature) => creature.alive)?.id
     view.select(firstId)
-    return view.game.player.inventory.berries
+    return view.game.player.inventory.items.bread ?? 0
   })
   await page.locator('.panel').waitFor({ state: 'visible' })
-  await page.getByRole('button', { name: /Feed/ }).click()
-  const berriesAfter = await page.evaluate(() => window.__luma.view.game.player.inventory.berries)
-  assert(berriesAfter === berriesBefore - 1, 'Feed did not consume exactly one berry')
+  await page.getByRole('button', { name: /Share bread/ }).click()
+  const breadAfter = await page.evaluate(() => window.__luma.view.game.player.inventory.items.bread ?? 0)
+  assert(breadAfter === breadBefore - 1, 'Share bread did not consume exactly one loaf')
   await page.getByRole('button', { name: 'Close creature care' }).click()
   assert(!(await page.locator('.panel').isVisible()), 'care panel did not close')
-  results.careInteraction = { berriesBefore, berriesAfter, panelClosed: true }
+  results.careInteraction = { breadBefore, breadAfter, panelClosed: true }
 
   // Focused text fields must isolate desktop interaction hotkeys.
   await page.evaluate(() => {

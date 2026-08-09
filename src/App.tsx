@@ -5,10 +5,11 @@ import type { InteractEvent } from './render/gameview'
 import { SoundEngine } from './audio/sfx'
 import { idbLoad, idbSave, exportSave } from './game/storage'
 import { activeQuest, questProgress } from './sim/quests'
-import { pickBerry as pickBerryFn, collectWood as collectWoodFn, craftTorch as craftTorchFn, toggleTorch as toggleTorchFn } from './sim/player'
+import { toggleTorch as toggleTorchFn } from './sim/player'
 import { ITEMS } from './sim/items'
 import { trustLabel, triggerName } from './sim/trauma'
 import type { SaveData } from './sim/save'
+
 import './index.css'
 
 const AUTOSAVE_KEY = 'autosave'
@@ -39,16 +40,16 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
 const trustColor = (t: number): string => `hsl(${Math.round(Math.min(1, Math.max(0, t)) * 120)} 70% 45%)`
 
 const STORY_LINES: Record<string, string> = {
-  q1_feed: 'Omar: "Guardian, the Luma are hungry. Walk to one and feed it — click it to open its care panel, then Feed."',
-  q2_teach: 'Omar: "They learn. Teach this one the word come, and it will follow your voice."',
-  q3_berry: 'Omar: "The valley provides. Pick 3 berries from the bushes to fill your pouch."',
-  q4_torch: 'Omar: "Night is falling soon, and with it, the Shadow. Craft a torch from 2 wood."',
-  q5_light: 'Omar: "Light your torch. The Shadow fears the flame."',
-  q6_adult: 'Omar: "Care for them until one reaches adulthood. They grow up fast here."',
-  q7_shadow: 'Omar: "A Shadow Beast walks the night. Stand your ground with the torch — drive it back."',
-  q8_shrine: 'Omar: "Deep in the cave is the Old Shrine. Light it, and the valley will remember you."',
-  q9_birth: 'Omar: "Now let new life come. Two adults will breed, and the valley grows again."',
-  all: 'Omar: "You did it, Guardian. Luma Valley shines again. Thank you for giving them a home."',
+  q1_feed: 'Warden: "Start at the Old Market. Every place in this city has a purpose."',
+  q2_teach: 'Warden: "Meet a citizen. Their choices come from needs, feelings, memory, and relationships."',
+  q3_berry: 'Warden: "Share market bread with a citizen and watch how trust changes."',
+  q4_torch: 'Warden: "Lantern Park offers rest, water, and company without a hidden cost."',
+  q5_light: 'Warden: "The Crooked Cup sells relief. Ale and cigarettes also damage judgment and create dependence."',
+  q6_adult: 'Warden: "The apothecary sells medicine. Citizens can learn to seek it when hurt."',
+  q7_shadow: 'Warden: "The back alley trades dream-dust. Citizens may learn to seek or avoid it from experience."',
+  q8_shrine: 'Warden: "The Watch Yard is a refuge. Frightened citizens remember safe places too."',
+  q9_birth: 'Warden: "Now observe. Citizens may share, argue, fight, reconcile, and raise a new generation."',
+  all: 'Omar: "You did it, Guardian. The old city lives again."',
 }
 
 export default function App() {
@@ -155,7 +156,7 @@ export default function App() {
   useEffect(() => {
     if (!quest) {
       if (q?.completed.includes('q9_birth')) setQuestText(STORY_LINES.all)
-      else setQuestText('Free play — the valley is yours.')
+      else setQuestText('Free play — the old city is yours to explore.')
       return
     }
     setQuestText(`${quest.title} — ${progress}/${quest.goal}${quest.blurb ? ` · ${quest.blurb}` : ''}`)
@@ -173,7 +174,7 @@ export default function App() {
     if (dead.length > 0) {
       const last = dead[dead.length - 1]
       if (last.journal[last.journal.length - 1]?.text.includes('passes away')) {
-        setToast(`${last.name} has passed away… the valley mourns.`)
+        setToast(`${last.name} has passed away… the city mourns.`)
       }
     }
   }, [tick, game])
@@ -181,36 +182,33 @@ export default function App() {
   const handleInteract = (ev: InteractEvent): void => {
     const g = gameRef.current
     if (!g) return
-    if (ev.kind === 'wood') {
-      if (collectWoodFn(g.player)) {
-        setToast('+1 wood')
-        soundRef.current?.click()
-      }
-    } else if (ev.kind === 'shrine') {
+    if (ev.kind === 'shrine') {
       g.emit('lightShrine', 1)
       viewRef.current?.lightShrine()
       soundRef.current?.voice(0.8, 'happy')
-      setToast('You light the Old Shrine. The valley glows. ✨')
+      setToast('You light the old watch fire. The city glows. ✨')
     } else if (ev.kind === 'pickup' && ev.itemId) {
       const item = ITEMS[ev.itemId as keyof typeof ITEMS]
       setToast(`+1 ${item?.name ?? ev.itemId}`)
       soundRef.current?.click()
     } else if (ev.kind === 'creature' && ev.creatureId != null) {
       const c = g.selectedCreature(ev.creatureId)
+      g.emit('meetCitizen', 1)
       if (c?.alive) setToast(`${c.name} is ${MOOD(c.chem.pleasure, c.chem.fear, c.chem.health)}. Care actions are now open.`)
+    } else if (ev.kind === 'place' && ev.placeId) {
+      const result = g.visitPlace(ev.placeId)
+      if (ev.placeId === 'market') g.emit('visitMarket', 1)
+      else if (ev.placeId === 'park') g.emit('visitPark', 1)
+      else if (ev.placeId === 'tavern') g.emit('visitTavern', 1)
+      else if (ev.placeId === 'apothecary') g.emit('visitApothecary', 1)
+      else if (ev.placeId === 'back-alley') g.emit('visitAlley', 1)
+      else if (ev.placeId === 'watch') g.emit('visitWatch', 1)
+      setToast(result.msg)
+      soundRef.current?.click()
     }
     setTick((t) => t + 1)
   }
 
-  const pickBerry = (): void => {
-    const g = gameRef.current
-    if (!g) return
-    if (pickBerryFn(g.player)) {
-      g.emit('pickBerry', 1)
-      soundRef.current?.munch()
-      setToast('+1 berry')
-    }
-  }
 
   const act = (fn: () => boolean | void, snd?: () => void): void => {
     fn()
@@ -220,20 +218,14 @@ export default function App() {
 
   const feedSelected = (): void => {
     if (!game || !selected) return
-    if (game.player.inventory.berries <= 0) {
-      setToast('No berries left — pick some from the valley.')
-      return
-    }
-    if (game.feed(selected.id)) {
-      game.player.inventory.berries--
-      soundRef.current?.munch()
-      setToast(`You feed ${selected.name}.`)
-      setTick((t) => t + 1)
-    }
+    const result = game.giveItem(selected.id, 'bread')
+    setToast(result.msg)
+    if (result.ok) soundRef.current?.munch()
+    setTick((t) => t + 1)
   }
 
   const interact = (): void => {
-    if (!viewRef.current?.interact()) setToast('Nothing within reach — aim at a nearby Luma, item, log, or shrine.')
+    if (!viewRef.current?.interact()) setToast('Nothing within reach — aim at a citizen or district sign.')
   }
 
   const dayLabel =
@@ -259,6 +251,13 @@ export default function App() {
     { label: 'lonely', value: selected.chem.loneliness, color: '#cf82a8' },
   ].sort((a, b) => b.value - a.value) : []
   const interactionHint = inGame ? viewRef.current?.interactionHint() ?? null : null
+  const urban = selected ? (selected as typeof selected & { urban?: {
+    emotions?: Partial<Record<'joy' | 'sadness' | 'anger' | 'fear' | 'empathy' | 'intoxication', number>>
+    currentGoal?: string | null
+    knownPlaces?: Record<string, unknown>
+    carriedItem?: string | null
+    judgment?: number
+  } }).urban : undefined
 
   return (
     <div className="app">
@@ -267,7 +266,7 @@ export default function App() {
       {/* FPV intro overlay */}
       {started && !inGame && (
         <div className="fpv-hint">
-          <p><strong>Click to enter the valley</strong></p>
+          <p><strong>Click to enter the old city</strong></p>
           <p className="hint">{isTouch ? 'Drag to look · joystick to walk · tap to interact' : 'WASD to walk · move mouse to look · arrows/Q/E also look · Space to jump'}</p>
           <button className="btn" onClick={() => {
             if (isTouch) {
@@ -279,16 +278,16 @@ export default function App() {
                 if (!viewRef.current?.fps.isLocked) setExploring(true)
               }, 400)
             }
-          }}>▶ {isTouch ? 'Start exploring' : 'Enter the Valley'}</button>
+          }}>▶ {isTouch ? 'Start exploring' : 'Enter the City'}</button>
         </div>
       )}
 
       <header className="topbar">
-        <h1 className="logo">Luma Valley</h1>
+        <h1 className="logo">Luma · Old City</h1>
         <div className="topbar-right">
           <span className="pill">🕊 {alive}</span>
           <span className="pill">{dayLabel}</span>
-          <span className="pill">🧺 {inventory?.berries ?? 0} 🪵 {inventory?.wood ?? 0} 🔥 {inventory?.torch ?? 0}{itemCounts ? ` ${itemCounts}` : ''}</span>
+          <span className="pill">🧺 {itemCounts || 'empty'} · 🔥 {inventory?.torch ?? 0}</span>
           <button className="icon-btn" onClick={() => setMenu('menu')} aria-label="Menu">☰</button>
         </div>
       </header>
@@ -320,22 +319,21 @@ export default function App() {
       )}
 
       {isTouch && inGame && !hasLooked && (
-        <div className="control-tip">Drag the meadow to look around<br /><span>The world follows your finger</span></div>
+        <div className="control-tip">Drag the street to look around<br /><span>The city follows your finger</span></div>
       )}
 
       {interactionHint && <div className="interaction-prompt">✦ {interactionHint} · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
 
-      {/* Torch + pickup quick actions */}
+      {/* City survival quick actions */}
       {started && inGame && !toast && (
         <div className="quickbar">
           <button
             className={`btn btn-small ${game?.player.torchLit ? 'btn-active' : ''}`}
-            onClick={() => { act(() => { if (game) toggleTorchFn(game.player) }); if (game?.player.torchLit) game?.emit('lightTorch', 1) }}
+            onClick={() => act(() => { if (game) toggleTorchFn(game.player) })}
           >
             🔥 {game?.player.torchLit ? 'Torch on' : 'Torch off'}
           </button>
-          <button className="btn btn-small" onClick={() => { act(() => { if (game) { if (craftTorchFn(game.player)) { game.emit('craftTorch', 1); setToast('Crafted a torch!') } else setToast('Need 2 wood to craft a torch') } }) }}>🪵 Craft torch</button>
-          <button className="btn btn-small" onClick={() => { act(() => pickBerry()) }}>🫐 Pick berry</button>
+          <button className="btn btn-small" onClick={() => setToast('Districts: Market = food · Park = recovery · Tavern = substances · Apothecary = medicine · Alley = danger · Watch = safety')}>🗺 City guide</button>
         </div>
       )}
 
@@ -355,6 +353,19 @@ export default function App() {
               <p className="needs-label">Needs · most urgent first</p>
               {selectedNeeds.map((need) => <Bar key={need.label} {...need} />)}
               <Bar label="health" value={selected.chem.health} color="#7fc27a" />
+              {urban && (
+                <section className="city-mind" aria-label="City cognition">
+                  <span className="psyche-sub">city cognition</span>
+                  <div className="emotion-row">
+                    {Object.entries(urban.emotions ?? {}).map(([name, value]) => (
+                      <span className="emotion-chip" key={name}>{name} {Math.round((value ?? 0) * 100)}</span>
+                    ))}
+                  </div>
+                  <p className="city-facts">
+                    goal <strong>{urban.currentGoal ?? 'none'}</strong> · judgment <strong>{Math.round((urban.judgment ?? 1) * 100)}</strong> · knows <strong>{Object.keys(urban.knownPlaces ?? {}).length}</strong> places · carrying <strong>{urban.carriedItem ?? 'nothing'}</strong>
+                  </p>
+                </section>
+              )}
               <div className="trust">
                 <span className={`trust-tag trust-${trustLabel(selected.psyche.trust)}`}>❤ {trustLabel(selected.psyche.trust)}</span>
                 <div className="bar-track trust-track">
@@ -374,7 +385,7 @@ export default function App() {
                 )}
               </div>
               <div className="actions">
-                <button className="btn" onClick={feedSelected}>🍓 Feed ({inventory?.berries ?? 0})</button>
+                <button className="btn" onClick={feedSelected}>🍞 Share bread ({game?.player.inventory.items.bread ?? 0})</button>
                 <button className="btn" onClick={() => act(() => game?.tickle(selected.id), () => soundRef.current?.voice(selected.traits.voicePitch, 'happy'))}>✨ Tickle</button>
                 <button
                   className={`btn ${game?.carriedId === selected.id ? 'btn-active' : ''}`}
@@ -430,7 +441,7 @@ export default function App() {
                       {item.emoji} {item.name} ({game?.player.inventory.items[item.id] ?? 0})
                     </button>
                   ))}
-                  {ownedItems.length === 0 && <span className="trauma-empty">your pouch is empty — search the valley</span>}
+                  {ownedItems.length === 0 && <span className="trauma-empty">your pouch is empty — search the city</span>}
                 </div>
               </div>
               <div className="psyche-actions">
@@ -447,7 +458,7 @@ export default function App() {
               </div>
             </>
           )}
-          {!selected.alive && <p className="grave-note">Resting in the valley. Their little life is remembered.</p>}
+          {!selected.alive && <p className="grave-note">Resting in the old city. Their life is remembered.</p>}
         </aside>
       )}
 
@@ -455,15 +466,15 @@ export default function App() {
       {!started && (
         <div className="overlay">
           <div className="card">
-            <h1 className="logo-big">Luma Valley</h1>
-            <p className="tagline">Tiny creatures with real brains. Raise them, teach them, protect them from the Shadow.</p>
-            <button className="btn btn-big" onClick={() => startNew()}>🌱 New Valley</button>
+            <h1 className="logo-big">Luma · Old City</h1>
+            <p className="tagline">Explore the city, meet its citizens, and observe the choices they make. Substances may offer short relief, but carry real health and dependence costs.</p>
+            <button className="btn btn-big" onClick={() => startNew()}>🏮 Enter the City</button>
             {hasSave && (
               <button className="btn btn-big btn-ghost" onClick={() => void idbLoad(AUTOSAVE_KEY).then((d) => d && loadGame(d))}>
-                ⏱ Resume valley
+                ⏱ Resume city
               </button>
             )}
-            <p className="hint">First-person. WASD walk, mouse look, click to interact. Your mentor awaits at the den.</p>
+            <p className="hint">First-person. WASD walk, mouse look, click to meet citizens or inspect district signs.</p>
           </div>
         </div>
       )}

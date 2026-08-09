@@ -42,6 +42,24 @@ describe('items', () => {
     expect(c.psyche.addiction.smoke).toBeGreaterThan(0)
     expect(c.lastDose.smoke).toBe(500)
   })
+
+  it('city substances trade short relief for dependence, health and judgment costs', () => {
+    const c = new Creature(null, mulberry32(40), 40)
+    c.chem.fear = 0.9
+    const health = c.chem.health
+    c.giveItem(ITEMS.ale)
+    expect(c.chem.fear).toBeLessThan(0.9)
+    expect(c.psyche.addiction.alcohol).toBeGreaterThan(0)
+    expect(c.chem.health).toBeLessThan(health)
+    expect(c.urban.intoxication).toBeGreaterThan(0)
+    expect(c.urban.judgment).toBeLessThan(1)
+
+    c.giveItem(ITEMS.cigarettes)
+    c.giveItem(ITEMS['dream-dust'])
+    expect(c.psyche.addiction.nicotine).toBeGreaterThan(0)
+    expect(c.psyche.addiction.drug).toBeGreaterThan(0)
+    expect(c.lastDose.drug).toBe(c.age)
+  })
 })
 
 describe('trauma', () => {

@@ -21,6 +21,9 @@ function makeCtx(world: World, creatures: Creature[], self: Creature, day = 0.4)
     findFriend: () => world.nearestCreature(self.pos, creatures, self.id),
     eatAt: (p) => world.eatAt(p),
     resolveCollision: (p, r) => world.resolveCollision(p, r),
+    discoverPlaces: () => [],
+    findPlace: () => null,
+    usePlace: () => null,
   }
 }
 
@@ -51,24 +54,17 @@ describe('creature', () => {
     expect(c.journal.some((j) => j.text.includes('learned'))).toBe(true)
   })
 
-  it('learning: eating near food reinforces toward-food behavior', () => {
-    // Place a plant right next to the creature; hunger high; creature should
-    // eventually find and eat, reducing hunger (and journaling "is full" or eating).
+  it('learns a nearby city place before it can seek its resources', () => {
     const w = new World(11)
     const c = new Creature(null, mulberry32(5), 1)
-    c.pos = { x: w.state.plants[0].pos.x + 0.4, z: w.state.plants[0].pos.z + 0.4 }
-    c.chem.hunger = 0.95
     const ctx = makeCtx(w, [c], c)
-    ctx.foodNear = 0.9
-    let ate = false
-    for (let i = 0; i < 400; i++) {
-      if (!c.tick(ctx)) break
-      if (c.chem.hunger < 0.8) {
-        ate = true
-        break
-      }
-    }
-    expect(ate).toBe(true)
+    const market = { id: 'market' as const, name: 'Old Market', purpose: 'food', pos: { x: 0, z: 0 }, radius: 5, provides: ['bread' as const], danger: 0 }
+    ctx.discoverPlaces = () => [market]
+    ctx.findPlace = () => market
+    c.chem.hunger = 0.95
+    c.tick(ctx)
+    expect(c.urban.knownPlaces.market).toBeDefined()
+    expect(c.journal.some((entry) => entry.text.includes('discovers Old Market'))).toBe(true)
   })
 
   it('dies at lifespan end (permadeath)', () => {
@@ -115,11 +111,12 @@ describe('creature', () => {
 })
 
 describe('world', () => {
-  it('generates plants, water and a den', () => {
+  it('generates a flat city foundation, fountain and residential den', () => {
     const w = new World(42)
-    expect(w.state.plants.length).toBeGreaterThan(10)
-    expect(w.state.waterPoints.length).toBeGreaterThan(10)
+    expect(w.state.plants).toHaveLength(0)
+    expect(w.state.waterPoints).toHaveLength(1)
     expect(w.state.den).toBeTruthy()
+    expect(w.height(-35, 22)).toBe(w.height(31, -27))
   })
 
   it('is deterministic per seed', () => {
@@ -128,12 +125,9 @@ describe('world', () => {
     expect(a.state.plants.map((p) => p.pos.x)).toEqual(b.state.plants.map((p) => p.pos.x))
   })
 
-  it('plants regrow berries over time', () => {
+  it('makes the back alley more dangerous than the market by day', () => {
     const w = new World(43)
-    const p = w.state.plants[0]
-    p.berries = 0
-    for (let i = 0; i < 150; i++) w.tick()
-    expect(p.berries).toBeGreaterThan(0)
+    expect(w.dangerAt({ x: -31, z: -2 }, 0.5)).toBeGreaterThan(w.dangerAt({ x: -18, z: 12 }, 0.5))
   })
 })
 

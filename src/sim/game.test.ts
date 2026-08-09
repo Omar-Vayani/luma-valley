@@ -34,6 +34,7 @@ describe('game', () => {
     const g = new Game(42)
     g.spawnInitial(4)
     for (let i = 0; i < 120; i++) g.tick()
+    g.player.pos = { x: 7, z: -8 }
     const save = g.save()
     const g2 = new Game(0)
     g2.load(save)
@@ -41,6 +42,20 @@ describe('game', () => {
     expect(g2.creatures.length).toBe(g.creatures.length)
     expect(g2.time).toBe(120)
     expect(g2.creatures[0].name).toBe(g.creatures[0].name)
+    expect(g2.player.pos).toEqual({ x: 7, z: -8 })
+  })
+
+  it('migrates pre-city saves to a visible city arrival', () => {
+    const old = new Game(12)
+    old.spawnInitial(3)
+    const save = old.save()
+    for (const creature of save.creatures) delete creature.urban
+    save.player.pos = { x: 48, z: 48 }
+    const city = new Game(0)
+    city.load(save)
+    expect(city.player.pos).toEqual({ x: 0, z: -11 })
+    expect(city.creatures.every((creature) => creature.pos.z === -4.5)).toBe(true)
+    expect(city.quests.active).toBe('q1_feed')
   })
 
   it('save stays small', () => {

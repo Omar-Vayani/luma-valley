@@ -2,9 +2,8 @@ import * as THREE from 'three'
 import type { Creature } from '../sim/creature'
 
 /**
- * creature3d — procedural low-poly creature mesh from the genome:
- * blob body, belly, big expressive eyes (blink, widen), ears, tail, legs,
- * color from hue, size from genes. Animated per frame by the sim state.
+ * A bright, expressive procedural citizen. The familiar creature silhouette is
+ * dressed for the city with a tunic, cloak and hood; it is always available.
  */
 
 export interface Creature3D {
@@ -29,6 +28,8 @@ export function buildCreature3D(creature: Creature): Creature3D {
   const darkMat = new THREE.MeshLambertMaterial({ color: darkColor })
   const whiteMat = new THREE.MeshLambertMaterial({ color: '#ffffff' })
   const pupilMat = new THREE.MeshLambertMaterial({ color: '#241a2e' })
+  const clothColor = new THREE.Color().setHSL((accentHue + .08) % 1, .38, .28)
+  const clothMat = new THREE.MeshLambertMaterial({ color: clothColor })
 
   // Body — rounded blob
   const body = new THREE.Mesh(new THREE.IcosahedronGeometry(size * 0.9, 1), bodyMat)
@@ -41,6 +42,21 @@ export function buildCreature3D(creature: Creature): Creature3D {
   belly.position.set(0, -size * 0.1, size * 0.42)
   belly.scale.set(1, 1.15, 0.75)
   g.add(belly)
+
+  // A high-contrast city silhouette: low tunic, back cloak and hood rim.
+  const tunic = new THREE.Mesh(new THREE.CylinderGeometry(size * .68, size * .82, size * 1.05, 8), clothMat)
+  tunic.position.y = -size * .28
+  tunic.castShadow = true
+  g.add(tunic)
+  const cloak = new THREE.Mesh(new THREE.ConeGeometry(size * .76, size * 1.45, 8, 1, true), clothMat)
+  cloak.position.set(0, -size * .08, -size * .27)
+  cloak.rotation.x = -.12
+  cloak.castShadow = true
+  g.add(cloak)
+  const hood = new THREE.Mesh(new THREE.TorusGeometry(size * .62, size * .13, 6, 12, Math.PI), clothMat)
+  hood.position.set(0, size * .47, size * .06)
+  hood.rotation.set(Math.PI / 2, 0, Math.PI)
+  g.add(hood)
 
   // Eyes (big, expressive)
   const eyeR = size * (0.16 + traits.eyeSize)
@@ -171,7 +187,7 @@ export function buildCreature3D(creature: Creature): Creature3D {
         g.position.z += (Math.random() - 0.5) * 0.05
       }
 
-      const moving = c.action === 'toFood' || c.action === 'toWater' || c.action === 'social' || c.action === 'wander'
+      const moving = c.action === 'toFood' || c.action === 'toWater' || c.action === 'toPlace' || c.action === 'social' || c.action === 'wander'
       const bob = c.sleeping ? Math.sin(time * 2.2) * 0.015 : Math.sin(time * 3.2 + creature.id) * (moving ? 0.12 : 0.04)
       // position from sim (ground height set by caller; we offset)
       g.position.y = bob
@@ -224,14 +240,14 @@ export function buildNameLabel(name: string): THREE.Sprite {
   ctx.textBaseline = 'middle'
   const textWidth = Math.min(228, ctx.measureText(name).width + 30)
   const left = (256 - textWidth) / 2
-  ctx.fillStyle = 'rgba(35,49,31,0.78)'
+  ctx.fillStyle = 'rgba(25,23,21,0.9)'
   ctx.beginPath()
   ctx.roundRect(left, 8, textWidth, 48, 12)
   ctx.fill()
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = '#fff0cc'
   ctx.fillText(name, 128, 34)
   const tex = new THREE.CanvasTexture(canvas)
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
-  sprite.scale.set(0.96, 0.24, 1)
+  sprite.scale.set(1.45, 0.36, 1)
   return sprite
 }

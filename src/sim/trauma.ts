@@ -30,7 +30,7 @@ export function createPsyche(): PsycheState {
     memories: [],
     baselineFear: 0,
     trust: 0.5,
-    addiction: { smoke: 0, sugar: 0, cactus: 0, mushroom: 0 },
+    addiction: { smoke: 0, sugar: 0, cactus: 0, mushroom: 0, alcohol: 0, nicotine: 0, drug: 0 },
     flashbackTimer: 0,
     trustLastEvent: 0,
   }

@@ -15,6 +15,17 @@ import { clamp, hashSeed, pick, type RNG } from './rng'
 import { createPsyche, psycheTick, traumatise, trustReaction, type PsycheState, type TraumaTrigger } from './trauma'
 import { applyItem, type ItemDef } from './items'
 import { createMind, dreadAt, remember, wantsToExplore, type MindState } from './mind'
+import {
+  CITY_PLACES,
+  createUrbanState,
+  decideCityGoal,
+  learnPlace,
+  updateEmotions,
+  type CityPlace,
+  type CityPlaceId,
+  type CityResource,
+  type UrbanState,
+} from './city'
 
 export const ACTIONS = [
   'wander',
@@ -26,6 +37,8 @@ export const ACTIONS = [
   'social',
   'vocalize',
   'flee',
+  'toPlace',
+  'usePlace',
 ] as const
 export type Action = (typeof ACTIONS)[number]
 
@@ -56,6 +69,9 @@ export interface CreatureCtx {
   findFriend: () => Vec2 | null
   eatAt: (pos: Vec2) => FoodEffect | null
   resolveCollision: (pos: Vec2, radius: number) => Vec2
+  discoverPlaces: (pos: Vec2) => CityPlace[]
+  findPlace: (id: CityPlaceId) => CityPlace | null
+  usePlace: (id: CityPlaceId, preferred: CityResource | null) => ItemDef | null
 }
 
 export interface LearnedWord {
@@ -84,7 +100,8 @@ export class Creature {
   bornTick: number
   psyche: PsycheState
   mind: MindState
-  lastDose: Record<string, number> = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999 }
+  urban: UrbanState
+  lastDose: Record<string, number> = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999, alcohol: -9999, nicotine: -9999, drug: -9999 }
   private rngStore: RNG
 
   constructor(genome: Genome | null, rng: RNG, id: number, bornTick = 0, name?: string) {
@@ -127,22 +144,26 @@ export class Creature {
     this.bornTick = bornTick
     this.psyche = createPsyche()
     this.mind = createMind()
+    this.urban = createUrbanState()
     this.rngStore = rng
   }
 
   /** Give an item — returns what it did (or null if dead). */
-  giveItem(item: ItemDef): { label: string; trustDelta: number; toxic: boolean } | null {
+  giveItem(item: ItemDef, fromPlayer = true): { label: string; trustDelta: number; toxic: boolean } | null {
     if (!this.alive) return null
     const out = applyItem(this.chem, item)
     this.chem = out.chem
-    this.psyche.trust = clamp(this.psyche.trust + out.trustDelta, 0, 1)
+    if (item.id === 'ale') this.urban.intoxication = clamp(this.urban.intoxication + 0.35, 0, 1)
+    if (item.id === 'dream-dust') this.urban.intoxication = clamp(this.urban.intoxication + 0.55, 0, 1)
+    this.urban.judgment = clamp(1 - this.urban.intoxication * 0.72, 0, 1)
+    if (fromPlayer) this.psyche.trust = clamp(this.psyche.trust + out.trustDelta, 0, 1)
     for (const [sub, amt] of Object.entries(out.addictionDelta)) {
       this.psyche.addiction[sub] = clamp((this.psyche.addiction[sub] ?? 0) + amt, 0, 1)
       this.lastDose[sub] = this.age
     }
     if (out.healthDelta > 0) this.chem.health = clamp(this.chem.health - out.healthDelta, 0, 1)
     const nice = out.trustDelta >= 0
-    this.log(nice ? `enjoys the ${out.label} (trust ↑)` : `sours at the ${out.label}`)
+    this.log(fromPlayer ? (nice ? `enjoys the ${out.label} (trust ↑)` : `sours at the ${out.label}`) : `uses ${out.label}`)
     if (out.toxic && this.chem.health <= 0.15) {
       this.die('poisoning')
       return { label: out.label, trustDelta: out.trustDelta, toxic: true }
@@ -211,7 +232,7 @@ export class Creature {
     // ── psyche: trauma, flashbacks, withdrawal ──
     const night = ctx.day > 0.72 || ctx.day < 0.1
     const withdrawal: string[] = []
-    for (const sub of ['smoke', 'sugar', 'cactus', 'mushroom']) {
+    for (const sub of ['smoke', 'sugar', 'cactus', 'mushroom', 'alcohol', 'nicotine', 'drug']) {
       if ((this.psyche.addiction[sub] ?? 0) > 0.35 && this.age - (this.lastDose[sub] ?? -9999) > 600) withdrawal.push(sub)
     }
     const psy = psycheTick(this.psyche, this.age, this.rngStore, {
@@ -231,6 +252,23 @@ export class Creature {
       this.log(`shudders — haunted by ${worst.trigger}`)
     }
     if (psy.healed) this.log('the fear seems a little smaller today')
+
+    // ── city cognition: discover nearby places, feel, and form a goal ──
+    for (const place of ctx.discoverPlaces(this.pos)) {
+      const firstVisit = !this.urban.knownPlaces[place.id]
+      learnPlace(this.urban, place, this.age, -place.danger * 0.4)
+      if (firstVisit) this.log(`discovers ${place.name}: ${place.purpose}`)
+    }
+    this.urban.intoxication = clamp(this.urban.intoxication - 0.0008, 0, 1)
+    if (this.urban.socialCooldown > 0) this.urban.socialCooldown--
+    updateEmotions(this.urban, {
+      pleasure: this.chem.pleasure,
+      fear: this.chem.fear,
+      pain: this.chem.pain,
+      loneliness: this.chem.loneliness,
+      health: this.chem.health,
+      empathy: 0.25 + this.gene('social') * 0.65,
+    })
 
     // ── mind: episodic dread + emotional contagion ──
     const dread = dreadAt(this.mind, this.pos)
@@ -301,6 +339,32 @@ export class Creature {
     else if (this.chem.thirst > 0.55) this.action = 'toWater'
     else if (this.chem.fatigue > 0.82) this.action = 'sleep'
     else if (this.chem.loneliness > 0.8 || (this.chem.boredom > 0.85 && ctx.creatureNear > 0.2)) this.action = 'social'
+
+    const withdrawalNeed = withdrawal.includes('drug') ? 'drug'
+      : withdrawal.includes('alcohol') ? 'alcohol'
+        : withdrawal.includes('nicotine') ? 'nicotine'
+          : null
+    let cityGoal = decideCityGoal(this.urban, {
+      hunger: this.chem.hunger,
+      health: this.chem.health,
+      loneliness: this.chem.loneliness,
+      boredom: this.chem.boredom,
+      fear: this.chem.fear,
+      withdrawal: withdrawalNeed,
+    })
+    if (!cityGoal && this.urban.currentGoal) cityGoal = this.urban.currentGoal
+    if (!cityGoal && (this.chem.hunger > 0.55 || this.chem.boredom > 0.5 || this.chem.loneliness > 0.5) && ctx.rng() < 0.018) {
+      const unknown = CITY_PLACES.filter((place) => !this.urban.knownPlaces[place.id])
+      if (unknown.length > 0) {
+        cityGoal = unknown[Math.floor(ctx.rng() * unknown.length)].id
+        this.urban.currentGoal = cityGoal
+        this.log('sets out to explore an unfamiliar district')
+      }
+    }
+    if (cityGoal) {
+      const place = ctx.findPlace(cityGoal)
+      this.action = place && this.dist(place.pos) <= 1.8 ? 'usePlace' : 'toPlace'
+    }
 
     // terrified creatures flee the player
     if (this.psyche.trust < 0.18 && ctx.playerNear > 0.3) this.action = 'flee'
@@ -384,6 +448,52 @@ export class Creature {
         this.sleeping = true
         this.actionTimer = 0
         this.log('falls asleep')
+        break
+      }
+      case 'toPlace': {
+        const place = this.urban.currentGoal ? ctx.findPlace(this.urban.currentGoal) : null
+        if (!place) {
+          this.action = 'wander'
+          this.urban.currentGoal = null
+          break
+        }
+        this.turnToward(place.pos)
+        if (this.dist(place.pos) <= 1.8) this.action = 'usePlace'
+        else this.move(speed, ctx)
+        break
+      }
+      case 'usePlace': {
+        const placeId = this.urban.currentGoal
+        const place = placeId ? ctx.findPlace(placeId) : null
+        if (!placeId || !place || this.dist(place.pos) > 2.2) {
+          this.action = 'toPlace'
+          break
+        }
+        let preferred: CityResource | null = null
+        if (placeId === 'market') preferred = 'bread'
+        else if (placeId === 'tavern') {
+          preferred = (this.psyche.addiction.nicotine ?? 0) > (this.psyche.addiction.alcohol ?? 0) ? 'cigarettes' : 'ale'
+        } else if (placeId === 'apothecary') preferred = 'medicine'
+        else if (placeId === 'back-alley') preferred = 'dream-dust'
+        const item = ctx.usePlace(placeId, preferred)
+        if (item) {
+          this.giveItem(item, false)
+          if (item.id === 'bread' && ctx.rng() < 0.35) this.urban.carriedItem = 'bread'
+        } else if (placeId === 'park') {
+          this.chem.thirst = clamp(this.chem.thirst - 0.45, 0, 1)
+          this.chem.boredom = clamp(this.chem.boredom - 0.22, 0, 1)
+          this.log('rests beside the Ashen Park fountain')
+        } else if (placeId === 'homes') {
+          this.chem.fatigue = clamp(this.chem.fatigue - 0.4, 0, 1)
+          this.chem.fear = clamp(this.chem.fear - 0.2, 0, 1)
+          this.log('rests safely on Lantern Row')
+        } else if (placeId === 'watch') {
+          this.chem.fear = clamp(this.chem.fear - 0.35, 0, 1)
+          this.log('calms down near the Old Watch')
+        }
+        this.urban.currentGoal = null
+        this.action = 'wander'
+        this.actionTimer = 0
         break
       }
       case 'social': {

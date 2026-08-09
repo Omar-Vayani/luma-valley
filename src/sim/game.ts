@@ -1,6 +1,6 @@
 import { Creature } from './creature'
 import type { CreatureCtx } from './creature'
-import { applyFood, FOOD_EFFECTS } from './biochem'
+import { applyFood, FOOD_EFFECTS, socialTick } from './biochem'
 import { ITEMS } from './items'
 import { World } from './world'
 import { applySave, buildSave, type SaveData } from './save'
@@ -9,6 +9,9 @@ import { createPlayer, type PlayerState } from './player'
 import { ShadowBeast } from './shadowbeast'
 import { createQuestLog, questEvent, type QuestEvent, type QuestLogState } from './quests'
 import { contagion, remember, updateAffinity } from './mind'
+import { affinityFor } from './mind'
+import { CITY_PLACES, resolveSocialEncounter, type CityPlaceId } from './city'
+import type { ItemId } from './items'
 
 /**
  * Game — orchestrates the world + creatures into one playable simulation.
@@ -40,13 +43,11 @@ export class Game {
   private breedCooldown = 0
   private shadowSpawnTimer = 0
   private beastNextId = 1
+  private placeVisitAt: Partial<Record<CityPlaceId, number>> = {}
 
   constructor(seed: number, size = 60, settings?: GameSettings) {
     this.world = new World(seed, size)
-    // level pads for the village house, cave, and graveyard structures
-    this.world.addFlatZone(-8, 14, 10)
-    this.world.addFlatZone(-24, -18, 9)
-    this.world.addFlatZone(28, 30, 9)
+
     this.rng = mulberry32(seed)
     if (settings) this.settings = settings
     this.player = createPlayer({ x: 0, z: 0 })
@@ -54,31 +55,23 @@ export class Game {
   }
 
   spawnInitial(count = 5): void {
+    this.player.pos = { x: 0, z: -11 }
     for (let i = 0; i < count; i++) {
       const c = new Creature(null, this.rng, this.nextId++, 0)
-      this.placeRandom(c)
+      const arrival = CITY_PLACES[0]
+      const streetX = (i - (count - 1) / 2) * 2.6
+      c.pos = this.world.resolveCollision(
+        { x: arrival.pos.x + streetX + range(this.rng, -0.35, 0.35), z: arrival.pos.z - 4.5 + range(this.rng, -0.25, 0.25) },
+        0.35,
+      )
       this.creatures.push(c)
-      c.log('hatches into the valley')
+      c.log('arrives in the old city')
     }
   }
 
   /** Fire a gameplay event into the quest engine. */
   emit(kind: QuestEvent, amount = 1): string[] {
     return questEvent(this.quests, kind, amount)
-  }
-
-  private placeRandom(c: Creature): void {
-    const s = this.world.state.size
-    for (let tries = 0; tries < 40; tries++) {
-      const x = range(this.rng, -s + 5, s - 5)
-      const z = range(this.rng, -s + 5, s - 5)
-      const h = this.world.height(x, z)
-      if (h > 0.3 && Math.hypot(x - this.world.state.den.x, z - this.world.state.den.z) > 6 && !this.world.collides({ x, z }, 0.5)) {
-        c.pos = { x, z }
-        return
-      }
-    }
-    c.pos = { x: 0, z: 0 }
   }
 
   private proximity(pos: { x: number; z: number }, find: () => { x: number; z: number } | null, max = 12): number {
@@ -106,6 +99,9 @@ export class Game {
       findWater: () => this.world.nearestWater(self.pos),
       findFriend: () => this.world.nearestCreature(self.pos, this.creatures, self.id),
       resolveCollision: (p, r) => this.world.resolveCollision(p, r),
+      discoverPlaces: (p) => CITY_PLACES.filter((place) => Math.hypot(place.pos.x - p.x, place.pos.z - p.z) <= place.radius + 3),
+      findPlace: (id) => CITY_PLACES.find((place) => place.id === id) ?? null,
+      usePlace: (_id, preferred) => preferred && preferred in ITEMS ? ITEMS[preferred as ItemId] : null,
       eatAt: (p) => {
         const fx = this.world.eatAt(p)
         if (fx) remember(self.mind, 'food', p, 1, 0.6, self.age)
@@ -137,6 +133,47 @@ export class Game {
           const bFear = contagion(b.mind, a.id, a.chem.fear)
           bondFear.set(a.id, (bondFear.get(a.id) ?? 0) + aFear)
           bondFear.set(b.id, (bondFear.get(b.id) ?? 0) + bFear)
+
+          if (d < 1.8 && a.urban.socialCooldown <= 0 && b.urban.socialCooldown <= 0 && this.time % 30 === (a.id + b.id) % 30) {
+            const outcome = resolveSocialEncounter(a.urban, b.urban, affinityFor(a.mind, b.id), this.rng)
+            a.urban.socialCooldown = 90
+            b.urban.socialCooldown = 90
+            if (outcome === 'share' && b.urban.carriedItem) {
+              const shared = b.urban.carriedItem
+              const item = ITEMS[shared as ItemId]
+              if (item) b.giveItem(item, false)
+              b.urban.carriedItem = null
+              updateAffinity(a.mind, b.id, 0.12)
+              updateAffinity(b.mind, a.id, 0.12)
+              a.log(`shares ${item?.name ?? shared} with ${b.name}`)
+              b.log(`${a.name} shares ${item?.name ?? shared}`)
+            } else if (outcome === 'fight' && !this.settings.gentle) {
+              const harmA = 0.015 + b.urban.emotions.anger * 0.025
+              const harmB = 0.015 + a.urban.emotions.anger * 0.025
+              a.chem.health = clamp(a.chem.health - harmA, 0, 1)
+              b.chem.health = clamp(b.chem.health - harmB, 0, 1)
+              a.chem.pain = clamp(a.chem.pain + 0.25, 0, 1)
+              b.chem.pain = clamp(b.chem.pain + 0.25, 0, 1)
+              updateAffinity(a.mind, b.id, -0.18)
+              updateAffinity(b.mind, a.id, -0.18)
+              a.log(`fights with ${b.name}`)
+              b.log(`fights with ${a.name}`)
+              for (const witness of this.creatures) {
+                if (witness.id !== a.id && witness.id !== b.id && Math.hypot(witness.pos.x - a.pos.x, witness.pos.z - a.pos.z) < 5) {
+                  witness.chem.fear = clamp(witness.chem.fear + 0.12, 0, 1)
+                }
+              }
+            } else if (outcome === 'talk') {
+              socialTick(a.chem)
+              socialTick(b.chem)
+              updateAffinity(a.mind, b.id, 0.018)
+              updateAffinity(b.mind, a.id, 0.018)
+              if (this.time % 180 < 30) {
+                a.log(`talks with ${b.name}`)
+                b.log(`talks with ${a.name}`)
+              }
+            }
+          }
         }
       }
     }
@@ -281,7 +318,7 @@ export class Game {
     if (!item || !c) return { ok: false, msg: 'Nothing happened.' }
     const inv = this.player.inventory.items
     const count = inv[itemId] ?? 0
-    if (count <= 0) return { ok: false, msg: `No ${item.name} left — find it in the valley.` }
+    if (count <= 0) return { ok: false, msg: `No ${item.name} left — learn which city district supplies it.` }
     const result = c.giveItem(item)
     inv[itemId] = count - 1
     if (result?.toxic) {
@@ -352,6 +389,58 @@ export class Game {
     return known
   }
 
+  /** Interact with a named city district. Every place has an explicit use. */
+  visitPlace(placeId: CityPlaceId): { ok: boolean; msg: string } {
+    const place = CITY_PLACES.find((candidate) => candidate.id === placeId)
+    if (!place) return { ok: false, msg: 'That place is not part of the city.' }
+    const itemByPlace: Partial<Record<CityPlaceId, ItemId>> = {
+      market: 'bread',
+      tavern: 'ale',
+      apothecary: 'medicine',
+      'back-alley': 'dream-dust',
+    }
+    const itemId = itemByPlace[placeId]
+    if (itemId) {
+      const addictive = placeId === 'tavern' || placeId === 'back-alley'
+      if (addictive) {
+        const cooldown = placeId === 'tavern' ? 180 : 360
+        const lastVisit = this.placeVisitAt[placeId] ?? -9999
+        if (this.time - lastVisit < cooldown) {
+          return { ok: false, msg: `${place.name}: service refused for now. Dependence and impairment need time to fade.` }
+        }
+        const held = this.player.inventory.items
+        const atLimit = placeId === 'tavern'
+          ? (held.ale ?? 0) >= 1 || (held.cigarettes ?? 0) >= 1
+          : (held['dream-dust'] ?? 0) >= 1
+        if (atLimit) {
+          return { ok: false, msg: `${place.name}: no more supplied while you still carry an addictive substance.` }
+        }
+      }
+      this.pickupItem(itemId)
+      if (placeId === 'tavern') this.pickupItem('cigarettes')
+      if (addictive) this.placeVisitAt[placeId] = this.time
+      const item = ITEMS[itemId]
+      return {
+        ok: true,
+        msg: placeId === 'tavern'
+          ? `${place.name}: one ale and one cigarette. Short relief harms health and judgment and may create dependence.`
+          : placeId === 'back-alley'
+            ? `${place.name}: one dangerous dose. It impairs judgment, harms health, and can create severe dependence.`
+            : `${place.name}: +1 ${item.name}. ${item.blurb}`,
+      }
+    }
+    if (placeId === 'park') {
+      this.player.sanity = clamp(this.player.sanity + 0.2, 0, 1)
+      return { ok: true, msg: `${place.name}: the fountain and quiet park restore calm.` }
+    }
+    if (placeId === 'homes') {
+      this.player.sanity = clamp(this.player.sanity + 0.3, 0, 1)
+      return { ok: true, msg: `${place.name}: homes provide sleep, shelter, and safety.` }
+    }
+    if (placeId === 'watch') return { ok: true, msg: `${place.name}: citizens seek the watch when frightened or threatened.` }
+    return { ok: true, msg: `${place.name}: ${place.purpose}.` }
+  }
+
   selectedCreature(id: number): Creature | null {
     return this.creatures.find((c) => c.id === id) ?? null
   }
@@ -363,7 +452,7 @@ export class Game {
       this.settings,
       this.nextId,
       this.time,
-      { pos: { ...this.player.pos }, facingYaw: this.player.facingYaw, inventory: { ...this.player.inventory, items: { ...(this.player.inventory.items ?? {}) } as Record<string, number> }, torchLit: this.player.torchLit, sanity: this.player.sanity },
+      { pos: { ...this.player.pos }, facingYaw: this.player.facingYaw, inventory: { ...this.player.inventory, items: { ...this.player.inventory.items } as Record<string, number> }, torchLit: this.player.torchLit, sanity: this.player.sanity },
       { active: this.quests.active, progress: { ...this.quests.progress }, completed: [...this.quests.completed], unlocked: [...this.quests.unlocked] },
       this.shadowBeasts.map((b) => ({ id: b.state.id, pos: { ...b.state.pos }, state: b.state.state, health: b.state.health, targetId: b.state.targetId })),
       this.beastNextId,
@@ -373,6 +462,7 @@ export class Game {
   }
 
   load(data: SaveData): void {
+    const legacyValley = data.creatures.some((creature) => !creature.urban)
     this.settings = data.settings
     this.nextId = data.nextId
     this.time = data.time
@@ -382,7 +472,7 @@ export class Game {
       this.player = {
         pos: { ...data.player.pos },
         facingYaw: data.player.facingYaw ?? 0,
-        inventory: { ...data.player.inventory, items: { ...(data.player.inventory.items ?? {}) } },
+        inventory: { ...data.player.inventory, items: { ...data.player.inventory.items } },
         torchLit: data.player.torchLit ?? false,
         sanity: data.player.sanity ?? 1,
         carryingId: null,
@@ -395,6 +485,17 @@ export class Game {
         completed: [...data.quests.completed],
         unlocked: [...data.quests.unlocked],
       }
+    }
+    if (legacyValley) {
+      this.player.pos = { x: 0, z: -11 }
+      this.player.facingYaw = 0
+      this.player.inventory.items.bread = Math.max(this.player.inventory.items.bread ?? 0, 2)
+      this.player.inventory.items.medicine = Math.max(this.player.inventory.items.medicine ?? 0, 1)
+      const alive = this.creatures.filter((creature) => creature.alive)
+      alive.forEach((creature, index) => {
+        creature.pos = { x: (index - (alive.length - 1) / 2) * 2.6, z: -4.5 }
+      })
+      this.quests = createQuestLog()
     }
     if (data.shadowBeasts) {
       this.shadowBeasts = data.shadowBeasts.map((s) => new ShadowBeast(s.id, s.pos))

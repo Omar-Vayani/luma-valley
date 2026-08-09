@@ -14,7 +14,7 @@ export function createPlayer(pos: Vec2): PlayerState {
   return {
     pos: { ...pos },
     facingYaw: 0,
-    inventory: { berries: 3, wood: 0, torch: 1, items: {} },
+    inventory: { berries: 0, wood: 0, torch: 1, items: { bread: 2, medicine: 1 } },
     torchLit: false,
     sanity: 1,
     carryingId: null,

@@ -2,6 +2,7 @@ import { Creature } from './creature'
 import { Brain } from './brain'
 import { World } from './world'
 import type { WorldState } from './world'
+import { createUrbanState, type UrbanState } from './city'
 import type { ChemicalState } from './biochem'
 import { describeGenome, type Genome } from './genetics'
 
@@ -62,6 +63,7 @@ export interface SavedCreature {
     affinity: Record<string, number>
     curiosity: number
   }
+  urban?: UrbanState
 }
 
 /** Compact brain: rounded tuples, no transient eligibility/state. */
@@ -138,6 +140,7 @@ export function buildSave(
         affinity: { ...c.mind.affinity },
         curiosity: Math.round(c.mind.curiosity * 100) / 100,
       },
+      urban: JSON.parse(JSON.stringify(c.urban)) as UrbanState,
     })),
     nextId,
     time,
@@ -175,14 +178,15 @@ export function applySave(data: SaveData, world: World, creatures: Creature[]): 
       }))
       c.psyche.baselineFear = sc.psyche.baselineFear ?? 0
       c.psyche.trust = sc.psyche.trust ?? 0.5
-      c.psyche.addiction = { smoke: 0, sugar: 0, cactus: 0, mushroom: 0, ...(sc.psyche.addiction ?? {}) }
-      c.lastDose = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999, ...(sc.psyche.lastDose ?? {}) }
+      c.psyche.addiction = { smoke: 0, sugar: 0, cactus: 0, mushroom: 0, alcohol: 0, nicotine: 0, drug: 0, ...sc.psyche.addiction }
+      c.lastDose = { smoke: -9999, sugar: -9999, cactus: -9999, mushroom: -9999, alcohol: -9999, nicotine: -9999, drug: -9999, ...sc.psyche.lastDose }
     }
     if (sc.mind) {
       c.mind.episodes = sc.mind.episodes.map((e) => ({ id: e.id, kind: e.kind as 'food' | 'scare' | 'friend' | 'water' | 'player-kind' | 'player-cruel', pos: { ...e.pos }, entityId: e.entityId, valence: e.valence, intensity: e.intensity, tick: e.tick }))
-      c.mind.affinity = { ...(sc.mind.affinity ?? {}) }
+      c.mind.affinity = { ...sc.mind.affinity }
       c.mind.curiosity = sc.mind.curiosity ?? 0.5
     }
+    c.urban = sc.urban ? JSON.parse(JSON.stringify(sc.urban)) as UrbanState : createUrbanState()
     c.journal = sc.journal.map((j) => ({ ...j }))
     creatures.push(c)
   }

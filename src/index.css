@@ -524,3 +524,33 @@ button, .btn, input, label.btn { min-height: 44px; }
   .jump-btn, .interact-btn { bottom: 10px; }
   .control-tip { top: 22%; }
 }
+
+/* Old-city palette: parchment UI over charcoal stone and amber lantern light. */
+:root {
+  --surface: #eee4ce;
+  --ink: #2d2a27;
+  --muted: #746b5e;
+  --accent: #9a632e;
+  --card-shadow: 0 8px 28px rgba(12, 13, 12, .38);
+}
+.topbar { background: linear-gradient(180deg, rgba(24, 23, 22, .92), rgba(24, 23, 22, 0)); }
+.logo { color: #ffd88f; text-shadow: 0 1px 4px #120d08; letter-spacing: .04em; }
+.pill { background: rgba(38, 34, 30, .86); border: 1px solid rgba(205, 159, 88, .24); }
+.quest-tracker { background: #e9dfc8; border-left-color: #b77938; }
+.quest-progress, .btn { background: #80532e; }
+.btn-active { background: #ba762e; }
+.panel { background: #eee4ce; border-color: #9d8766; }
+.quickbar { background: rgba(30, 28, 26, .78); }
+.control-tip, .interaction-prompt { background: rgba(30, 28, 26, .92); border-color: rgba(226, 175, 94, .52); }
+.joystick { background: rgba(37, 35, 31, .5); border-color: rgba(244, 202, 128, .75); }
+.jump-btn, .interact-btn { background: rgba(55, 45, 35, .9); border-color: rgba(244, 202, 128, .8); }
+.city-mind { margin-top: 10px; border-top: 1px solid #cabc9f; }
+.emotion-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.emotion-chip { padding: 3px 6px; border-radius: 5px; background: #d7cab0; color: #4b4339; font-size: .66rem; font-weight: 700; }
+.city-facts { margin: 6px 0; color: #665d50; font-size: .72rem; }
+
+@media (max-width: 720px) {
+  .quest-tracker { width: min(290px, calc(100vw - 90px)); }
+  .quickbar { max-width: calc(100vw - 220px); overflow-x: auto; left: 50%; }
+  .panel .emotion-row { max-width: 100%; }
+}

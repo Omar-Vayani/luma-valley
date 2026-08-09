@@ -61,19 +61,20 @@ describe('mind', () => {
       findFriend: () => null,
       eatAt: () => null,
       resolveCollision: (p) => ({ ...p }),
+      discoverPlaces: () => [],
+      findPlace: () => null,
+      usePlace: () => null,
     })
     expect(c.chem.fear).toBeGreaterThanOrEqual(before)
     void c2
     void g
   })
 
-  it('eating remembers the food spot', () => {
+  it('citizens learn the district where they arrive', () => {
     const g = new Game(7)
     g.spawnInitial(1)
     const c = g.creatures[0]
-    // put a plant near the creature and tick until it eats
-    g.world.state.plants = [{ id: 1, pos: { x: c.pos.x + 1, z: c.pos.z }, berries: 3, regrow: 0 }]
-    for (let i = 0; i < 300 && !c.mind.episodes.some((e) => e.kind === 'food'); i++) g.tick()
-    expect(c.mind.episodes.some((e) => e.kind === 'food')).toBe(true)
+    g.tick()
+    expect(Object.keys(c.urban.knownPlaces).length).toBeGreaterThan(0)
   })
 })

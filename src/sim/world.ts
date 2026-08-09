@@ -1,8 +1,9 @@
 import { Creature } from './creature'
 import type { FoodEffect } from './biochem'
 import { FOOD_EFFECTS } from './biochem'
-import { int, mulberry32, range, type RNG } from './rng'
+import { mulberry32, type RNG } from './rng'
 import type { Vec2 } from './creature'
+import { CITY_PLACES } from './city'
 
 /**
  * World — a small procedural valley with terrain height, a stream,
@@ -65,32 +66,18 @@ export class World {
       flatZones: [],
       colliders: [],
     }
-    // stream along z axis at x ≈ -6 with meander
-    for (let z = -size; z <= size; z += 2) {
-      const meander = Math.sin(z * 0.3 + seed) * 3
-      this.state.waterPoints.push({ x: -6 + meander, z })
-    }
-    this.state.den = { x: 8, z: 4 }
-    const plantCount = 36
-    for (let i = 0; i < plantCount; i++) {
-      const x = range(this.rng, -size + 4, size - 4)
-      const z = range(this.rng, -size + 4, size - 4)
-      const h = this.height(x, z)
-      if (h < 0.25) continue // don't plant in the stream
-      this.state.plants.push({ id: i, pos: { x, z }, berries: int(this.rng, 1, 4), regrow: 0 })
-    }
+    // The old city uses a level foundation. Water is available from the
+    // public fountain in Ashen Park; food and other resources come from
+    // explicit, learnable city places rather than anonymous wilderness props.
+    const park = CITY_PLACES.find((place) => place.id === 'park')!
+    this.state.waterPoints.push({ ...park.pos })
+    this.state.den = { ...CITY_PLACES.find((place) => place.id === 'homes')!.pos }
   }
 
   height(x: number, z: number): number {
-    let h = sampleHeight(x, z, this.state.seed)
-    for (const zone of this.state.flatZones) {
-      const d = Math.hypot(x - zone.x, z - zone.z)
-      if (d < zone.r) {
-        const edge = Math.max(0, Math.min(1, (d - zone.r * 0.6) / (zone.r * 0.4)))
-        h = zone.y + (h - zone.y) * (edge * edge * (3 - 2 * edge))
-      }
-    }
-    return h
+    void x
+    void z
+    return 0.5
   }
 
   /** Carve a level pad for a structure. */
@@ -149,11 +136,13 @@ export class World {
     return best
   }
 
-  /** Danger: for now, night time is mildly scary; later: predators. */
+  /** Danger comes from darkness, the city edge, and the illicit back alley. */
   dangerAt(pos: Vec2, dayTime: number): number {
-    const night = dayTime > 0.75 || dayTime < 0.12 ? 0.6 : 0
+    const night = dayTime > 0.75 || dayTime < 0.12 ? 0.35 : 0
     const edge = Math.abs(pos.x) > this.state.size - 6 || Math.abs(pos.z) > this.state.size - 6 ? 0.3 : 0
-    return Math.min(1, night + edge)
+    const alley = CITY_PLACES.find((place) => place.id === 'back-alley')!
+    const alleyDanger = Math.hypot(pos.x - alley.pos.x, pos.z - alley.pos.z) < alley.radius + 3 ? alley.danger : 0
+    return Math.min(1, night + edge + alleyDanger)
   }
 
   eatAt(pos: Vec2): FoodEffect | null {

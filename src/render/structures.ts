@@ -1,103 +1,117 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { CITY_PLACES, type CityPlace, type CityPlaceId } from '../sim/city'
 
-/**
- * structures — loads and places the Quaternius village house, dungeon
- * cave dressing, and graveyard corner from converted GLB/glTF assets.
- */
-const loader = new GLTFLoader()
-
-function load(url: string): Promise<THREE.Group> {
-  return new Promise((resolve, reject) => loader.load(url, (g) => resolve(g.scene), undefined, reject))
+export interface CityStructures {
+  group: THREE.Group
+  interactionMeshes: THREE.Object3D[]
+  lanterns: THREE.PointLight[]
 }
 
-function place(group: THREE.Group, scene: THREE.Scene, x: number, y: number, z: number, ry = 0, s = 1): void {
-  const g = group.clone(true)
-  g.position.set(x, y, z)
-  g.rotation.y = ry
-  g.scale.setScalar(s)
-  scene.add(g)
+const MAT = {
+  stone: new THREE.MeshLambertMaterial({ color: '#655f55' }),
+  dark: new THREE.MeshLambertMaterial({ color: '#302e2b' }),
+  roof: new THREE.MeshLambertMaterial({ color: '#403a36' }),
+  wood: new THREE.MeshLambertMaterial({ color: '#5e412c' }),
+  amber: new THREE.MeshLambertMaterial({ color: '#ffc15c', emissive: '#a95818', emissiveIntensity: 1.1 }),
+  green: new THREE.MeshLambertMaterial({ color: '#354b39' }),
+  purple: new THREE.MeshLambertMaterial({ color: '#9854c7', emissive: '#55206f', emissiveIntensity: 0.8 }),
+  cloth: new THREE.MeshLambertMaterial({ color: '#7d5035' }),
 }
 
-/** Terrain ground Y at a world point (matches world3d terrain). */
-export function groundY(world: { height: (x: number, z: number) => number }, x: number, z: number): number {
-  return world.height(x, z) * 6 - 2.5
+function box(group: THREE.Group, size: [number, number, number], pos: [number, number, number], material: THREE.Material, ry = 0): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material)
+  mesh.position.set(...pos)
+  mesh.rotation.y = ry
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  group.add(mesh)
+  return mesh
 }
 
-/** Build a cozy stone cottage from village modular pieces. */
-export async function buildStoneHouse(scene: THREE.Scene, cx: number, cz: number, gy: (x: number, z: number) => number): Promise<void> {
-  try {
-    const [wall, doorWall, roof, door] = await Promise.all([
-      load('models/village/Wall_Plaster_Straight.gltf'),
-      load('models/village/Wall_Plaster_Door_Flat.gltf'),
-      load('models/village/Roof_RoundTiles_4x6.gltf'),
-      load('models/village/Door_2_Flat.gltf'),
-    ])
-    const y = (x: number, z: number) => gy(x, z)
-    // north + south walls
-    place(wall, scene, cx, y(cx, cz + 3), cz + 3, 0)
-    place(wall, scene, cx + 4, y(cx + 4, cz + 3), cz + 3, 0)
-    place(wall, scene, cx, y(cx, cz - 3), cz - 3, 0)
-    place(wall, scene, cx + 4, y(cx + 4, cz - 3), cz - 3, 0)
-    // east wall with door
-    place(doorWall, scene, cx + 4.2, y(cx + 4.2, cz - 1.5), cz - 1.5, Math.PI / 2)
-    // west wall
-    place(wall, scene, cx - 0.2, y(cx - 0.2, cz - 1.5), cz - 1.5, Math.PI / 2)
-    place(wall, scene, cx - 0.2, y(cx - 0.2, cz + 1.5), cz + 1.5, Math.PI / 2)
-    // roof
-    place(roof, scene, cx + 2, y(cx + 2, cz) + 2.6, cz, 0)
-    place(roof, scene, cx + 2, y(cx + 2, cz) + 2.6, cz, Math.PI, 1)
-    // door
-    place(door, scene, cx + 4.3, y(cx + 4.3, cz - 1.5), cz - 1.5, Math.PI / 2)
-  } catch (e) {
-    console.warn('village house failed to load', e)
+function building(group: THREE.Group, x: number, z: number, w: number, d: number, floors: number, entrance: 'n' | 's' | 'e' | 'w'): void {
+  const h = floors * 2.6
+  box(group, [w, h, d], [x, h / 2, z], MAT.stone)
+  box(group, [w + 0.35, 0.55, d + 0.35], [x, h + 0.25, z], MAT.roof)
+  const doorPos: [number, number, number] = entrance === 'n' ? [x, 1.05, z - d / 2 - 0.02] : entrance === 's' ? [x, 1.05, z + d / 2 + 0.02] : entrance === 'e' ? [x - w / 2 - 0.02, 1.05, z] : [x + w / 2 + 0.02, 1.05, z]
+  box(group, entrance === 'n' || entrance === 's' ? [1.3, 2.1, 0.12] : [0.12, 2.1, 1.3], doorPos, MAT.dark)
+}
+
+function labelSprite(place: CityPlace): THREE.Sprite {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512; canvas.height = 96
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = 'rgba(26,24,22,.9)'; ctx.roundRect(8, 8, 496, 80, 14); ctx.fill()
+  ctx.strokeStyle = '#c49b58'; ctx.lineWidth = 3; ctx.stroke()
+  ctx.fillStyle = '#fff0cc'; ctx.font = '700 29px Georgia, serif'; ctx.textAlign = 'center'; ctx.fillText(place.name, 256, 43)
+  ctx.fillStyle = '#d2c4a5'; ctx.font = '19px system-ui, sans-serif'; ctx.fillText(place.purpose, 256, 70)
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }))
+  sprite.scale.set(6.8, 1.28, 1)
+  return sprite
+}
+
+function marker(group: THREE.Group, place: CityPlace, interactionMeshes: THREE.Object3D[]): void {
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 2.6, 8), MAT.wood)
+  post.position.set(place.pos.x, 1.3, place.pos.z)
+  post.userData = { interact: 'place', placeId: place.id }
+  group.add(post)
+  const label = labelSprite(place)
+  label.position.set(place.pos.x, 3.25, place.pos.z)
+  label.userData = post.userData
+  group.add(label)
+  interactionMeshes.push(post, label)
+}
+
+function lantern(group: THREE.Group, lanterns: THREE.PointLight[], x: number, z: number): void {
+  box(group, [0.12, 2.7, 0.12], [x, 1.35, z], MAT.dark)
+  const lamp = box(group, [0.4, 0.55, 0.4], [x, 2.65, z], MAT.amber)
+  lamp.castShadow = false
+  const light = new THREE.PointLight(0xff9e3d, 1.25, 9, 2)
+  light.position.set(x, 2.7, z); group.add(light); lanterns.push(light)
+}
+
+function district(group: THREE.Group, place: CityPlace): void {
+  const { x, z } = place.pos
+  if (place.id === 'market') {
+    for (const dx of [-3, 0, 3]) { box(group, [2.3, .75, 1.4], [x + dx, .38, z + 2], MAT.wood); box(group, [2.6, .12, 1.8], [x + dx, 2.1, z + 2], MAT.cloth); box(group, [.55, .35, .35], [x + dx, .95, z + 2], MAT.amber) }
+  } else if (place.id === 'tavern') {
+    building(group, x, z + 2, 7, 5, 2, 'n')
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.65, .65, 1.2, 12), MAT.wood); barrel.rotation.z = Math.PI / 2; barrel.position.set(x - 2.5, .65, z - 1); group.add(barrel)
+    box(group, [1.8, 1.1, .12], [x + 2.2, 2.5, z - .55], MAT.dark)
+    // cigarette pictogram: pale stem and ember, clearly a warning-style trade sign.
+    box(group, [1.05, .12, .12], [x + 2.2, 2.55, z - .64], new THREE.MeshLambertMaterial({ color: '#d9d1bd' }), .18)
+  } else if (place.id === 'park') {
+    const well = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.4, 1, 16), MAT.stone); well.position.set(x, .5, z); group.add(well)
+    box(group, [3.3, .25, .7], [x + 3, .7, z + 2], MAT.wood)
+    for (const [dx, dz] of [[-3, -2], [3, -2], [-3, 3]] as const) { const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.3, .45, 2.5, 7), MAT.wood); trunk.position.set(x + dx, 1.25, z + dz); group.add(trunk); const crown = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.8, 8), MAT.green); crown.position.set(x + dx, 3.3, z + dz); group.add(crown) }
+  } else if (place.id === 'apothecary') {
+    building(group, x + 1, z + 1, 6, 5, 2, 'n')
+    box(group, [.55, 2, .18], [x - 1.2, 3.2, z - 1.55], MAT.green); box(group, [2, .55, .18], [x - 1.2, 3.2, z - 1.55], MAT.green)
+    for (const dx of [-2, -1.2, -.4]) { const bottle = new THREE.Mesh(new THREE.CylinderGeometry(.15, .22, .65, 8), MAT.amber); bottle.position.set(x + dx, .35, z - 2); group.add(bottle) }
+  } else if (place.id === 'homes') {
+    for (const [dx, floors] of [[-4, 2], [0, 3], [4, 2]] as const) { building(group, x + dx, z + 2, 3.4, 5, floors, 'n'); box(group, [2.1, .4, 1], [x + dx, .35, z - 1.2], MAT.wood) }
+  } else if (place.id === 'watch') {
+    building(group, x + 4, z + 2, 4, 4, 3, 'n')
+    const brazier = new THREE.Mesh(new THREE.CylinderGeometry(.65, .45, .7, 8), MAT.dark); brazier.position.set(x - 2.2, .5, z); group.add(brazier)
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(.35, 1.1, 8), MAT.amber); flame.position.set(x - 2.2, 1.3, z); group.add(flame)
+    for (const dx of [-2, 0, 2]) box(group, [.18, 2.2, .18], [x + dx, 1.1, z + 3], MAT.wood)
+  } else {
+    box(group, [6, 4.2, 1], [x - 2, 2.1, z + 2.5], MAT.dark, -.15)
+    const contraband = new THREE.Mesh(new THREE.OctahedronGeometry(.8, 0), MAT.purple); contraband.position.set(x, 1.15, z); contraband.userData = { interact: 'place', placeId: place.id }; group.add(contraband)
   }
 }
 
-/** Dress the cave mouth with dungeon pieces. */
-export async function buildDungeonDressing(scene: THREE.Scene, caveX: number, caveZ: number, gy: (x: number, z: number) => number): Promise<void> {
-  try {
-    const [gate, column, chest, potion, banner] = await Promise.all([
-      load('models/village/dungeon-gate.glb'),
-      load('models/village/column.glb'),
-      load('models/village/chest.glb'),
-      load('models/village/potion.glb'),
-      load('models/village/banner.glb'),
-    ])
-    const y = (x: number, z: number) => gy(x, z)
-    place(gate, scene, caveX - 1, y(caveX - 1, caveZ), caveZ, Math.PI / 2, 1.6)
-    place(column, scene, caveX + 3, y(caveX + 3, caveZ + 2), caveZ + 2, 0, 2)
-    place(column, scene, caveX - 4, y(caveX - 4, caveZ - 2), caveZ - 2, 0, 2)
-    place(chest, scene, caveX - 5, y(caveX - 5, caveZ - 4), caveZ - 4, 0.5)
-    place(potion, scene, caveX - 5.5, y(caveX - 5.5, caveZ - 3.6) + 0.3, caveZ - 3.6, 0)
-    place(banner, scene, caveX + 1, y(caveX + 1, caveZ + 3), caveZ + 3, 0, 1.2)
-  } catch (e) {
-    console.warn('dungeon dressing failed', e)
-  }
+export function buildCityStructures(): CityStructures {
+  const group = new THREE.Group()
+  const interactionMeshes: THREE.Object3D[] = []
+  const lanterns: THREE.PointLight[] = []
+  for (const place of CITY_PLACES) { district(group, place); marker(group, place, interactionMeshes) }
+  for (const [x, z] of [[-8, 8], [8, 8], [-8, -8], [8, -8], [0, 29], [29, 0], [-29, 0]] as const) lantern(group, lanterns, x, z)
+  return { group, interactionMeshes, lanterns }
 }
 
-/** A spooky graveyard corner — the Shadow's lair. */
-export async function buildGraveyard(scene: THREE.Scene, gx: number, gz: number, gy: (x: number, z: number) => number): Promise<void> {
-  try {
-    const [coffin, candle, fence, altar, gate] = await Promise.all([
-      load('models/village/coffin.glb'),
-      load('models/village/candle.glb'),
-      load('models/village/fence.glb'),
-      load('models/village/altar-stone.glb'),
-      load('models/village/grave-gate.glb'),
-    ])
-    const y = (x: number, z: number) => gy(x, z)
-    place(coffin, scene, gx, y(gx, gz), gz, 0.4)
-    place(candle, scene, gx + 1.5, y(gx + 1.5, gz + 0.5), gz + 0.5, 0)
-    place(candle, scene, gx - 1.5, y(gx - 1.5, gz - 0.5), gz - 0.5, 0)
-    place(fence, scene, gx + 2.5, y(gx + 2.5, gz + 2), gz + 2, Math.PI / 2, 1.4)
-    place(fence, scene, gx - 2.5, y(gx - 2.5, gz - 2), gz - 2, 0, 1.4)
-    place(altar, scene, gx + 3, y(gx + 3, gz - 2), gz - 2, 0)
-    place(gate, scene, gx, y(gx, gz + 3), gz + 3, 0, 1.4)
-    const glow = new THREE.PointLight(0x6a8fd8, 0.7, 8)
-    glow.position.set(gx, y(gx, gz) + 1.2, gz)
-    scene.add(glow)
-  } catch (e) {
-    console.warn('graveyard failed to load', e)
-  }
+export function cityPlaceById(id: string): CityPlace | undefined {
+  return CITY_PLACES.find((place) => place.id === id as CityPlaceId)
 }
+
+/** Flat terrain compatibility for older callers. */
+export function groundY(_world: { height: (x: number, z: number) => number }, _x: number, _z: number): number { return 0 }

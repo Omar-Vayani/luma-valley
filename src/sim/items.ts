@@ -6,8 +6,13 @@
 import type { ChemicalState } from './biochem'
 import { clamp } from './rng'
 
-export type Substance = 'smoke' | 'sugar' | 'cactus' | 'mushroom'
+export type Substance = 'smoke' | 'sugar' | 'cactus' | 'mushroom' | 'alcohol' | 'nicotine' | 'drug'
 export type ItemId =
+  | 'bread'
+  | 'ale'
+  | 'cigarettes'
+  | 'dream-dust'
+  | 'medicine'
   | 'berry'
   | 'honey'
   | 'smoke-herb'
@@ -42,6 +47,48 @@ export interface ItemDef {
 }
 
 export const ITEMS: Record<ItemId, ItemDef> = {
+  bread: {
+    id: 'bread', name: 'Market Bread', emoji: '🍞', healthy: true,
+    blurb: 'Simple food from the Old Market. Safe, filling, and easy to share.',
+    chem: { hunger: -0.42, pleasure: 0.08 },
+    psych: { calm: 0.06 },
+    trust: 0.05,
+  },
+  ale: {
+    id: 'ale', name: 'Tankard of Ale', emoji: '🍺', healthy: false,
+    blurb: 'Brief confidence and warmth, followed by worse judgment, fatigue, and possible dependence.',
+    chem: { pleasure: 0.22, fatigue: 0.16, pain: -0.12 },
+    psych: { fear: -0.28, calm: 0.2, pleasure: 0.18 },
+    addictive: { substance: 'alcohol', amount: 0.2 },
+    healthCost: 0.025,
+    withdrawal: { substance: 'alcohol', fearSpike: 0.34, calmDrop: 0.3 },
+  },
+  cigarettes: {
+    id: 'cigarettes', name: 'Cigarettes', emoji: '🚬', healthy: false,
+    blurb: 'A short calm that trains the body to demand another. Slowly harms health.',
+    chem: { pleasure: 0.08 },
+    psych: { fear: -0.35, stress: -0.35, calm: 0.28 },
+    addictive: { substance: 'nicotine', amount: 0.24 },
+    healthCost: 0.035,
+    withdrawal: { substance: 'nicotine', fearSpike: 0.3, calmDrop: 0.38 },
+  },
+  'dream-dust': {
+    id: 'dream-dust', name: 'Dream-Dust', emoji: '◈', healthy: false,
+    blurb: 'An illegal escape sold in Moth Alley. Strong relief, impaired judgment, health damage, and rapid dependence.',
+    chem: { pleasure: 0.32, fatigue: 0.24, pain: -0.22 },
+    psych: { fear: -0.52, stress: -0.55, calm: 0.38, pleasure: 0.24 },
+    addictive: { substance: 'drug', amount: 0.34 },
+    healthCost: 0.055,
+    toxic: true,
+    withdrawal: { substance: 'drug', fearSpike: 0.5, calmDrop: 0.48 },
+  },
+  medicine: {
+    id: 'medicine', name: 'Apothecary Medicine', emoji: '⚕', healthy: true,
+    blurb: 'A measured remedy. Restores health and eases pain without dependence.',
+    chem: { health: 0.28, pain: -0.32, fear: -0.08 },
+    psych: { calm: 0.12 },
+    trust: 0.08,
+  },
   berry: {
     id: 'berry', name: 'Sweet Berry', emoji: '🍓', healthy: true,
     blurb: 'Nourishing and safe. A little joy in every bite.',
@@ -87,7 +134,7 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   },
   'dream-mushroom': {
     id: 'dream-mushroom', name: 'Dream Mushroom', emoji: '🍄', healthy: false,
-    blurb: 'Vivid, wandering dreams — the valley melts away. So fragile afterwards.',
+    blurb: 'Vivid, wandering dreams distort the city. Judgment and health collapse afterwards.',
     chem: { pleasure: 0.1 },
     psych: { fear: -0.5, stress: -0.6, calm: 0.4, pleasure: 0.2 },
     addictive: { substance: 'mushroom', amount: 0.28 },

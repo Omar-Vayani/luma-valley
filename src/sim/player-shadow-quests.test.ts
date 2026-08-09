@@ -6,7 +6,9 @@ import { activeQuest, createQuestLog, questEvent, QUEST_CHAIN } from './quests'
 describe('player', () => {
   it('has starting inventory', () => {
     const p = createPlayer({ x: 0, z: 0 })
-    expect(p.inventory.berries).toBe(3)
+    expect(p.inventory.berries).toBe(0)
+    expect(p.inventory.items.bread).toBe(2)
+    expect(p.inventory.items.medicine).toBe(1)
     expect(p.inventory.torch).toBe(1)
     expect(p.sanity).toBe(1)
   })
@@ -37,6 +39,7 @@ describe('player', () => {
 
   it('throw berry consumes one', () => {
     const p = createPlayer({ x: 0, z: 0 })
+    p.inventory.berries = 3
     expect(throwBerry(p)).toBe(true)
     expect(p.inventory.berries).toBe(2)
     p.inventory.berries = 0
@@ -90,20 +93,17 @@ describe('quests', () => {
   it('starts at q1_feed and advances through events', () => {
     const log = createQuestLog()
     expect(activeQuest(log)?.id).toBe('q1_feed')
-    const ev = questEvent(log, 'feed', 1)
+    const ev = questEvent(log, 'visitMarket', 1)
     expect(ev).toContain('quest:q2_teach')
     expect(activeQuest(log)?.id).toBe('q2_teach')
   })
 
   it('counts objectives across events', () => {
     const log = createQuestLog()
-    questEvent(log, 'feed', 1)
-    // q2_teach needs 1 teach
-    questEvent(log, 'teach', 1)
+    questEvent(log, 'visitMarket', 1)
+    questEvent(log, 'meetCitizen', 1)
     expect(activeQuest(log)?.id).toBe('q3_berry')
-    // q3 needs 3 berries
-    questEvent(log, 'pickBerry', 1)
-    questEvent(log, 'pickBerry', 2)
+    questEvent(log, 'feed', 1)
     expect(activeQuest(log)?.id).toBe('q4_torch')
   })
 
@@ -116,14 +116,14 @@ describe('quests', () => {
   it('full chain ends in victory', () => {
     const log = createQuestLog()
     const map: Record<string, [string, number]> = {
-      feed: ['feed', 1],
-      teach: ['teach', 1],
-      berry: ['pickBerry', 3],
-      torch: ['craftTorch', 1],
-      light: ['lightTorch', 1],
-      adult: ['adult', 1],
-      shadow: ['repelShadow', 1],
-      shrine: ['lightShrine', 1],
+      market: ['visitMarket', 1],
+      citizen: ['meetCitizen', 1],
+      bread: ['feed', 1],
+      park: ['visitPark', 1],
+      tavern: ['visitTavern', 1],
+      apothecary: ['visitApothecary', 1],
+      alley: ['visitAlley', 1],
+      watch: ['visitWatch', 1],
       birth: ['birth', 1],
     }
     const chain = QUEST_CHAIN.map((q) => q.id)
