@@ -20,6 +20,7 @@ import {
   deserializeSociety,
   killNpc,
   marketPrice,
+  recordObserverAction,
   tickSociety,
   type SocialEvent,
   type SocialEventKind,
@@ -428,11 +429,17 @@ export class Game {
     if (this.societyTimer < this.societyInterval) return
     this.societyTimer = 0
     this.syncSocietyNpcs()
-    const positions: Record<number, { x: number; z: number }> = {}
-    for (const c of this.creatures) if (c.alive) positions[c.id] = { x: c.pos.x, z: c.pos.z }
+    const positions = this.societyPositions()
     const events = tickSociety(this.society, this.societyRng, { positions })
     this.applySocietyEvents(events, positions)
     this.syncSocietyNpcs()
+  }
+
+  /** Living creature positions keyed by creature id — one society NPC per creature. */
+  private societyPositions(): Record<number, { x: number; z: number }> {
+    const positions: Record<number, { x: number; z: number }> = {}
+    for (const c of this.creatures) if (c.alive) positions[c.id] = { x: c.pos.x, z: c.pos.z }
+    return positions
   }
 
   /** Map society events onto creatures: needs, damage, and visible intents. */
@@ -724,6 +731,15 @@ export class Game {
   useOverseerTool(creatureId: number, tool: OverseerTool): { ok: boolean; msg: string } {
     const c = this.creatures.find((x) => x.id === creatureId && x.alive)
     if (!c) return { ok: false, msg: 'No one is there.' }
+    // End-to-end observer semantics: besides the direct creature effects
+    // below, the society kernel records the intervention — the target NPC's
+    // traits shift (kindness builds trust, cruelty breeds fear) and nearby
+    // witnesses update their memory of the target (witnessed reputation).
+    // Recorded first so even a lethal whip lands its reputation event.
+    recordObserverAction(this.society, tool === 'stick' || tool === 'whip' ? 'cruel' : 'kind', c.id, {
+      at: c.pos,
+      positions: this.societyPositions(),
+    })
     switch (tool) {
       case 'feed': {
         applyFood(c.chem, FOOD_EFFECTS.berry)

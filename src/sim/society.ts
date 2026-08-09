@@ -37,7 +37,7 @@ export type ItemId = string
 
 export type SocialChoice = 'follow' | 'flee' | 'share' | 'hoard' | 'trade' | 'fight' | 'cooperate'
 
-export type SocialEventKind = SocialChoice | 'work' | 'death'
+export type SocialEventKind = SocialChoice | 'work' | 'death' | 'kind' | 'cruel'
 
 export const SOCIAL_CHOICES: readonly SocialChoice[] = [
   'follow',
@@ -123,6 +123,23 @@ export interface DirectEffects {
   hoard?: Partial<Pick<Traits, 'greed'>>
 }
 
+/**
+ * Observer (player) intervention effects — SOCIETY_REBUILD.md tools.
+ * `traits` shift the target NPC's own social traits; `witnesses` are the
+ * reputation leak into nearby NPCs' relationship memories OF the target
+ * (witnesses remember kindness/cruelty shown to that citizen).
+ */
+export interface ObserverEffects {
+  kind: {
+    traits: Partial<Traits>
+    witnesses: Partial<Pick<RelationshipMemory, 'trust' | 'attachment' | 'love'>>
+  }
+  cruel: {
+    traits: Partial<Traits>
+    witnesses: Partial<Pick<RelationshipMemory, 'trust' | 'betrayal' | 'fear'>>
+  }
+}
+
 export interface SocietyConfig {
   temperature: number // softmax temperature for utility-weighted choice sampling
   maxWitnessDistance: number
@@ -139,6 +156,7 @@ export interface SocietyConfig {
   marketMaxStocks: Record<ItemId, number>
   marketBasePrices: Record<ItemId, number>
   direct: DirectEffects
+  observer: ObserverEffects
 }
 
 export interface SocietyState {
@@ -224,6 +242,19 @@ export const DEFAULT_CONFIG: SocietyConfig = {
     flee: { fear: 0.02 },
     hoard: { greed: 0.02 },
   },
+  observer: {
+    // The player is an observer, not an NPC: kindness builds the target's
+    // trust and softens fear; cruelty erodes trust and breeds fear. Nearby
+    // witnesses remember the act in their memory of the target (reputation).
+    kind: {
+      traits: { trust: 0.06, fear: -0.02 },
+      witnesses: { trust: 0.04, attachment: 0.02 },
+    },
+    cruel: {
+      traits: { trust: -0.12, fear: 0.15 },
+      witnesses: { trust: -0.06, fear: 0.1 },
+    },
+  },
 }
 
 function mergeConfig(partial: Partial<SocietyConfig> = {}): SocietyConfig {
@@ -231,6 +262,10 @@ function mergeConfig(partial: Partial<SocietyConfig> = {}): SocietyConfig {
     ...DEFAULT_CONFIG,
     ...partial,
     direct: { ...DEFAULT_CONFIG.direct, ...partial.direct },
+    observer: {
+      kind: { ...DEFAULT_CONFIG.observer.kind, ...partial.observer?.kind },
+      cruel: { ...DEFAULT_CONFIG.observer.cruel, ...partial.observer?.cruel },
+    },
   }
 }
 
@@ -490,6 +525,45 @@ function applyDelta(
   if (delta.love !== undefined) rel.love = clamp(rel.love + delta.love, 0, 1)
   if (delta.betrayal !== undefined) rel.betrayal = clamp(rel.betrayal + delta.betrayal, 0, 1)
   if (delta.fear !== undefined) rel.fear = clamp(rel.fear + delta.fear, 0, 1)
+}
+
+// ---------------------------------------------------------------------------
+// Observer interventions (player tools)
+// ---------------------------------------------------------------------------
+
+/**
+ * A player observer intervention (SOCIETY_REBUILD.md). The target NPC's own
+ * social traits shift (kindness builds trust, cruelty breeds fear), nearby
+ * witnesses update their relationship memory OF the target — the witnessed
+ * reputation the Society tab surfaces — and the bounded event log records
+ * it. The player has no NPC identity; `actorId` on the emitted event is the
+ * target so the observer feed can name who was affected. Returns the event,
+ * or null when the target is unknown or dead.
+ */
+export function recordObserverAction(
+  state: SocietyState,
+  kind: 'kind' | 'cruel',
+  targetId: number,
+  opts: EventOptions = {},
+): SocialEvent | null {
+  const target = state.npcs[targetId]
+  if (!target || !target.alive) return null
+  const fx = kind === 'kind' ? state.config.observer.kind : state.config.observer.cruel
+  for (const key of Object.keys(fx.traits) as (keyof Traits)[]) {
+    const delta = fx.traits[key]
+    if (delta !== undefined) target.traits[key] = clamp(target.traits[key] + delta, 0, 1)
+  }
+  for (const w of witnessesFor(state, targetId, null, opts.at, opts.positions)) {
+    const rel = ensureRel(state.npcs[w], targetId)
+    rel.interactions += 1
+    applyDelta(rel, fx.witnesses)
+  }
+  return emit(state, {
+    tick: state.tick,
+    kind,
+    actorId: targetId,
+    targetId: null,
+  })
 }
 
 // ---------------------------------------------------------------------------

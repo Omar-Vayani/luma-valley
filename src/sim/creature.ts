@@ -545,6 +545,8 @@ export class Creature {
           preferred = (this.psyche.addiction.nicotine ?? 0) > (this.psyche.addiction.alcohol ?? 0) ? 'cigarettes' : 'ale'
         } else if (placeId === 'apothecary') preferred = 'medicine'
         else if (placeId === 'back-alley') preferred = 'dream-dust'
+        else if (placeId === 'restaurant') preferred = 'bread'
+        else if (placeId === 'hospital') preferred = 'medicine'
         const item = ctx.usePlace(placeId, preferred)
         if (item) {
           this.giveItem(item, false)

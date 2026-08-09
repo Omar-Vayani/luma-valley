@@ -728,3 +728,88 @@ describe('game observer tools', () => {
     expect(JSON.stringify(g.player.inventory)).toBe(before)
   })
 })
+
+describe('game observer tools — society end-to-end', () => {
+  it('beneficial tools raise the target society NPC trust and warm witness memories', () => {
+    const g = new Game(320)
+    g.spawnInitial(3)
+    const target = g.creatures[0]
+    const witness = g.creatures[1]
+    const far = g.creatures[2]
+    target.pos = { x: 0, z: 0 }
+    witness.pos = { x: 2, z: 0 } // within 7m witness radius
+    far.pos = { x: 20, z: 20 } // out of range
+    const npcTrust = g.society.npcs[target.id].traits.trust
+    const wTrust = g.society.npcs[witness.id].relationships[target.id]?.trust ?? 0
+    const fRel = g.society.npcs[far.id].relationships[target.id]
+    const r = g.useOverseerTool(target.id, 'feed')
+    expect(r.ok).toBe(true)
+    expect(g.society.npcs[target.id].traits.trust).toBeGreaterThan(npcTrust)
+    expect((g.society.npcs[witness.id].relationships[target.id]?.trust ?? 0)).toBeGreaterThan(wTrust)
+    expect(fRel).toBeUndefined() // distant witness never learns
+    expect(g.society.events.some((e) => e.kind === 'kind' && e.actorId === target.id)).toBe(true)
+  })
+
+  it('harmful tools erode the target society NPC trust and spread fear to witnesses', () => {
+    const g = new Game(321)
+    g.spawnInitial(2)
+    const target = g.creatures[0]
+    const witness = g.creatures[1]
+    target.pos = { x: 0, z: 0 }
+    witness.pos = { x: 2, z: 0 }
+    const npcTrust = g.society.npcs[target.id].traits.trust
+    const npcFear = g.society.npcs[target.id].traits.fear
+    const wPriorTrust = g.society.npcs[witness.id].traits.trust
+    const wPriorFear = g.society.npcs[witness.id].traits.fear
+    const r = g.useOverseerTool(target.id, 'whip')
+    expect(r.ok).toBe(true)
+    expect(g.society.npcs[target.id].traits.trust).toBeLessThan(npcTrust)
+    expect(g.society.npcs[target.id].traits.fear).toBeGreaterThan(npcFear)
+    // witness memory of the target starts from the witness's own trait priors;
+    // cruelty must push trust below and fear above those
+    const wRel = g.society.npcs[witness.id].relationships[target.id]!
+    expect(wRel.trust).toBeLessThan(wPriorTrust)
+    expect(wRel.fear).toBeGreaterThan(wPriorFear)
+    expect(g.society.events.some((e) => e.kind === 'cruel' && e.actorId === target.id)).toBe(true)
+  })
+
+  it('observer events surface in the Society tab recent events feed', () => {
+    const g = new Game(322)
+    g.spawnInitial(1)
+    g.useOverseerTool(g.creatures[0].id, 'whip')
+    const events = g.societyRecentEvents(5)
+    expect(events.some((e) => e.kind === 'cruel')).toBe(true)
+  })
+})
+
+describe('game city services', () => {
+  it('a sick citizen at the hospital receives treatment', () => {
+    const g = new Game(330, 96, { gentle: true, societyInterval: 1e9 })
+    g.spawnInitial(1)
+    const c = g.creatures[0]
+    c.chem.health = 0.3
+    c.chem.hunger = 0.3
+    c.urban.knownPlaces.hospital = { provides: ['medicine', 'rest'], pos: { x: 48, z: -26 }, confidence: 1, valence: 1, lastVisited: 0 }
+    c.urban.currentGoal = 'hospital'
+    c.pos = { x: 48.5, z: -26 }
+    const healthBefore = c.chem.health
+    g.tick()
+    expect(c.chem.health).toBeGreaterThan(healthBefore)
+    expect(c.journal.some((j) => j.text.includes('uses'))).toBe(true)
+  })
+
+  it('a hungry citizen at the restaurant gets a hot meal', () => {
+    const g = new Game(331, 96, { gentle: true, societyInterval: 1e9 })
+    g.spawnInitial(1)
+    const c = g.creatures[0]
+    c.chem.health = 0.9
+    c.chem.hunger = 0.9
+    c.urban.knownPlaces.restaurant = { provides: ['bread', 'company'], pos: { x: 16, z: -42 }, confidence: 1, valence: 1, lastVisited: 0 }
+    c.urban.currentGoal = 'restaurant'
+    c.pos = { x: 16.5, z: -42 }
+    const hungerBefore = c.chem.hunger
+    g.tick()
+    expect(c.chem.hunger).toBeLessThan(hungerBefore)
+    expect(c.journal.some((j) => j.text.includes('Market Bread'))).toBe(true)
+  })
+})

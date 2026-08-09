@@ -88,6 +88,8 @@ function describeSocietyEvent(ev: SocietyEventView): string {
     case 'hoard': return `${act} hoards goods`
     case 'work': return `${act} works the yard`
     case 'death': return `${act} has died`
+    case 'kind': return `${act} is treated kindly by the observer — trust grows around them`
+    case 'cruel': return `${act} is treated cruelly by the observer — witnesses remember`
     default: return `${act} ${ev.kind}${tgt}`
   }
 }

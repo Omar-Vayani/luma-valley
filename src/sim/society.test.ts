@@ -16,6 +16,7 @@ import {
   getRelationship,
   killNpc,
   marketPrice,
+  recordObserverAction,
   recordSocialEvent,
   sampleChoice,
   sellToMarket,
@@ -451,6 +452,80 @@ describe('death is permanent', () => {
     expect(getNpc(s, b)!.alive).toBe(false)
     expect(getNpc(s, b)!.deathTick).toBe(1)
     expect(evs.some((e) => e.kind === 'death' && e.actorId === b && e.killerId === a)).toBe(true)
+  })
+})
+
+describe('observer interventions (player tools)', () => {
+  it('kindness shifts the target NPC traits and warms witness memories of them', () => {
+    const s = mkSociety()
+    const target = addNpc(s, { traits: { trust: 0.5, fear: 0.5 } })
+    const witness = addNpc(s, {})
+    const far = addNpc(s, {})
+    const ev = recordObserverAction(s, 'kind', target, {
+      at: pos(0, 0),
+      positions: { [witness]: pos(0, 1), [far]: pos(50, 50) },
+    })
+    expect(ev).not.toBeNull()
+    expect(ev!.kind).toBe('kind')
+    expect(getNpc(s, target)!.traits.trust).toBeGreaterThan(0.5)
+    expect(getNpc(s, target)!.traits.fear).toBeLessThan(0.5)
+    const rel = getRelationship(s, witness, target)!
+    expect(rel.trust).toBeGreaterThan(0.5)
+    expect(rel.interactions).toBe(1)
+    // distant npcs never witness the intervention
+    expect(getRelationship(s, far, target)).toBeUndefined()
+  })
+
+  it('cruelty erodes the target NPC traits and spreads fear of them to witnesses', () => {
+    const s = mkSociety()
+    const target = addNpc(s, { traits: { trust: 0.8, fear: 0.1 } })
+    const witness = addNpc(s, {})
+    const wPrior = { trust: getNpc(s, witness)!.traits.trust, fear: getNpc(s, witness)!.traits.fear }
+    const ev = recordObserverAction(s, 'cruel', target, {
+      at: pos(0, 0),
+      positions: { [witness]: pos(0, 1) },
+    })
+    expect(ev).not.toBeNull()
+    expect(getNpc(s, target)!.traits.trust).toBeLessThan(0.8)
+    expect(getNpc(s, target)!.traits.fear).toBeGreaterThan(0.1)
+    // the lazily-created witness memory of the target starts from the witness's
+    // own trait priors; cruelty must push trust below and fear above those
+    const rel = getRelationship(s, witness, target)!
+    expect(rel.trust).toBeLessThan(wPrior.trust)
+    expect(rel.fear).toBeGreaterThan(wPrior.fear)
+  })
+
+  it('all affected traits stay bounded after many interventions', () => {
+    const s = mkSociety()
+    const target = addNpc(s, {})
+    const witness = addNpc(s, {})
+    for (let i = 0; i < 50; i++) {
+      recordObserverAction(s, 'cruel', target, { at: pos(0, 0), positions: { [witness]: pos(0, 1) } })
+      recordObserverAction(s, 'kind', target, { at: pos(0, 0), positions: { [witness]: pos(0, 1) } })
+    }
+    expectTraitsBounded(getNpc(s, target)!.traits)
+    const rel = getRelationship(s, witness, target)!
+    expect(rel.trust).toBeGreaterThanOrEqual(0)
+    expect(rel.trust).toBeLessThanOrEqual(1)
+    expect(rel.fear).toBeGreaterThanOrEqual(0)
+    expect(rel.fear).toBeLessThanOrEqual(1)
+  })
+
+  it('refuses interventions on unknown or dead npcs', () => {
+    const s = mkSociety()
+    expect(recordObserverAction(s, 'kind', 999)).toBeNull()
+    const target = addNpc(s, {})
+    killNpc(s, target)
+    expect(recordObserverAction(s, 'kind', target)).toBeNull()
+  })
+
+  it('observer events round-trip through compact saves', () => {
+    const s = mkSociety()
+    const target = addNpc(s, {})
+    const witness = addNpc(s, {})
+    recordObserverAction(s, 'cruel', target, { at: pos(0, 0), positions: { [witness]: pos(0, 1) } })
+    const s2 = deserializeSociety(JSON.parse(JSON.stringify(compactSociety(s))))
+    expect(s2.events.some((e) => e.kind === 'cruel' && e.actorId === target)).toBe(true)
   })
 })
 
