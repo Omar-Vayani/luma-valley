@@ -41,10 +41,11 @@ describe('play/exercise tower — strength and joy', () => {
 
   it('a creature at the play tower plays instead of starving', () => {
     const s = createSim(99)
-    const c = s.spawnCreature(GEN(), 28, 28) // at play tower in the new grid
+    const c = s.spawnCreature(GEN(), 0, 44) // at play tower (gym)
     c.chem.hunger = 0.4
     c.chem.pleasure = 0.2 // bored → seeks play
-    c.pos = { x: 0, z: 32 }
+    c.pos = { x: 0, z: 44 }
+    c.learnTower('play')
     s.tick()
     expect(c.action).toBe('play')
     expect(c.chem.strength).toBeGreaterThan(0)

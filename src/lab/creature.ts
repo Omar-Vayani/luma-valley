@@ -38,6 +38,9 @@ export interface Creature {
   buried: boolean // true when carried to the graveyard
   jealousy: number // 0..1 — how much the partner's outside bonds sting
   drives: Drives
+  knowledge: Record<string, number> // towerId -> 0..1 (learned by seeing/visiting)
+  knowsTower(towerId: string): boolean
+  learnTower(towerId: string): void
   hurt(amount: number): void
   pay(amount: number): boolean
   deposit(amount: number): void
@@ -81,6 +84,13 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     buried: false,
     jealousy: 0,
     drives: createDrives(),
+    knowledge: {},
+    knowsTower(towerId: string): boolean {
+      return (c.knowledge[towerId] ?? 0) > 0.3
+    },
+    learnTower(towerId: string): void {
+      c.knowledge[towerId] = Math.min(1, (c.knowledge[towerId] ?? 0) + 1) // one sight = you know where it is
+    },
     hurt(amount: number): void {
       if (!c.alive) return
       c.chem.health = clamp01(c.chem.health - amount)

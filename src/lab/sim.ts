@@ -167,6 +167,7 @@ export function createSim(seed = 1): Sim {
     },
     tick(): void {
       sim.time++
+      learnFromSight(sim) // learn BEFORE deciding so knowledge gates actions
       // decisions for every alive creature
       for (const c of sim.creatures) {
         if (!c.alive) continue
@@ -271,7 +272,7 @@ function decide(sim: Sim, c: Creature): void {
       return
     }
     const breadPrice = marketPrice(sim.economy, 'bread')
-    if (c.wallet >= breadPrice && (sim.economy.goods.bread?.stock ?? 0) > 0) {
+    if (c.wallet >= breadPrice && (sim.economy.goods.bread?.stock ?? 0) > 0 && knows(sim, c, 'food')) {
       const atTower = towerAt(c.pos.x, c.pos.z)
       if (atTower?.id === 'food') {
         // already here: actually BUY and eat, don't just stand around
@@ -285,6 +286,12 @@ function decide(sim: Sim, c: Creature): void {
       }
       goTo(sim, c, 'food')
       c.intention = 'food'
+      return
+    }
+    if (c.wallet >= breadPrice && !knows(sim, c, 'food')) {
+      // doesn't know where food is — must explore to find it
+      explore(sim, c)
+      c.intention = null
       return
     }
     // broke and starving: steal if a wallet is near, otherwise work
@@ -306,8 +313,13 @@ function decide(sim: Sim, c: Creature): void {
       }
       return
     }
-    goTo(sim, c, 'work')
-    c.intention = 'work'
+    if (knows(sim, c, 'work')) {
+      goTo(sim, c, 'work')
+      c.intention = 'work'
+    } else {
+      explore(sim, c)
+      c.intention = null
+    }
     return
   }
 
@@ -324,10 +336,14 @@ function decide(sim: Sim, c: Creature): void {
     }
   }
 
-  // A mourning creature carrying a loved body is driven by duty, not the mind.
-  if (c.chem.grief > 0.4 && hasUnburiedLovedOne(sim, c)) {
-    carryCorpseDirect(sim, c)
-    return
+  // ANY creature (not just lovers) carries an unburied body to the graveyard —
+  // a civic duty. Close bonds make it more urgent, but no one walks past a corpse.
+  // Once carrying, the duty persists until burial.
+  if (c.action === 'carry' || c.action === 'bury' || c.chem.grief > 0.2 || hasNearbyCorpse(sim, c)) {
+    if (c.action === 'carry' || c.action === 'bury' || hasUnburiedLovedOne(sim, c) || nearestCorpse(sim, c, 10)) {
+      carryCorpseDirect(sim, c)
+      return
+    }
   }
 
   // Continue a committed action while it remains sensible.
@@ -338,15 +354,19 @@ function decide(sim: Sim, c: Creature): void {
   }
 
   // A tower-bound action the creature is still walking toward: stay committed
-  // until arrival (no flip-flopping mid-journey).
+  // until arrival (no flip-flopping mid-journey). BUT urgent needs override:
+  // if hunger/health/energy are critical, the mind re-scores now.
   if (c.intention && c.goalTowerId !== null && c.goalTowerId !== 'none' && actionValid(sim, c, c.intention)) {
-    const goal = towerAt(c.pos.x, c.pos.z)
-    if (goal?.id !== c.goalTowerId) {
-      execute(sim, c, c.intention)
-      return
+    const urgent = c.chem.hunger < 0.35 || c.chem.energy < 0.15 || c.chem.health < 0.3
+    if (!urgent) {
+      const goal = towerAt(c.pos.x, c.pos.z)
+      if (goal?.id !== c.goalTowerId) {
+        execute(sim, c, c.intention)
+        return
+      }
+      // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
+      c.goalTowerId = 'none'
     }
-    // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
-    c.goalTowerId = 'none'
   }
 
   // Re-score and pick a fresh action (mind + free will).
@@ -405,6 +425,33 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         return
       }
       goTo(sim, c, 'school')
+      return
+    }
+    case 'farm': {
+      // farm work: stay a while, then harvest bread (a work alternative)
+      if (at?.id === 'farm') {
+        c.workProgress += 1
+        c.action = 'farm'
+        if (c.workProgress >= WORK_SHIFT_TICKS) {
+          c.chem.hunger = clamp01(c.chem.hunger + 0.45) // grew food — eat it
+          c.workProgress = 0
+          emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'harvest'
+        }
+        return
+      }
+      goTo(sim, c, 'farm')
+      return
+    }
+    case 'park': {
+      if (at?.id === 'park') {
+        c.chem.pleasure = clamp01(c.chem.pleasure + 0.2)
+        c.chem.social = clamp01(c.chem.social + 0.1)
+        emit(sim, 'play', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'relax'
+        return
+      }
+      goTo(sim, c, 'park')
       return
     }
     case 'sleep': {
@@ -478,6 +525,19 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       goTo(sim, c, 'bank')
       return
     }
+    case 'withdraw': {
+      if (at?.id === 'bank' && c.banked > 0) {
+        const price = marketPrice(sim.economy, 'bread')
+        const need = Math.max(price, 3) - c.wallet
+        const amount = Math.min(c.banked, Math.max(1, need)) // only what's needed
+        c.banked -= amount
+        c.wallet += amount
+        c.action = 'withdraw'
+        return
+      }
+      goTo(sim, c, 'bank')
+      return
+    }
     case 'play': {
       if (at?.id === 'play') {
         applyPlay(c.chem)
@@ -545,6 +605,14 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       wander(sim, c)
       return
     }
+    case 'idle': {
+      // rest in place — small recovery, then the mind re-scores
+      c.chem.energy = clamp01(c.chem.energy + 0.02)
+      c.chem.pleasure = clamp01(c.chem.pleasure + 0.01)
+      c.action = 'idle'
+      c.intention = null // re-score soon; content creatures rest a few ticks
+      return
+    }
     default: {
       wander(sim, c)
     }
@@ -561,7 +629,9 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
     c.action = 'arrived'
     return
   }
-  const step = Math.min(SPEED, d)
+  // desperate creatures hurry — hunger/health urgency speeds the walk
+  const hurry = c.chem.hunger < 0.2 || c.chem.health < 0.3 || c.chem.energy < 0.12 ? 1.7 : 1
+  const step = Math.min(SPEED * hurry, d)
   const dx = ((t.x - c.pos.x) / d) * step
   const dz = ((t.z - c.pos.z) / d) * step
   c.pos.x += dx
@@ -618,6 +688,23 @@ function flee(sim: Sim, c: Creature): void {
   c.action = 'flee'
 }
 
+/** A creature learns the location of any tower it can see (or has been to). */
+function learnFromSight(sim: Sim): void {
+  for (const c of sim.creatures) {
+    if (!c.alive) continue
+    for (const t of TOWERS) {
+      const d = dist(c.pos.x, c.pos.z, t.x, t.z)
+      if (d <= 16) c.learnTower(t.id)
+    }
+  }
+}
+
+/** Is this tower known to the creature? (actions require knowledge — no omniscience) */
+function knows(sim: Sim, c: Creature, towerId: string): boolean {
+  void sim
+  return c.knowsTower(towerId)
+}
+
 function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
   let best: Creature | null = null
   let bestD = range
@@ -644,29 +731,56 @@ function hasUnburiedLovedOne(sim: Sim, c: Creature): boolean {
   return false
 }
 
-/** Carry a loved body to the graveyard and bury it — duty overrides the mind. */
+/** Any unburied corpse within `range` units. */
+function nearestCorpse(sim: Sim, c: Creature, range: number): Creature | null {
+  let best: Creature | null = null
+  let bestD = range
+  for (const o of sim.creatures) {
+    if (o.id === c.id || o.alive || o.buried) continue
+    const d = dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z)
+    if (d < bestD) {
+      bestD = d
+      best = o
+    }
+  }
+  return best
+}
+
+/** Is any unburied body within a short range (so strangers feel the duty)? */
+function hasNearbyCorpse(sim: Sim, c: Creature): boolean {
+  return nearestCorpse(sim, c, 6) !== null
+}
+
+/** Carry a body to the graveyard and bury it — duty overrides the mind. */
 function carryCorpseDirect(sim: Sim, c: Creature): void {
-  let loved: Creature | undefined
+  let body: Creature | undefined
   if (c.partnerId !== null) {
     const p = sim.creatures.find((o) => o.id === c.partnerId)
-    if (p && !p.alive && !p.buried) loved = p
+    if (p && !p.alive && !p.buried) body = p
   }
-  if (!loved) {
+  if (!body) {
     for (const o of sim.creatures) {
       if (!o.alive && !o.buried && (c.bonds[o.id] ?? 0) > 0.5) {
-        loved = o
+        body = o
         break
       }
     }
   }
-  if (!loved) return
+  // any nearby corpse will do — anyone can carry the dead
+  if (!body) {
+    body = nearestCorpse(sim, c, 12) ?? undefined
+  }
+  if (!body) return
+  // carrying: the body travels with the carrier until burial
+  body.pos.x = c.pos.x
+  body.pos.z = c.pos.z
   const gy = findTower('graveyard')
   if (!gy) return
   const d = dist(c.pos.x, c.pos.z, gy.x, gy.z)
   if (d <= gy.radius + 2) {
-    loved.buried = true
-    sim.graves.push({ creatureId: loved.id, name: loved.name, x: gy.x + (sim.rng() - 0.5) * 4, z: gy.z + (sim.rng() - 0.5) * 4, tick: sim.time })
-    emit(sim, 'bury', c, loved, gy.x, gy.z)
+    body.buried = true
+    sim.graves.push({ creatureId: body.id, name: body.name, x: gy.x + (sim.rng() - 0.5) * 4, z: gy.z + (sim.rng() - 0.5) * 4, tick: sim.time })
+    emit(sim, 'bury', c, body, gy.x, gy.z)
     c.chem.grief = clamp01(c.chem.grief - 0.35) // closure helps
     c.action = 'bury'
     c.intention = null
@@ -752,6 +866,31 @@ function grieve(sim: Sim, dead: Creature): void {
       c.chem.grief = clamp01(c.chem.grief + 0.5)
       c.action = 'mourn'
     }
+  }
+}
+
+/** Wander toward an unseen/unknown tower — curiosity = learning by exploring. */
+function explore(sim: Sim, c: Creature): void {
+  // pick a tower the creature has never learned — the strongest unknown pull
+  const unknown = TOWERS.filter((t) => !c.knowsTower(t.id))
+  const seen = TOWERS.filter((t) => c.knowsTower(t.id) && (c.memory.seenPlaces[t.id] ?? 0) < 2)
+  const pool = unknown.length > 0 ? unknown : seen.length > 0 ? seen : TOWERS
+  let best: TowerId | null = null
+  let bestScore = -Infinity
+  for (const t of pool) {
+    const d = dist(c.pos.x, c.pos.z, t.x, t.z)
+    const novelty = !c.knowsTower(t.id) ? 2 : 1
+    const score = novelty * 100 - d + c.genome.curiosity * 40 + (c.drives?.curiosity ?? 0.3) * 30
+    if (score > bestScore) {
+      bestScore = score
+      best = t.id
+    }
+  }
+  if (best) {
+    goTo(sim, c, best)
+    c.action = `explore ${best}`
+  } else {
+    wander(sim, c)
   }
 }
 

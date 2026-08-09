@@ -26,14 +26,18 @@ export type ActionName =
   | 'drink'    // go to tavern and buy brew
   | 'den'      // go to the den and buy herb/spark
   | 'school'   // go to school and learn (raises future earnings)
+  | 'farm'     // go to the farm and grow food (work alternative)
+  | 'park'     // go to the park to relax and find joy
   | 'buyWeapon' // go to tools and buy a stick
   | 'deposit'  // go to bank and store money
+  | 'withdraw' // go to bank and take money out when broke
   | 'play'     // go to gym/play and train strength
   | 'social'   // bond with a nearby creature
   | 'steal'    // rob a nearby creature
   | 'share'    // give coins to a grateful friend
   | 'fight'    // attack a nearby rival
   | 'collect'  // pick up dropped coins
+  | 'idle'     // rest in place when content and uncurious
   | 'wander'   // explore something unseen
 
 export type ActionScores = Record<ActionName, number>
@@ -107,23 +111,32 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
   const scores: ActionScores = {
     // food: urgent when hungry AND affordable; a broke creature knows it cannot buy
     // (and when the shelf is empty, food loses its pull — go earn/steal instead)
-    food: press.hungry * (0.9 + g.greed * 0.3) * (canAffordFood ? 1 : 0.25) * (breadInStock ? 1 : 0.2) + (canAffordFood ? starving : 0) * (breadInStock ? 1 : 0.1),
+    // Knowledge-gated: a creature that never saw the food tower must explore first.
+    food: (press.hungry * (0.9 + g.greed * 0.3) * (canAffordFood ? 1 : 0.25) * (breadInStock ? 1 : 0.2) + (canAffordFood ? starving : 0) * (breadInStock ? 1 : 0.1)) * (c.knowsTower('food') ? 1 : 0.15),
     // work: needed to afford food/medicine; honest creatures work, thieves prefer other means
-    work: (hungry > 0 ? (canAffordFood ? 0.15 : 1) : 0) * (0.6 + g.greed * 0.4) + starving * (canAffordFood ? 0.4 : (1 - g.theft) * 1.6) + bleedingOut * 0.6,
+    work: ((hungry > 0 ? (canAffordFood ? 0.15 : 1) : 0) * (0.6 + g.greed * 0.4) + starving * (canAffordFood ? 0.4 : (1 - g.theft) * 1.6) + bleedingOut * 0.6) * (c.knowsTower('work') ? 1 : 0.15),
     // sleep: tired or at home
     sleep: press.tired * (at?.id === 'homes' ? 1.2 : 0.8) + collapsing,
     // heal: wounded, only if affordable
-    heal: wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut,
-    // drink: sad + pleasure-seeking / addictive personality — stronger when AT the tavern
-    drink: (0.65 * g.addictionProne + press.bored * 0.7 + (c.chem.addiction.brew ?? 0) * 1.8) * (0.6 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 1.0),
-    // den: craving herb/spark is a strong pull for addicts (base attraction for prone types)
-    den: ((0.6 * g.addictionProne + (c.chem.addiction.herb ?? 0) * 2.0 + (c.chem.addiction.spark ?? 0) * 2.6 + press.bored * 0.5) * (0.5 + g.addictionProne * 1.3)) * (at?.id === 'den' ? 1.7 : 1.0),
+    heal: (wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut) * (c.knowsTower('pharmacy') ? 1 : 0.2),
+    // drink: ONLY a sad/bored creature or a real addict craves a drink. A
+    // happy creature at a tavern has no reason to drink (no instant booze death).
+    drink: ((c.chem.addiction.brew ?? 0) * 2.2 + press.bored * 1.1) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9) * (c.knowsTower('tavern') ? 1 : 0.15),
+    // den: craving herb/spark — only existing addiction or real boredom pulls.
+    den: (((c.chem.addiction.herb ?? 0) * 2.4 + (c.chem.addiction.spark ?? 0) * 3.0 + press.bored * 0.9) * (0.4 + g.addictionProne * 1.3)) * (at?.id === 'den' ? 1.7 : 0.9) * (c.knowsTower('den') ? 1 : 0.15),
     // school: curious, ambitious creatures learn to earn more later (a modest want)
-    school: (0.15 + g.learning * 0.9 + c.drives.importance * 0.4) * (c.education < 3 ? 1 : 0.1) * (c.wallet > 3 ? 1 : 0.4) * (at?.id === 'school' ? 1.5 : 0.7),
+    school: (0.1 + g.learning * 0.8 + c.drives.importance * 0.3) * (c.education < 3 ? 1 : 0.1) * (c.wallet > 3 ? 1 : 0.4) * (at?.id === 'school' ? 1.5 : 0.7) * (c.knowsTower('school') ? 1 : 0.15),
+    // farm: broke/hungry creatures who know the farm prefer growing food over work
+    farm: (hungry > 0 ? (canAffordFood ? 0.2 : 1) : 0) * (0.5 + g.greed * 0.3) * (at?.id === 'farm' ? 1.4 : 0.8) * (c.knowsTower('farm') ? 1 : 0.15),
+    // park: sad/bored creatures relax for joy — the healthy escape
+    park: press.bored * 0.5 * (at?.id === 'park' ? 1.6 : 0.9) * (c.knowsTower('park') ? 1 : 0.15),
     // weapon: aggressive creatures want one (non-aggressive barely care)
     buyWeapon: g.aggression * 0.9 * (c.weapon ? 0 : 1) * (c.wallet >= 10 ? 1 : 0.3),
     // bank: cautious creatures deposit surplus (strong once they learned safety)
-    deposit: (c.memory.facts.bankIsSafe ? 1.4 : 0.15) * (c.wallet > 6 ? 1.0 : c.wallet > 3 ? 0.4 : 0) * (0.4 + (1 - g.greed) * 0.8 + c.drives.lossAversion * 0.4),
+    deposit: (c.memory.facts.bankIsSafe ? 1.4 : 0.15) * (c.wallet > 6 ? 1.0 : c.wallet > 3 ? 0.4 : 0) * (0.4 + (1 - g.greed) * 0.8 + c.drives.lossAversion * 0.4) * (c.knowsTower('bank') ? 1 : 0.15),
+    // withdraw: broke but has savings → go get money (bank is a real account).
+    // Only withdraw what's needed — savings stay for real emergencies.
+    withdraw: ((c.wallet < breadPrice ? 1 : 0) * (c.banked > 3 ? 1.5 : c.banked > 0 ? 0.8 : 0) + press.hungry * (c.banked > 0 ? 0.5 : 0)) * (c.knowsTower('bank') ? 1 : 0.15),
     // play: bored or weak, and at/near the gym — a leisure want, not a need
     play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.2 : 0.7),
     // social: lonely + sociable + opportunity
@@ -139,6 +152,8 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // collect: poor/greedy + hoarding drive and a pile nearby (hoarders grab
     // free money even when they already have some)
     collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8) * (moneyDrop ? 1.4 : 0.05),
+    // idle: content creatures rest in place (low curiosity → idle wins over wander)
+    idle: (1 - g.curiosity * 0.9) * (1 - c.drives.curiosity * 0.5) * 0.7,
     // wander: curious creatures explore the unknown (curiosity drive) — but
     // a creature with a specific craving wanders less (it knows what it wants)
     wander: (0.25 + g.curiosity * 0.6 + c.drives.curiosity * 0.5) * (1 - cravingBias) * (grief > 0.4 ? 1.3 : 1),
@@ -239,8 +254,11 @@ export function towerIdForAction(action: ActionName): string | null {
     case 'drink': return 'tavern'
     case 'den': return 'den'
     case 'school': return 'school'
+    case 'farm': return 'farm'
+    case 'park': return 'park'
     case 'buyWeapon': return 'tools'
     case 'deposit': return 'bank'
+    case 'withdraw': return 'bank'
     case 'play': return 'play'
     default: return null
   }

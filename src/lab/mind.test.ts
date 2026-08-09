@@ -11,6 +11,8 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
     const c = s.spawnCreature(GEN({ theft: 0.1 }), 10, 10)
     c.wallet = 0
     c.chem.hunger = 0.2
+    c.learnTower('work') // knows where work is (already explored)
+    c.learnTower('food')
     const scores = scoreActions(s, c)
     expect(scores.work).toBeGreaterThan(scores.wander)
     expect(scores.work).toBeGreaterThan(scores.food)
@@ -22,6 +24,7 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
     const c = s.spawnCreature(GEN({ theft: 0.1 }), 10, 10)
     c.wallet = 20
     c.chem.hunger = 0.2
+    c.learnTower('food')
     const scores = scoreActions(s, c)
     expect(scores.food).toBeGreaterThan(scores.work)
     expect(scores.food).toBeGreaterThan(scores.wander)
@@ -34,6 +37,7 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
     rich.wallet = 10
     thief.wallet = 0
     thief.chem.hunger = 0.2
+    thief.learnTower('work')
     const scores = scoreActions(s, thief)
     expect(scores.steal).toBeGreaterThan(scores.work)
   })
@@ -41,6 +45,7 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
   it('an honest creature rates work above stealing even when poor', () => {
     const s = createSim(4)
     const honest = s.spawnCreature(GEN({ theft: 0.1 }), 0, 0)
+    honest.learnTower('work')
     const rich = s.spawnCreature(GEN(), 1, 0)
     rich.wallet = 10
     honest.wallet = 0

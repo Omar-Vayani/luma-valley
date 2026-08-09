@@ -21,6 +21,7 @@ describe('behavior — action suitability emerges from needs + genes', () => {
     rich2.wallet = 10
     honest.wallet = 0
     honest.chem.hunger = 0.2
+    honest.learnTower('work') // knows the honest way to earn
     honestSim.tick()
     expect(rich2.wallet).toBe(10) // honest did not steal
   })
@@ -30,6 +31,7 @@ describe('behavior — action suitability emerges from needs + genes', () => {
     const c = s.spawnCreature(GEN(), 10, 10)
     c.wallet = 0
     c.chem.hunger = 0.2
+    c.learnTower('work') // has explored and knows where work is
     s.tick()
     expect(c.goalTowerId).toBe('work')
   })
@@ -39,13 +41,14 @@ describe('behavior — action suitability emerges from needs + genes', () => {
     const c = s.spawnCreature(GEN(), 10, 10)
     c.wallet = 20
     c.chem.hunger = 0.2
+    c.learnTower('food')
     s.tick()
     expect(c.goalTowerId).toBe('food')
   })
 
   it('a weak creature trains at the gym/play to gain strength', () => {
     const s = createSim(5)
-    const c = s.spawnCreature(GEN(), 0, 32) // at gym tower
+    const c = s.spawnCreature(GEN(), 0, 44) // at gym tower
     c.chem.strength = 0.1
     c.chem.hunger = 0.9
     c.chem.pleasure = 0.9
@@ -56,7 +59,7 @@ describe('behavior — action suitability emerges from needs + genes', () => {
 
   it('an addiction-prone sad creature buys a drink (combined behavior)', () => {
     const s = createSim(6)
-    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -32, 32) // at tavern
+    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -38, 38) // at tavern
     c.wallet = 20
     c.chem.pleasure = 0.1 // sad/bored
     for (let i = 0; i < 5; i++) s.tick()

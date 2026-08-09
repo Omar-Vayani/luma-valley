@@ -10,6 +10,8 @@ import { LabView } from './render/labview'
 import { createSim, type Sim } from './lab/sim'
 import { deriveEmotion, type EmotionType } from './lab/emotion'
 import { DRIVE_KEYS, driveTitles, type DriveKey } from './lab/drives'
+import { TOWERS } from './lab/world'
+import { SUBSTANCES } from './lab/substances'
 
 import './lab.css'
 
@@ -56,6 +58,14 @@ const EMOJI: Record<EmotionType, string> = {
   sad: '😢',
   sleepy: '😴',
   loving: '😍',
+}
+
+// Substance pills in the addictions group (only shown when level > 0.05).
+const SUBSTANCE_EMOJI: Record<string, string> = {
+  brew: '🍺',
+  herb: '🌿',
+  spark: '✨',
+  tonic: '💊',
 }
 
 // Compact drive labels for the drives row (full titles live in the tooltip).
@@ -215,6 +225,7 @@ export default function App() {
   const emotion = selected ? deriveEmotion(selected.chem, selected.genome) : null
   const partner =
     selected && selected.partnerId !== null ? (sim?.creatureById(selected.partnerId) ?? null) : null
+  const knownCount = selected ? TOWERS.filter((t) => selected.knowsTower(t.id)).length : 0
 
   return (
     <div className="app" data-lab>
@@ -275,7 +286,10 @@ export default function App() {
           aria-label={`${selected.name} details`}
         >
           <header className="chip-head">
+            <span className="chip-emoji">{EMOJI[emotion.type]}</span>
+            <span className="chip-dot" style={{ background: emotion.color }} />
             <h2>{selected.name}</h2>
+            <span className="chip-mood-label">{emotion.type}</span>
             <button
               type="button"
               className="chip-close"
@@ -286,11 +300,6 @@ export default function App() {
               ✕
             </button>
           </header>
-          <div className="chip-mood">
-            <span className="chip-emoji">{EMOJI[emotion.type]}</span>
-            <span className="chip-dot" style={{ background: emotion.color }} />
-            <span className="chip-mood-label">{emotion.type}</span>
-          </div>
           <div className="chip-bars">
             <Bar label="hunger" value={selected.chem.hunger} color="#e8876a" />
             <Bar label="energy" value={selected.chem.energy} color="#e0b46a" />
@@ -300,7 +309,16 @@ export default function App() {
             <span>🪙 {Math.round(selected.wallet)}</span>
             <span>🏦 {Math.round(selected.banked)}</span>
             {selected.weapon && <span>🪓 {selected.weapon}</span>}
+            <span className="chip-knowledge" title="buildings known">
+              🗺️ {knownCount}/{TOWERS.length}
+            </span>
             <span className="chip-action">{selected.action}</span>
+          </div>
+          <div className="chip-knowledge-track" aria-hidden="true">
+            <div
+              className="chip-knowledge-fill"
+              style={{ width: `${Math.round((knownCount / TOWERS.length) * 100)}%` }}
+            />
           </div>
           <button
             type="button"
@@ -314,39 +332,86 @@ export default function App() {
           </button>
           {showMore && (
             <div className="chip-extra" id="chip-extra">
-              <div className="chip-bars">
-                <Bar label="health" value={selected.chem.health} color="#7fb57f" />
-                <Bar label="pleasure" value={selected.chem.pleasure} color="#c98ae0" />
-                <Bar label="social" value={selected.chem.social} color="#7fc4d9" />
-                <Bar label="fear" value={selected.chem.fear} color="#9fc7e8" />
+              <div className="chip-group">
+                <span className="chip-group-title">survival</span>
+                <div className="chip-bars">
+                  <Bar label="health" value={selected.chem.health} color="#7fb57f" />
+                  <Bar label="pleasure" value={selected.chem.pleasure} color="#c98ae0" />
+                  <Bar label="social" value={selected.chem.social} color="#7fc4d9" />
+                  <Bar label="fear" value={selected.chem.fear} color="#9fc7e8" />
+                </div>
               </div>
-              <div className="chip-meta">
-                {selected.chem.grief > 0.05 && (
-                  <span className="chip-pill">🕯️ grief {Math.round(selected.chem.grief * 100)}</span>
-                )}
-                {selected.jealousy > 0.05 && (
-                  <span className="chip-pill">💚 jealousy {Math.round(selected.jealousy * 100)}</span>
-                )}
-                <span className="chip-pill">🎓 {Math.round(selected.education)}</span>
-                {selected.gangId !== null && <span className="chip-pill">⚔️ gang</span>}
-                <span className="chip-pill">💞 bonds: {Object.keys(selected.bonds).length}</span>
+              <div className="chip-group">
+                <span className="chip-group-title">mind</span>
+                <div className="chip-meta">
+                  {selected.chem.grief > 0.05 && (
+                    <span className="chip-pill">🕯️ grief {Math.round(selected.chem.grief * 100)}</span>
+                  )}
+                  {selected.jealousy > 0.05 && (
+                    <span className="chip-pill">💚 jealousy {Math.round(selected.jealousy * 100)}</span>
+                  )}
+                  {selected.chem.intoxication > 0.05 && (
+                    <span className="chip-pill">🌀 drunk {Math.round(selected.chem.intoxication * 100)}</span>
+                  )}
+                  {selected.chem.grief <= 0.05 &&
+                    selected.jealousy <= 0.05 &&
+                    selected.chem.intoxication <= 0.05 && <span className="chip-meta-empty">calm & clear</span>}
+                </div>
               </div>
-              {selected.gratitude[0] > 0.2 && <p className="chip-grateful">💛 grateful to you</p>}
-              {partner && <p className="chip-partner">💛 {partner.name}</p>}
-              <div className="drives-row" role="group" aria-label="drives">
-                {DRIVE_KEYS.map((k) => (
-                  <span
-                    key={k}
-                    className="drive-item"
-                    title={`${k}: ${driveTitles[k]} (${Math.round(selected.drives[k] * 100)})`}
-                  >
+              <div className="chip-group">
+                <span className="chip-group-title">society</span>
+                <div className="chip-meta">
+                  <span className="chip-pill">🎓 {Math.round(selected.education)}</span>
+                  {selected.gangId !== null && <span className="chip-pill">⚔️ gang {selected.gangId}</span>}
+                  {partner && <span className="chip-pill">💞 {partner.name}</span>}
+                  <span className="chip-pill">💞 bonds: {Object.keys(selected.bonds).length}</span>
+                </div>
+                {selected.gratitude[0] > 0.2 && <p className="chip-grateful">💛 grateful to you</p>}
+              </div>
+              <div className="chip-group">
+                <span className="chip-group-title">addictions</span>
+                <div className="chip-meta">
+                  {SUBSTANCES.filter((s) => (selected.chem.addiction[s.id] ?? 0) > 0.05).map((s) => (
+                    <span key={s.id} className="chip-pill">
+                      {SUBSTANCE_EMOJI[s.id]} {s.name} {Math.round((selected.chem.addiction[s.id] ?? 0) * 100)}
+                    </span>
+                  ))}
+                  {!SUBSTANCES.some((s) => (selected.chem.addiction[s.id] ?? 0) > 0.05) && (
+                    <span className="chip-meta-empty">clean</span>
+                  )}
+                </div>
+              </div>
+              <div className="chip-group">
+                <span className="chip-group-title">knowledge map</span>
+                <div className="kmap" role="group" aria-label="buildings known">
+                  {TOWERS.map((t) => (
                     <span
-                      className="drive-dot"
-                      style={{ opacity: 0.15 + selected.drives[k] * 0.85 }}
-                    />
-                    <span className="drive-key">{DRIVE_SHORT[k]}</span>
-                  </span>
-                ))}
+                      key={t.id}
+                      className={`kmap-cell ${selected.knowsTower(t.id) ? 'kmap-cell-known' : ''}`}
+                      title={`${t.label}${selected.knowsTower(t.id) ? '' : ' (unknown)'}`}
+                    >
+                      {t.icon}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="chip-group">
+                <span className="chip-group-title">drives</span>
+                <div className="drives-row" role="group" aria-label="drives">
+                  {DRIVE_KEYS.map((k) => (
+                    <span
+                      key={k}
+                      className="drive-item"
+                      title={`${k}: ${driveTitles[k]} (${Math.round(selected.drives[k] * 100)})`}
+                    >
+                      <span
+                        className="drive-dot"
+                        style={{ opacity: 0.15 + selected.drives[k] * 0.85 }}
+                      />
+                      <span className="drive-key">{DRIVE_SHORT[k]}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           )}

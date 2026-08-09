@@ -198,13 +198,6 @@ button { font: inherit; cursor: pointer; }
   line-height: 1;
 }
 
-.chip-mood {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
 .chip-emoji { font-size: 1.15rem; }
 .chip-dot {
   width: 10px;
@@ -213,11 +206,12 @@ button { font: inherit; cursor: pointer; }
   box-shadow: 0 0 6px rgba(255, 255, 255, 0.25);
 }
 .chip-mood-label {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: capitalize;
   letter-spacing: 0.08em;
   color: var(--muted);
+  white-space: nowrap;
 }
 .chip-gang {
   margin-left: auto;
@@ -262,10 +256,32 @@ button { font: inherit; cursor: pointer; }
 
 .chip-stats {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
   margin-top: 8px;
   font-size: 0.8rem;
+}
+
+.chip-knowledge {
+  font-weight: 700;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.chip-knowledge-track {
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.chip-knowledge-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--amber);
+  transition: width 0.25s ease;
 }
 
 .chip-action {
@@ -334,11 +350,59 @@ button { font: inherit; cursor: pointer; }
   color: var(--ink);
 }
 
+.chip-group {
+  margin-top: 10px;
+}
+
+.chip-group-title {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.chip-meta-empty {
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* Knowledge map: one tiny tile per tower, lit when the creature knows it. */
+.kmap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.kmap-cell {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(224, 180, 106, 0.18);
+  border-radius: 6px;
+  background: rgba(42, 36, 24, 0.55);
+  font-size: 0.78rem;
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+
+.kmap-cell-known {
+  border-color: var(--amber-dim);
+  background: rgba(224, 180, 106, 0.14);
+  filter: none;
+  opacity: 1;
+  box-shadow: 0 0 6px rgba(224, 180, 106, 0.25);
+}
+
 .drives-row {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  margin-top: 10px;
+  margin-top: 6px;
   padding: 8px 6px 6px;
   border: 1px solid rgba(224, 180, 106, 0.18);
   border-radius: 12px;

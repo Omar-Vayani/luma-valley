@@ -70,6 +70,145 @@ function makeTextSprite(text: string, opts: { size?: number; color?: string; bg?
   return sprite
 }
 
+// ── building primitives: boxes/roofs/windows/doors/signs — shared by every tower ──
+type MatOpts = Partial<THREE.MeshStandardMaterialParameters>
+
+function mkMat(color: THREE.ColorRepresentation, opts: MatOpts = {}): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...opts })
+}
+
+function mkBox(w: number, h: number, d: number, m: THREE.Material | THREE.ColorRepresentation): THREE.Mesh {
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m instanceof THREE.Material ? m : mkMat(m))
+}
+
+function mkCyl(rt: number, rb: number, h: number, seg: number, m: THREE.Material | THREE.ColorRepresentation): THREE.Mesh {
+  return new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m instanceof THREE.Material ? m : mkMat(m))
+}
+
+function mkSphere(r: number, m: THREE.Material | THREE.ColorRepresentation): THREE.Mesh {
+  return new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), m instanceof THREE.Material ? m : mkMat(m))
+}
+
+interface RoofSpec {
+  wallTop: number // top of the walls
+  halfDepth: number // eave half-depth (walls + overhang)
+  halfWidth: number // gable half-width (walls + overhang)
+  roofH: number // ridge rise above wallTop
+  mat: THREE.Material
+  ridgeMat: THREE.Material
+}
+
+/** Gabled roof: two sloped planes + gable triangles + ridge cap, overhanging the walls. */
+function addGableRoof(group: THREE.Group, s: RoofSpec): void {
+  const slopeLen = Math.hypot(s.halfDepth, s.roofH)
+  const rot = Math.atan2(s.halfDepth, s.roofH)
+  const planeW = s.halfWidth * 2 + 0.4
+  for (const dir of [-1, 1] as const) {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(planeW, slopeLen), s.mat)
+    p.rotation.x = dir === 1 ? -rot : rot
+    p.position.set(0, s.wallTop + s.roofH / 2, dir * (s.halfDepth / 2))
+    group.add(p)
+  }
+  const shape = new THREE.Shape()
+  shape.moveTo(-s.halfWidth, 0)
+  shape.lineTo(s.halfWidth, 0)
+  shape.lineTo(0, s.roofH)
+  shape.closePath()
+  const gGeo = new THREE.ShapeGeometry(shape)
+  for (const dir of [-1, 1] as const) {
+    const g = new THREE.Mesh(gGeo, s.mat)
+    g.rotation.y = dir === 1 ? 0 : Math.PI
+    g.position.set(0, s.wallTop, dir * s.halfDepth)
+    group.add(g)
+  }
+  const ridge = mkBox(planeW, 0.3, 0.3, s.ridgeMat)
+  ridge.position.y = s.wallTop + s.roofH
+  group.add(ridge)
+}
+
+/** Flat roof slab with a small overhang all around. */
+function addFlatRoof(group: THREE.Group, wallTop: number, size: number, thickness: number, m: THREE.Material | THREE.ColorRepresentation): void {
+  const roof = mkBox(size + 1.0, thickness, size + 1.0, m)
+  roof.position.y = wallTop + thickness / 2
+  group.add(roof)
+}
+
+/** Framed window flush on a wall face at (x,y,z) with outward normal (nx,nz). */
+function addWindow(group: THREE.Group, x: number, y: number, z: number, nx: number, nz: number, paneMat: THREE.Material, frameMat: THREE.Material): void {
+  const g = new THREE.Group()
+  // rotate so the group's local +z is the wall's outward normal
+  if (nx !== 0) {
+    g.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2
+  } else if (nz < 0) {
+    g.rotation.y = Math.PI
+  }
+  const frame = mkBox(1.16, 1.16, 0.08, frameMat)
+  frame.position.z = 0.09
+  const pane = mkBox(0.92, 0.92, 0.06, paneMat)
+  pane.position.z = 0.16
+  const mull = mkBox(0.09, 0.92, 0.1, frameMat)
+  mull.position.z = 0.12
+  const sill = mkBox(1.26, 0.1, 0.16, frameMat)
+  sill.position.set(0, -0.6, 0.12)
+  g.add(frame, pane, mull, sill)
+  g.position.set(x, y, z)
+  group.add(g)
+}
+
+/** Door with frame posts, lintel, handle and a stone step in front. z is the wall face. */
+function addDoor(group: THREE.Group, x: number, z: number, doorMat: THREE.Material, trimMat: THREE.Material, w = 1.2, h = 2.0): void {
+  const postL = mkBox(0.16, h + 0.26, 0.14, trimMat)
+  postL.position.set(x - w / 2 - 0.08, h / 2 + 0.13, z)
+  const postR = mkBox(0.16, h + 0.26, 0.14, trimMat)
+  postR.position.set(x + w / 2 + 0.08, h / 2 + 0.13, z)
+  const lintel = mkBox(w + 0.32, 0.16, 0.14, trimMat)
+  lintel.position.set(x, h + 0.21, z)
+  const door = mkBox(w, h, 0.12, doorMat)
+  door.position.set(x, h / 2, z + 0.16)
+  const knob = mkBox(0.09, 0.09, 0.12, 0xd8b04a)
+  knob.position.set(x + w / 2 - 0.22, h / 2 - 0.25, z + 0.26)
+  const step = mkBox(w + 0.55, 0.14, 0.6, 0xaeaeae)
+  step.position.set(x, 0.07, z + 0.52)
+  group.add(postL, postR, lintel, door, knob, step)
+}
+
+/** Chimney box + cap on a roof; baseY is where it meets the roof surface. */
+function addChimney(group: THREE.Group, x: number, z: number, baseY: number, smoke: boolean): void {
+  const chimney = mkBox(0.75, 1.4, 0.75, 0x8a4a3a)
+  chimney.position.set(x, baseY + 0.7, z)
+  group.add(chimney)
+  const cap = mkBox(0.92, 0.14, 0.92, 0x6e3a2e)
+  cap.position.set(x, baseY + 1.42, z)
+  group.add(cap)
+  if (smoke) {
+    const smokeMat = mkMat(0xffffff, { transparent: true, opacity: 0.5, roughness: 1 })
+    for (let i = 0; i < 3; i++) {
+      const puff = mkSphere(0.18 + i * 0.06, smokeMat)
+      puff.position.set(x + i * 0.1, baseY + 1.6 + i * 0.34, z + (i % 2 === 0 ? -0.06 : 0.08))
+      group.add(puff)
+    }
+  }
+}
+
+/** Wooden hanging sign on two posts — the physical counterpart of the floating label. */
+function addSign(group: THREE.Group, x: number, z: number): void {
+  const wood = mkMat(0x6e4a2e, { roughness: 0.9 })
+  const boardMat = mkMat(0xd9c08a, { roughness: 0.8 })
+  const postL = mkBox(0.12, 1.6, 0.12, wood)
+  postL.position.set(x - 0.42, 0.8, z)
+  const postR = mkBox(0.12, 1.6, 0.12, wood)
+  postR.position.set(x + 0.42, 0.8, z)
+  const cross = mkBox(0.96, 0.1, 0.1, wood)
+  cross.position.set(x, 1.5, z)
+  const armL = mkBox(0.06, 0.34, 0.06, wood)
+  armL.position.set(x - 0.35, 1.28, z)
+  const armR = mkBox(0.06, 0.34, 0.06, wood)
+  armR.position.set(x + 0.35, 1.28, z)
+  const board = mkBox(1.02, 0.56, 0.08, boardMat)
+  board.position.set(x, 0.95, z + 0.06)
+  group.add(postL, postR, cross, armL, armR, board)
+}
+
 export class LabView {
   sim: Sim
   private renderer: THREE.WebGLRenderer
@@ -85,7 +224,7 @@ export class LabView {
   // camera control
   private camTarget = new THREE.Vector3(0, 0, 0)
   private camTilt = 1.0 // radians
-  private camDist = 40
+  private camDist = 62
 
   // pointer state (pan + pinch + tap)
   private pointers = new Map<number, { x: number; y: number }>()
@@ -121,7 +260,7 @@ export class LabView {
 
     // warm sky + haze so the horizon is never black
     this.scene.background = new THREE.Color('#cfc4a6')
-    this.scene.fog = new THREE.Fog('#cfc4a6', 70, 150)
+    this.scene.fog = new THREE.Fog('#cfc4a6', 90, 185)
 
     // ground
     const ground = new THREE.Mesh(
@@ -165,9 +304,9 @@ export class LabView {
     this.renderer.domElement.remove()
   }
 
-  // ── towers: classic houses — cube walls, slanted triangle roof, gable ends,
-  //    windows, a door, and a hanging sign with the label. Simple shapes.
-  //    graveyard / den / school get their own themed builds. ──
+  // ── towers: houses with real gabled roofs, chimneys, framed windows, doors
+  //    with steps, and a wooden sign post beside the door. graveyard / den /
+  //    school / farm / park get their own themed builds. ──
   private buildTower(t: Tower): void {
     const group = new THREE.Group()
     const color = new THREE.Color(t.color)
@@ -178,13 +317,21 @@ export class LabView {
       this.buildDen(group)
     } else if (t.id === 'school') {
       this.buildSchool(group)
+    } else if (t.id === 'farm') {
+      this.buildFarm(group)
+    } else if (t.id === 'park') {
+      this.buildPark(group)
     } else {
       this.buildHouse(group, t, color)
     }
 
-    // hanging sign with the label — big, readable, above the door
+    // wooden sign on a post beside the door (physical, in addition to the label)
+    addSign(group, 2.6, 3.7)
+
+    // hanging label — big, readable, above the building
+    const labelY = t.id === 'farm' ? 8.8 : 7.6
     const label = makeTextSprite(`${t.icon} ${t.label}`, { color: '#1c1a14', bg: '#fff4d8', size: 44 })
-    label.position.set(0, 7.4, 0)
+    label.position.set(0, labelY, 0)
     group.add(label)
 
     group.position.set(t.x, 0, t.z)
@@ -192,106 +339,145 @@ export class LabView {
     this.towerMeshes.push(group)
   }
 
-  /** The standard tower: cube walls, slanted triangle roof, windows, door. */
+  /** The standard tower: gabled house with overhanging roof, chimney, framed windows, door + step. */
   private buildHouse(group: THREE.Group, t: Tower, color: THREE.Color): void {
-    const wallMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.9 })
-    const roofMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(1.25), roughness: 0.55 })
+    const wallMat = mkMat(color.clone().multiplyScalar(0.8), { roughness: 0.95 })
+    const trimMat = mkMat(color.clone().multiplyScalar(1.18), { roughness: 0.8 })
+    const roofMat = mkMat(color.clone().multiplyScalar(1.3), { roughness: 0.55 })
+    const ridgeMat = mkMat(color.clone().multiplyScalar(0.85), { roughness: 0.6 })
 
-    // cube walls
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4, 6.5), wallMat)
+    // cube walls + corner trim posts
+    const walls = mkBox(6.5, 4, 6.5, wallMat)
     walls.position.y = 2
     group.add(walls)
-
-    // slanted triangle roof: two planes + triangular gable ends + ridge
-    const roof = new THREE.Group()
-    const slope = 0.75
-    const half = 3.45
-    const roofH = half * slope // rise
-    // two roof planes
-    const plane = (rotX: number, y: number): THREE.Mesh => {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(7.4, Math.hypot(half, roofH)), roofMat)
-      p.rotation.x = rotX
-      p.position.y = y
-      return p
-    }
-    roof.add(plane(Math.PI / 2 - Math.atan(slope), roofH / 2))
-    roof.add(plane(-(Math.PI / 2 - Math.atan(slope)), roofH / 2))
-    // gable triangles (fill the open front/back)
-    const gable = (rotY: number): THREE.Mesh => {
-      const shape = new THREE.Shape()
-      shape.moveTo(-half, 0)
-      shape.lineTo(half, 0)
-      shape.lineTo(0, roofH)
-      shape.closePath()
-      const g = new THREE.Mesh(new THREE.ShapeGeometry(shape), roofMat)
-      g.rotation.y = rotY
-      g.position.y = 4
-      return g
-    }
-    roof.add(gable(0))
-    roof.add(gable(Math.PI))
-    roof.position.y = 0
-    group.add(roof)
-
-    // ridge cap
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(7.4, 0.3, 0.3), roofMat)
-    ridge.position.y = 4 + roofH
-    group.add(ridge)
-
-    // windows (dark squares on the walls)
-    const winMat = new THREE.MeshStandardMaterial({ color: 0x241d14, roughness: 0.4 })
-    for (const [wx, wz] of [[-2.3, 0], [2.3, 0], [0, -2.3], [0, 2.3]] as const) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.08), winMat)
-      win.position.set(wx, 2.6, wz)
-      group.add(win)
+    for (const [cx, cz] of [[-3.24, -3.24], [3.24, -3.24], [-3.24, 3.24], [3.24, 3.24]] as const) {
+      const corner = mkBox(0.24, 4.1, 0.24, trimMat)
+      corner.position.set(cx, 2.05, cz)
+      group.add(corner)
     }
 
-    // door
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.1), new THREE.MeshStandardMaterial({ color: 0x3a2a18 }))
-    door.position.set(0, 1, 2.3)
-    group.add(door)
+    // gabled roof with a proper overhang past the walls
+    addGableRoof(group, { wallTop: 4, halfDepth: 3.65, halfWidth: 3.6, roofH: 2.3, mat: roofMat, ridgeMat })
 
-    // special decoration per tower
-    if (t.id === 'homes') {
-      // beds: little raised rectangles
+    // chimney on the roof slope (some towers puff smoke)
+    const smoke = t.id === 'food' || t.id === 'homes' || t.id === 'tools' || t.id === 'tavern' || t.id === 'work'
+    const chimneyY = 4 + 2.3 * (1 - 1.7 / 3.65)
+    addChimney(group, 2.2, -1.7, chimneyY, smoke)
+
+    // framed windows flush on all four walls
+    const paneMat = mkMat(0x2e2618, { roughness: 0.4 })
+    const frameMat = mkMat(0xe8dcc0, { roughness: 0.6 })
+    addWindow(group, -2.2, 2.7, 3.25, 0, 1, paneMat, frameMat)
+    addWindow(group, 2.2, 2.7, 3.25, 0, 1, paneMat, frameMat)
+    addWindow(group, -2.2, 2.7, -3.25, 0, -1, paneMat, frameMat)
+    addWindow(group, 2.2, 2.7, -3.25, 0, -1, paneMat, frameMat)
+    addWindow(group, 3.25, 2.7, 0, 1, 0, paneMat, frameMat)
+    addWindow(group, -3.25, 2.7, 0, -1, 0, paneMat, frameMat)
+
+    // door with frame, handle and stone step
+    const doorMat = mkMat(0x3a2a18, { roughness: 0.7 })
+    addDoor(group, 0, 3.25, doorMat, trimMat)
+
+    // yard decorations — each business gets something out front (outside the walls)
+    if (t.id === 'food') {
+      // produce crates + barrel by the door
+      for (let i = 0; i < 3; i++) {
+        const crate = mkBox(0.7, 0.7, 0.7, 0x8a6a40)
+        crate.position.set(-3.6, 0.35 + i * 0.72, 2.6)
+        group.add(crate)
+      }
+      const barrel = mkCyl(0.42, 0.42, 0.95, 10, 0x9a7a4a)
+      barrel.position.set(-3.2, 0.475, 1.2)
+      group.add(barrel)
+    } else if (t.id === 'bank') {
+      // columns flanking the entrance + a stack of gold coins
+      for (const sx of [-1.35, 1.35] as const) {
+        const col = mkCyl(0.28, 0.34, 3.4, 12, 0xe8e2d0)
+        col.position.set(sx, 1.7, 3.45)
+        group.add(col)
+      }
+      for (let i = 0; i < 3; i++) {
+        const coin = mkCyl(0.5, 0.5, 0.14, 16, 0xd9a13d)
+        coin.position.set(3.7, 0.07 + i * 0.15, 2.8)
+        group.add(coin)
+      }
+    } else if (t.id === 'pharmacy') {
+      // white cross over the door + potted plant
+      const crossMat = mkMat(0xf4f4f4)
+      const v = mkBox(0.3, 1.0, 0.06, crossMat)
+      v.position.set(0, 2.7, 3.33)
+      const hbar = mkBox(0.6, 0.3, 0.06, crossMat)
+      hbar.position.set(0, 2.7, 3.33)
+      group.add(v, hbar)
+      const pot = mkCyl(0.3, 0.22, 0.4, 8, 0x9a4a3a)
+      pot.position.set(-3.4, 0.2, 2.9)
+      const bush = mkSphere(0.32, 0x4fae5a)
+      bush.position.set(-3.4, 0.62, 2.9)
+      group.add(pot, bush)
+    } else if (t.id === 'homes') {
+      // beds: little raised rectangles in the side yard
       for (let i = 0; i < 3; i++) {
         const bed = new THREE.Group()
-        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.3, 1), new THREE.MeshStandardMaterial({ color: 0x6a4a2a }))
+        const frame = mkBox(1.7, 0.3, 1, 0x6a4a2a)
         frame.position.y = 0.5
-        const mat = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.18, 1), new THREE.MeshStandardMaterial({ color: 0xcfc4a6 }))
-        mat.position.y = 0.75
-        bed.add(frame)
-        bed.add(mat)
-        bed.position.set(-2.6 + i * 2.6, 0, -2.9)
+        const matt = mkBox(1.7, 0.18, 1, 0xcfc4a6)
+        matt.position.y = 0.75
+        bed.add(frame, matt)
+        bed.position.set(-3.7, 0, -2.6 + i * 2.6)
         group.add(bed)
       }
+    } else if (t.id === 'tools') {
+      // log pile + anvil
+      for (let i = 0; i < 3; i++) {
+        const log = mkCyl(0.34, 0.34, 0.9, 10, 0x9a6a3a)
+        log.rotation.x = Math.PI / 2
+        log.position.set(-3.5, 0.34, -2.8 + i * 0.95)
+        group.add(log)
+      }
+      const anvil = mkCyl(0.5, 0.7, 0.6, 8, 0x666)
+      anvil.position.set(-3.6, 0.3, 1.4)
+      group.add(anvil)
+    } else if (t.id === 'tavern') {
+      // barrels by the door + a mug on the porch
+      for (let i = 0; i < 2; i++) {
+        const barrel = mkCyl(0.45, 0.45, 1.0, 10, 0x7a4a2a)
+        barrel.position.set(-2.9 + i * 1.5, 0.5, 3.9)
+        group.add(barrel)
+      }
+      const mug = mkCyl(0.22, 0.18, 0.5, 8, 0xd9b04a)
+      mug.position.set(-2.6, 0.75, 3.3)
+      group.add(mug)
     } else if (t.id === 'play') {
-      // gym/play: a swing set + rings
-      const postMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a })
+      // gym/play: a swing set on the lawn + rings mounted on the side wall
+      const postMat = mkMat(0x8a7a5a)
       const swing = new THREE.Group()
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 0.3), postMat)
+      const p1 = mkBox(0.3, 3, 0.3, postMat)
       p1.position.set(-1.8, 1.5, 0)
-      const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 0.3), postMat)
+      const p2 = mkBox(0.3, 3, 0.3, postMat)
       p2.position.set(1.8, 1.5, 0)
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.25, 0.25), postMat)
+      const bar = mkBox(3.9, 0.25, 0.25, postMat)
       bar.position.y = 3
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.15, 0.5), new THREE.MeshStandardMaterial({ color: 0xd9a13d }))
+      const seat = mkBox(0.8, 0.15, 0.5, 0xd9a13d)
       seat.position.y = 1.3
       swing.add(p1, p2, bar, seat)
+      swing.position.set(3.1, 0, 4.0)
       group.add(swing)
-      for (const [rx, rz] of [[-2.6, -1.8], [2.6, -1.8]] as const) {
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 8, 12), new THREE.MeshStandardMaterial({ color: 0xe0b46a }))
-        ring.position.set(rx, 1.6, rz)
+      const rbar = mkBox(0.16, 0.16, 1.7, postMat)
+      rbar.position.set(3.62, 2.2, 0)
+      group.add(rbar)
+      for (const rz of [-0.5, 0.5] as const) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.09, 8, 12), mkMat(0xe0b46a))
+        ring.position.set(3.62, 1.35, rz)
         group.add(ring)
       }
     } else if (t.id === 'work') {
-      // work tower: an anvil + stacked crates (factory look)
-      const anvil = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 0.6, 8), new THREE.MeshStandardMaterial({ color: 0x666 }))
-      anvil.position.set(-1.5, 0.3, -1.2)
+      // work tower: anvil + stacked crates in the side yard (factory look)
+      const anvil = mkCyl(0.5, 0.7, 0.6, 8, 0x666)
+      anvil.position.set(-3.6, 0.3, -2.2)
       group.add(anvil)
       for (let i = 0; i < 2; i++) {
-        const crate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), new THREE.MeshStandardMaterial({ color: 0x8a6a40 }))
-        crate.position.set(1.6, 0.45 + i * 0.95, 1.4)
+        const crate = mkBox(0.9, 0.9, 0.9, 0x8a6a40)
+        crate.position.set(-3.9, 0.45 + i * 0.95, 1.2)
         group.add(crate)
       }
     }
@@ -299,28 +485,33 @@ export class LabView {
 
   /** Graveyard: dark stone chapel + tombstones + fence around the plot. */
   private buildGraveyard(group: THREE.Group): void {
-    const stone = new THREE.MeshStandardMaterial({ color: 0x7a7a86, roughness: 0.95 })
-    const darkRoof = new THREE.MeshStandardMaterial({ color: 0x3a3a42, roughness: 0.9 })
-    const darkTrim = new THREE.MeshStandardMaterial({ color: 0x2e2e34, roughness: 0.9 })
+    const stone = mkMat(0x7a7a86, { roughness: 0.95 })
+    const darkRoof = mkMat(0x3a3a42, { roughness: 0.9 })
+    const darkTrim = mkMat(0x2e2e34, { roughness: 0.9 })
 
     // walls + flat dark roof (with overhang)
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4, 6.5), stone)
+    const walls = mkBox(6.5, 4, 6.5, stone)
     walls.position.y = 2
     group.add(walls)
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.4, 7.6), darkRoof)
-    roof.position.y = 4.2
-    group.add(roof)
+    addFlatRoof(group, 4, 6.5, 0.4, darkRoof)
 
-    // door (dark)
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.1), darkTrim)
-    door.position.set(0, 1, 2.3)
-    group.add(door)
+    // small chimney at the back of the roof
+    addChimney(group, 2.4, -2.2, 4.6, false)
 
-    // tombstones: rounded-top slabs + a couple with a carved cross
-    const tombMat = new THREE.MeshStandardMaterial({ color: 0xb4b4be, roughness: 0.85 })
+    // door (dark) with a stone step
+    addDoor(group, 0, 3.25, darkTrim, stone)
+
+    // dark stained windows, framed in stone
+    const paneMat = mkMat(0x1a1a22, { roughness: 0.5 })
+    addWindow(group, -2.2, 2.6, 3.25, 0, 1, paneMat, stone)
+    addWindow(group, 2.2, 2.6, 3.25, 0, 1, paneMat, stone)
+    addWindow(group, 0, 2.6, -3.25, 0, -1, paneMat, stone)
+
+    // tombstones scattered around the plot (outside the walls)
+    const tombMat = mkMat(0xb4b4be, { roughness: 0.85 })
     const makeTomb = (x: number, z: number, rounded: boolean): void => {
       const tomb = new THREE.Group()
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.22), tombMat)
+      const slab = mkBox(0.75, 0.75, 0.22, tombMat)
       slab.position.y = 0.375
       tomb.add(slab)
       if (rounded) {
@@ -329,27 +520,29 @@ export class LabView {
         cap.position.y = 0.75
         tomb.add(cap)
       } else {
-        const v = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.07), tombMat)
+        const v = mkBox(0.12, 0.5, 0.07, tombMat)
         v.position.set(0, 0.55, 0.14)
-        const h = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.07), tombMat)
+        const h = mkBox(0.34, 0.12, 0.07, tombMat)
         h.position.set(0, 0.62, 0.14)
         tomb.add(v, h)
       }
       tomb.position.set(x, 0, z)
       group.add(tomb)
     }
-    makeTomb(-2.2, -2.3, true)
-    makeTomb(0.5, -2.5, false)
-    makeTomb(2.6, -1.7, true)
-    makeTomb(-1.0, 2.0, false)
+    makeTomb(-4.4, -4.0, true)
+    makeTomb(0.8, -5.2, false)
+    makeTomb(4.6, -3.2, true)
+    makeTomb(-4.8, 2.6, false)
+    makeTomb(3.4, 4.6, true)
+    makeTomb(-1.2, 5.0, false)
 
     // fence: thin posts + two rails around the plot
-    const fenceMat = new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 0.9 })
+    const fenceMat = mkMat(0x4a4a52, { roughness: 0.9 })
     const R = 6.2
     const posts = 12
     for (let i = 0; i < posts; i++) {
       const a = (i / posts) * Math.PI * 2
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.1, 0.16), fenceMat)
+      const post = mkBox(0.16, 1.1, 0.16, fenceMat)
       post.position.set(Math.cos(a) * R, 0.55, Math.sin(a) * R)
       group.add(post)
     }
@@ -363,7 +556,7 @@ export class LabView {
       const mz = (Math.sin(a0) + Math.sin(a1)) / 2
       const rotY = -Math.atan2(dz, dx)
       for (const ry of [0.5, 0.95]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.08), fenceMat)
+        const rail = mkBox(len, 0.08, 0.08, fenceMat)
         rail.position.set(mx * R, ry, mz * R)
         rail.rotation.y = rotY
         group.add(rail)
@@ -373,65 +566,38 @@ export class LabView {
 
   /** Den: shady low hideout — dark green walls, hanging herbs, amber window. */
   private buildDen(group: THREE.Group): void {
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.95 })
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x2a3320, roughness: 0.85 })
+    const wallMat = mkMat(0x3d4a2e, { roughness: 0.95 })
+    const roofMat = mkMat(0x2a3320, { roughness: 0.85 })
+    const trimMat = mkMat(0x5a6a3a, { roughness: 0.8 })
 
-    // low walls + a low-pitched slanted roof
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 3.2, 6.5), wallMat)
+    // low walls + a low-pitched gabled roof
+    const walls = mkBox(6.5, 3.2, 6.5, wallMat)
     walls.position.y = 1.6
     group.add(walls)
-    const slope = 0.45
-    const half = 3.45
-    const roofH = half * slope
-    const wallTop = 3.2
-    const plane = (rotX: number, y: number): THREE.Mesh => {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(7.4, Math.hypot(half, roofH)), roofMat)
-      p.rotation.x = rotX
-      p.position.y = y
-      return p
-    }
-    group.add(plane(Math.PI / 2 - Math.atan(slope), roofH / 2 + wallTop))
-    group.add(plane(-(Math.PI / 2 - Math.atan(slope)), roofH / 2 + wallTop))
-    const gable = (rotY: number): THREE.Mesh => {
-      const shape = new THREE.Shape()
-      shape.moveTo(-half, 0)
-      shape.lineTo(half, 0)
-      shape.lineTo(0, roofH)
-      shape.closePath()
-      const g = new THREE.Mesh(new THREE.ShapeGeometry(shape), roofMat)
-      g.rotation.y = rotY
-      g.position.y = wallTop
-      return g
-    }
-    group.add(gable(0))
-    group.add(gable(Math.PI))
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(7.4, 0.25, 0.25), roofMat)
-    ridge.position.y = wallTop + roofH
-    group.add(ridge)
+    addGableRoof(group, { wallTop: 3.2, halfDepth: 3.55, halfWidth: 3.5, roofH: 1.5, mat: roofMat, ridgeMat: roofMat })
 
-    // glowing amber window
-    const amber = new THREE.MeshStandardMaterial({ color: 0xffb24d, emissive: 0xffa93d, emissiveIntensity: 1.6, roughness: 0.3 })
-    const win = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.08), amber)
-    win.position.set(0, 2.2, 2.3)
-    group.add(win)
+    // small chimney — no smoke, a hideout stays quiet
+    addChimney(group, 2.3, -1.6, 3.2 + 1.5 * (1 - 1.6 / 3.55), false)
 
-    // door (dark wood)
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 0.1), new THREE.MeshStandardMaterial({ color: 0x241c12 }))
-    door.position.set(0, 0.9, 2.3)
-    group.add(door)
+    // glowing amber window above the door, with a frame
+    const amber = mkMat(0xffb24d, { emissive: 0xffa93d, emissiveIntensity: 1.6, roughness: 0.3 })
+    addWindow(group, 0, 2.5, 3.25, 0, 1, amber, trimMat)
+
+    // door (dark wood) + step
+    addDoor(group, 0, 3.25, mkMat(0x241c12), trimMat, 1.2, 1.8)
 
     // hanging herbs dangling from under the roof edge
-    const herbMat = new THREE.MeshStandardMaterial({ color: 0x4f9a3d, roughness: 0.7 })
-    const herbMat2 = new THREE.MeshStandardMaterial({ color: 0x6abf4f, roughness: 0.7 })
+    const herbMat = mkMat(0x4f9a3d, { roughness: 0.7 })
+    const herbMat2 = mkMat(0x6abf4f, { roughness: 0.7 })
     const hang = (x: number, z: number, len: number, r: number, mat: THREE.Material): void => {
       const herb = new THREE.Group()
-      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.06, len, 0.06), herbMat)
+      const stem = mkBox(0.06, len, 0.06, herbMat)
       stem.position.y = -len / 2
       const bulb = new THREE.Mesh(new THREE.ConeGeometry(r, r * 1.8, 6), mat)
       bulb.rotation.x = Math.PI
       bulb.position.y = -len - r * 0.9
       herb.add(stem, bulb)
-      herb.position.set(x, wallTop + 0.1, z)
+      herb.position.set(x, 3.3, z)
       group.add(herb)
     }
     hang(-2.4, -2.5, 0.5, 0.22, herbMat)
@@ -443,54 +609,160 @@ export class LabView {
 
   /** School: light blue-gray hall with a flat roof, a bell, and a book at the door. */
   private buildSchool(group: THREE.Group): void {
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xa8b6c9, roughness: 0.9 })
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x5a6a80, roughness: 0.6 })
+    const wallMat = mkMat(0xa8b6c9, { roughness: 0.9 })
+    const roofMat = mkMat(0x5a6a80, { roughness: 0.6 })
+    const trimMat = mkMat(0xd8dfe8, { roughness: 0.7 })
 
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4, 6.5), wallMat)
+    const walls = mkBox(6.5, 4, 6.5, wallMat)
     walls.position.y = 2
     group.add(walls)
 
     // flat roof with a slight overhang
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.35, 7.6), roofMat)
-    roof.position.y = 4.15
-    group.add(roof)
+    addFlatRoof(group, 4, 6.5, 0.35, roofMat)
 
-    // small bell on the ridge: post + sphere + cone clapper
-    const bellMat = new THREE.MeshStandardMaterial({ color: 0xd8b04a, roughness: 0.4, metalness: 0.3 })
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.8, 0.14), bellMat)
+    // chimney at the back
+    addChimney(group, 2.4, -2.4, 4.5, false)
+
+    // small bell on the roof: post + sphere + cone clapper
+    const bellMat = mkMat(0xd8b04a, { roughness: 0.4, metalness: 0.3 })
+    const post = mkBox(0.14, 0.8, 0.14, bellMat)
     post.position.y = 4.65
-    const bell = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), bellMat)
+    const bell = mkSphere(0.34, bellMat)
     bell.position.y = 5.0
     const bellTop = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 8), bellMat)
     bellTop.position.y = 5.4
     group.add(post, bell, bellTop)
 
-    // windows (light panes)
-    const winMat = new THREE.MeshStandardMaterial({ color: 0xdfe8f2, roughness: 0.3 })
-    for (const [wx, wz] of [[-2.3, 0], [2.3, 0], [0, -2.3]] as const) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.08), winMat)
-      win.position.set(wx, 2.6, wz)
-      group.add(win)
-    }
+    // windows (light panes, framed)
+    const winMat = mkMat(0xdfe8f2, { roughness: 0.3 })
+    const frameMat = mkMat(0x4a5a70, { roughness: 0.6 })
+    addWindow(group, -2.2, 2.7, 3.25, 0, 1, winMat, frameMat)
+    addWindow(group, 2.2, 2.7, 3.25, 0, 1, winMat, frameMat)
+    addWindow(group, -2.2, 2.7, -3.25, 0, -1, winMat, frameMat)
+    addWindow(group, 2.2, 2.7, -3.25, 0, -1, winMat, frameMat)
+    addWindow(group, 3.25, 2.7, 0, 1, 0, winMat, frameMat)
+    addWindow(group, -3.25, 2.7, 0, -1, 0, winMat, frameMat)
 
-    // door
-    const door = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2, 0.1), new THREE.MeshStandardMaterial({ color: 0x4a3a28 }))
-    door.position.set(0, 1, 2.3)
-    group.add(door)
+    // door + step
+    addDoor(group, 0, 3.25, mkMat(0x4a3a28), trimMat)
 
-    // book icon at the door: two open pages
-    const bookMat = new THREE.MeshStandardMaterial({ color: 0xf0e8d0, roughness: 0.7 })
+    // book icon over the door: two open pages
+    const bookMat = mkMat(0xf0e8d0, { roughness: 0.7 })
     const book = new THREE.Group()
-    const pageL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.34), bookMat)
+    const pageL = mkBox(0.5, 0.06, 0.34, bookMat)
     pageL.rotation.z = 0.35
     pageL.position.set(-0.24, 0, 0)
-    const pageR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.34), bookMat)
+    const pageR = mkBox(0.5, 0.06, 0.34, bookMat)
     pageR.rotation.z = -0.35
     pageR.position.set(0.24, 0, 0)
-    const spine = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.34), new THREE.MeshStandardMaterial({ color: 0x8a4a2a }))
+    const spine = mkBox(0.06, 0.1, 0.34, 0x8a4a2a)
     book.add(pageL, pageR, spine)
-    book.position.set(0, 2.35, 2.42)
+    book.position.set(0, 2.3, 3.44)
     group.add(book)
+  }
+
+  /** Farm: wide red barn with a dark gabled roof, hay bales and crop rows. */
+  private buildFarm(group: THREE.Group): void {
+    const wallMat = mkMat(0x9c4a38, { roughness: 0.9 })
+    const roofMat = mkMat(0x4a3626, { roughness: 0.6 })
+    const trimMat = mkMat(0x6e3a2e, { roughness: 0.8 })
+
+    // wide barn walls
+    const walls = mkBox(9, 4.5, 6.5, wallMat)
+    walls.position.y = 2.25
+    group.add(walls)
+
+    // dark gabled roof with overhang
+    addGableRoof(group, { wallTop: 4.5, halfDepth: 3.6, halfWidth: 4.75, roofH: 2.2, mat: roofMat, ridgeMat: roofMat })
+
+    // chimney + smoke
+    addChimney(group, 2.6, -1.7, 4.5 + 2.2 * (1 - 1.7 / 3.6), true)
+
+    // big barn door + step
+    addDoor(group, 0, 3.25, mkMat(0x5a3524), trimMat, 1.8, 2.4)
+
+    // windows: loft window in the front gable + side windows
+    const paneMat = mkMat(0x2e2618, { roughness: 0.4 })
+    addWindow(group, 0, 5.5, 3.62, 0, 1, paneMat, trimMat)
+    addWindow(group, 3.25, 2.5, 0, 1, 0, paneMat, trimMat)
+    addWindow(group, -3.25, 2.5, 0, -1, 0, paneMat, trimMat)
+
+    // hay bales stacked beside the barn
+    const hayMat = mkMat(0xd9b94a, { roughness: 0.9 })
+    const bale = (x: number, y: number, z: number): void => {
+      const b = mkCyl(0.45, 0.45, 0.9, 10, hayMat)
+      b.rotation.x = Math.PI / 2
+      b.position.set(x, y, z)
+      group.add(b)
+    }
+    bale(-3.5, 0.45, 4.3)
+    bale(-2.4, 0.45, 4.5)
+    bale(-2.95, 1.35, 4.4)
+
+    // crop rows behind the barn
+    const cropA = mkMat(0x6fae4a, { roughness: 0.9 })
+    const cropB = mkMat(0x8fae5f, { roughness: 0.9 })
+    for (let i = 0; i < 6; i++) {
+      const row = mkBox(0.45, 0.1, 2.8, i % 2 === 0 ? cropA : cropB)
+      row.position.set(-3.9 + i * 1.56, 0.05, -4.6)
+      group.add(row)
+    }
+  }
+
+  /** Park: open pavilion, a pond with pebbles, and two trees. */
+  private buildPark(group: THREE.Group): void {
+    const postMat = mkMat(0x8a7a5a, { roughness: 0.85 })
+    const roofMat = mkMat(0x3d7a5a, { roughness: 0.7 })
+
+    // pavilion: 4 posts + flat roof with a finial
+    for (const [px, pz] of [[-2.3, -2.3], [2.3, -2.3], [-2.3, 2.3], [2.3, 2.3]] as const) {
+      const post = mkBox(0.26, 3, 0.26, postMat)
+      post.position.set(px, 1.5, pz)
+      group.add(post)
+    }
+    addFlatRoof(group, 3, 5.2, 0.3, roofMat)
+    const finial = mkSphere(0.18, 0xd9a13d)
+    finial.position.y = 3.5
+    group.add(finial)
+
+    // pond: blue circles on the ground + a pebble ring
+    const pondOuter = new THREE.Mesh(new THREE.CircleGeometry(2.6, 28), mkMat(0x3a7a9a, { roughness: 0.9 }))
+    pondOuter.rotation.x = -Math.PI / 2
+    pondOuter.position.set(4.3, 0.02, -2.9)
+    group.add(pondOuter)
+    const pond = new THREE.Mesh(new THREE.CircleGeometry(2.25, 28), mkMat(0x4faeae, { roughness: 0.35 }))
+    pond.rotation.x = -Math.PI / 2
+    pond.position.set(4.3, 0.04, -2.9)
+    group.add(pond)
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2
+      const pebble = mkSphere(0.11, 0x9a9aa4)
+      pebble.scale.y = 0.5
+      pebble.position.set(4.3 + Math.cos(a) * 2.7, 0.05, -2.9 + Math.sin(a) * 2.7)
+      group.add(pebble)
+    }
+
+    // two trees: brown trunk + layered green canopy
+    const trunkMat = mkMat(0x6e4a2e, { roughness: 0.9 })
+    const leafMat = mkMat(0x4fae5a, { roughness: 0.8 })
+    const leafMat2 = mkMat(0x3d8f4a, { roughness: 0.8 })
+    const tree = (x: number, z: number, scale: number): void => {
+      const g = new THREE.Group()
+      const trunk = mkCyl(0.24 * scale, 0.32 * scale, 1.7 * scale, 10, trunkMat)
+      trunk.position.y = 0.85 * scale
+      g.add(trunk)
+      const c1 = mkSphere(1.05 * scale, leafMat)
+      c1.position.y = 2.35 * scale
+      const c2 = mkSphere(0.7 * scale, leafMat2)
+      c2.position.set(0.45 * scale, 2.9 * scale, 0.2 * scale)
+      const c3 = mkSphere(0.6 * scale, leafMat2)
+      c3.position.set(-0.4 * scale, 2.7 * scale, -0.3 * scale)
+      g.add(c1, c2, c3)
+      g.position.set(x, 0, z)
+      group.add(g)
+    }
+    tree(-4.3, -2.6, 1)
+    tree(-3.4, 3.1, 1.25)
   }
 
   // ── creatures: big ball + eyes + brows + mouth + carried stick + emotion badge ──
@@ -1100,7 +1372,7 @@ export class LabView {
         const d = Math.hypot(a.x - b.x, a.y - b.y)
         if (this.pinchStart > 0) {
           const ratio = d / this.pinchStart
-          this.camDist = Math.min(130, Math.max(20, this.camDist / ratio))
+          this.camDist = Math.min(160, Math.max(24, this.camDist / ratio))
           this.pinchStart = d
         }
       } else if (this.panLast) {
@@ -1126,7 +1398,7 @@ export class LabView {
     // wheel zoom for desktop
     el.addEventListener('wheel', (e) => {
       e.preventDefault()
-      this.camDist = Math.min(130, Math.max(20, this.camDist + e.deltaY * 0.03))
+      this.camDist = Math.min(160, Math.max(24, this.camDist + e.deltaY * 0.03))
     }, { passive: false })
 
     // process taps after each frame
@@ -1196,6 +1468,6 @@ export class LabView {
 
   resetCamera(): void {
     this.camTarget.set(0, 0, 0)
-    this.camDist = 40
+    this.camDist = 62
   }
 }

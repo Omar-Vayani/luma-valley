@@ -127,6 +127,7 @@ describe('graveyard — the dead are carried and buried', () => {
     const c = s.spawnCreature(GEN({ theft: 0.1 }), 10, 10)
     c.wallet = 20
     c.chem.hunger = 0.1
+    c.learnTower('food') // has explored and knows where the food tower is
     for (let i = 0; i < 170; i++) s.tick() // world-crossing walk takes ~130 ticks
     expect(c.alive).toBe(true)
     expect(c.chem.hunger).toBeGreaterThan(0.3) // ate
@@ -138,7 +139,8 @@ describe('graveyard — the dead are carried and buried', () => {
     const c = s.spawnCreature(GEN({ theft: 0.1, greed: 0.2 }), 10, 10)
     c.wallet = 0
     c.chem.hunger = 0.1
-    for (let i = 0; i < 200; i++) s.tick()
+    c.learnTower('work') // has explored and knows where work is
+    for (let i = 0; i < 300; i++) s.tick() // walk to work + shift in the bigger world
     expect(c.alive).toBe(true)
     expect(c.wallet).toBeGreaterThan(0) // earned
   })

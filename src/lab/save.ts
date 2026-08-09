@@ -54,6 +54,7 @@ interface SavedCreature {
   buried: boolean
   jealousy: number
   drives: Drives
+  knowledge: Record<string, number>
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -85,6 +86,7 @@ export function saveSim(sim: Sim): LabSave {
     buried: c.buried,
     jealousy: c.jealousy,
     drives: { ...c.drives },
+    knowledge: { ...c.knowledge },
   }))
   return {
     version: 4,
@@ -130,6 +132,7 @@ export function loadSim(data: LabSave): Sim {
     c.buried = sc.buried ?? false
     c.jealousy = sc.jealousy ?? 0
     c.drives = { ...(sc.drives ?? createDrives()) }
+    c.knowledge = { ...sc.knowledge }
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)
