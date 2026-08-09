@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { World } from '../sim/world'
+import { CITY_WALL_BOUND } from '../sim/city-layout'
 
 export interface World3D {
   group: THREE.Group
@@ -41,12 +42,19 @@ export function buildWorld3D(world: World): World3D {
   ground.receiveShadow = true
   group.add(ground)
 
-  const plaza = new THREE.Mesh(new THREE.CircleGeometry(22, 48), paving)
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(17, 40), paving)
   plaza.rotation.x = -Math.PI / 2
   plaza.position.y = 0.018
   plaza.receiveShadow = true
   group.add(plaza)
-  for (const [sx, sz, x, z] of [[8, 84, 0, 0], [84, 8, 0, 0], [7, 36, -18, -1], [7, 34, 18, 0]] as const) {
+  // A block-readable street grid: broad avenues, narrow alleys, and district spurs.
+  for (const [sx, sz, x, z] of [
+    [9, 138, 0, 0], [138, 9, 0, 0],
+    [7, 82, -32, -6], [7, 76, 32, -2],
+    [52, 6, -28, 18], [48, 6, 28, 26],
+    [42, 6, -28, -28], [42, 6, 28, -28],
+    [28, 5, -49, -4],
+  ] as const) {
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), road)
     strip.rotation.x = -Math.PI / 2
     strip.position.set(x, 0.025, z)
@@ -54,13 +62,12 @@ export function buildWorld3D(world: World): World3D {
     group.add(strip)
   }
 
-  // Bounded walls with readable north/south/east/west gate breaks.
+  // The wall is the real playable boundary. Gatehouses are closed landmarks rather than exits into void.
   for (const [x, z, sx, sz] of [
-    [-25, -43, 34, 2], [25, -43, 34, 2], [-25, 43, 34, 2], [25, 43, 34, 2],
-    [-43, -25, 2, 34], [-43, 25, 2, 34], [43, -25, 2, 34], [43, 25, 2, 34],
+    [0, -CITY_WALL_BOUND, CITY_WALL_BOUND * 2, 2], [0, CITY_WALL_BOUND, CITY_WALL_BOUND * 2, 2],
+    [-CITY_WALL_BOUND, 0, 2, CITY_WALL_BOUND * 2], [CITY_WALL_BOUND, 0, 2, CITY_WALL_BOUND * 2],
   ] as const) addWall(group, x, z, sx, sz, stone)
-  // Block-built gate arches: tall piers and a weathered lintel keep every route open.
-  for (const [x, z, horizontal] of [[0, -43, true], [0, 43, true], [-43, 0, false], [43, 0, false]] as const) {
+  for (const [x, z, horizontal] of [[0, -CITY_WALL_BOUND, true], [0, CITY_WALL_BOUND, true], [-CITY_WALL_BOUND, 0, false], [CITY_WALL_BOUND, 0, false]] as const) {
     if (horizontal) {
       addWall(group, x - 5, z, 2, 2, stone); addWall(group, x + 5, z, 2, 2, stone)
       const lintel = new THREE.Mesh(new THREE.BoxGeometry(12, 1.5, 2), stone); lintel.position.set(x, 5.25, z); lintel.castShadow = true; group.add(lintel)
@@ -70,7 +77,7 @@ export function buildWorld3D(world: World): World3D {
     }
   }
   const towerGeo = new THREE.CylinderGeometry(3, 3.6, 7, 8)
-  for (const [x, z] of [[-43, -43], [43, -43], [-43, 43], [43, 43]] as const) {
+  for (const [x, z] of [[-CITY_WALL_BOUND, -CITY_WALL_BOUND], [CITY_WALL_BOUND, -CITY_WALL_BOUND], [-CITY_WALL_BOUND, CITY_WALL_BOUND], [CITY_WALL_BOUND, CITY_WALL_BOUND]] as const) {
     const tower = new THREE.Mesh(towerGeo, stone)
     tower.position.set(x, 3.5, z)
     tower.castShadow = true
@@ -88,7 +95,7 @@ export function buildWorld3D(world: World): World3D {
   sun.position.set(34, 48, 18)
   sun.castShadow = true
   sun.shadow.mapSize.set(1024, 1024)
-  Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 1, far: 130 })
+  Object.assign(sun.shadow.camera, { left: -72, right: 72, top: 72, bottom: -72, near: 1, far: 150 })
   group.add(ambient, sun)
 
   return {

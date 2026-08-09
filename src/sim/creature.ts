@@ -71,6 +71,7 @@ export interface CreatureCtx {
   resolveCollision: (pos: Vec2, radius: number) => Vec2
   discoverPlaces: (pos: Vec2) => CityPlace[]
   findPlace: (id: CityPlaceId) => CityPlace | null
+  navigatePlace?: (id: CityPlaceId, pos: Vec2) => Vec2 | null
   usePlace: (id: CityPlaceId, preferred: CityResource | null) => ItemDef | null
 }
 
@@ -380,20 +381,20 @@ export class Creature {
 
   private execute(ctx: CreatureCtx): void {
     this.actionTimer++
-    const speed = 0.5 + this.traits.energy * 0.6
+    const speed = 0.16 + this.traits.energy * 0.12
     switch (this.action) {
       case 'flee': {
         // panic: run fast, turning hard
-        this.facing += (ctx.rng() - 0.5) * 1.6
-        this.move(speed * 1.8, ctx)
+        this.facing += (ctx.rng() - 0.5) * 0.55
+        this.move(speed * 1.25, ctx)
         break
       }
       case 'wander': {
         if (this.actionTimer > 60 || this.actionTimer === 1) {
-          this.facing += (ctx.rng() - 0.5) * 2.4
+          this.facing += (ctx.rng() - 0.5) * 1.1
           this.actionTimer = 0
         }
-        this.move(speed * 0.7, ctx)
+        this.move(speed * 0.6, ctx)
         break
       }
       case 'toFood': {
@@ -457,7 +458,8 @@ export class Creature {
           this.urban.currentGoal = null
           break
         }
-        this.turnToward(place.pos)
+        const navigationTarget = ctx.navigatePlace?.(place.id, this.pos) ?? place.pos
+        this.turnToward(navigationTarget)
         if (this.dist(place.pos) <= 1.8) this.action = 'usePlace'
         else this.move(speed, ctx)
         break
@@ -518,18 +520,25 @@ export class Creature {
   }
 
   private move(dist: number, ctx: CreatureCtx): void {
-    const noise = (ctx.rng() - 0.5) * 0.3
+    const noise = (ctx.rng() - 0.5) * 0.08
     this.facing += noise
-    this.pos.x += Math.cos(this.facing) * dist
-    this.pos.z += Math.sin(this.facing) * dist
-    // collision: push out of rocks/trees/structures
-    const resolved = ctx.resolveCollision(this.pos, 0.35)
+    const before = { ...this.pos }
+    const proposed = {
+      x: this.pos.x + Math.cos(this.facing) * dist,
+      z: this.pos.z + Math.sin(this.facing) * dist,
+    }
+    const resolved = ctx.resolveCollision(proposed, 0.5)
     this.pos.x = resolved.x
     this.pos.z = resolved.z
+    if (Math.hypot(resolved.x - before.x, resolved.z - before.z) < dist * 0.3) {
+      this.facing += (ctx.rng() < 0.5 ? -1 : 1) * 0.7
+    }
   }
 
   private turnToward(target: Vec2): void {
-    this.facing = Math.atan2(target.z - this.pos.z, target.x - this.pos.x)
+    const desired = Math.atan2(target.z - this.pos.z, target.x - this.pos.x)
+    const delta = Math.atan2(Math.sin(desired - this.facing), Math.cos(desired - this.facing))
+    this.facing += Math.max(-0.42, Math.min(0.42, delta))
   }
 
   private dist(target: Vec2): number {

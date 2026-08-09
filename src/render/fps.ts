@@ -26,8 +26,8 @@ export class FPSControls {
   private locked = false
   private world: World
   private groundHeight: (x: number, z: number) => number
-  private radius = 0.8
-  private eyeHeight = 1.5
+  private radius = 0.45
+  private eyeHeight = 1.72
   private gravity = -28
   private grounded = true
   private jumpVel = 0
@@ -187,6 +187,10 @@ export class FPSControls {
 
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target instanceof Element ? e.target : null
+    const active = document.activeElement instanceof Element ? document.activeElement : null
+    const isEditing = (element: Element | null): boolean => !!element?.closest('input, textarea, select, button, [contenteditable="true"]')
+    if (isEditing(target) || isEditing(active) || document.querySelector('.overlay')) return
     if (e.code.startsWith('Arrow')) e.preventDefault()
     this.keys.add(e.code)
   }
@@ -254,12 +258,17 @@ export class FPSControls {
     this.jumpVel += this.gravity * dt
     if (this.jumpVel < -12) this.jumpVel = -12
 
-    // horizontal move with collision (terrain bounds + static colliders)
-    const nx = this.position.x + move.x
-    const nz = this.position.z + move.z
-    if (nx > this.worldMin + this.radius && nx < this.worldMax - this.radius) this.position.x = nx
-    if (nz > this.worldMin + this.radius && nz < this.worldMax - this.radius) this.position.z = nz
-    const resolved = this.world.resolveCollision({ x: this.position.x, z: this.position.z }, this.radius)
+    // horizontal move: swept axis separation produces Minecraft-like wall sliding
+    // and cannot pop the camera through thin doorway/wall geometry.
+    const boundedMove = {
+      x: this.position.x + move.x > this.worldMin + this.radius && this.position.x + move.x < this.worldMax - this.radius ? move.x : 0,
+      z: this.position.z + move.z > this.worldMin + this.radius && this.position.z + move.z < this.worldMax - this.radius ? move.z : 0,
+    }
+    const resolved = this.world.moveWithCollisions(
+      { x: this.position.x, z: this.position.z },
+      boundedMove,
+      this.radius,
+    )
     this.position.x = resolved.x
     this.position.z = resolved.z
 

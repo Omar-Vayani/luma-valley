@@ -2,11 +2,13 @@ import * as THREE from 'three'
 import type { Game } from '../sim/game'
 import type { Creature } from '../sim/creature'
 import type { CityPlaceId } from '../sim/city'
+import { CITY_WALL_BOUND } from '../sim/city-layout'
 import { buildWorld3D, terrainY, type World3D } from './world3d'
 import { buildCreature3D, buildNameLabel, type Creature3D } from './creature3d'
 import { buildCityStructures, cityPlaceById } from './structures'
 import { FPSControls } from './fps'
 import type { SoundEngine } from '../audio/sfx'
+import { pickFocusTarget, type FocusCandidate, type FocusTarget } from './focus'
 
 export type InteractKind = 'creature' | 'berry' | 'wood' | 'shrine' | 'den' | 'pickup' | 'place'
 
@@ -54,6 +56,7 @@ export class GameView {
   private game: Game
   private sound: SoundEngine | null
   private showNames = true
+  private paused = false
   private placeTargets: THREE.Object3D[] = []
   private static TICK_RATE = 6
 
@@ -110,31 +113,25 @@ export class GameView {
     const city = buildCityStructures()
     this.scene.add(city.group)
     this.placeTargets = city.interactionMeshes
-    // Footprints stay conservative and offset behind front doors, leaving the road network open.
-    for (const [x, z, radius] of [
-      [-18, 15, 3.2], [-18, -12, 3.3], [19, -11, 2.8],
-      [14, 15, 1.8], [18, 15, 1.8], [22, 15, 1.8], [4, 20, 2.1], [-33, 1, 2.5],
-    ] as const) this.game.world.addCollider(x, z, radius)
-    // Closely spaced circular colliders make solid walls while keeping the four gates open.
-    for (let offset = -40; offset <= 40; offset += 4) {
-      if (Math.abs(offset) < 7) continue
-      this.game.world.addCollider(offset, -43, 2.1)
-      this.game.world.addCollider(offset, 43, 2.1)
-      this.game.world.addCollider(-43, offset, 2.1)
-      this.game.world.addCollider(43, offset, 2.1)
-    }
+    // Render geometry and collision now share the same wall footprints.
+    this.game.world.clearColliders()
+    for (const wall of city.colliders) this.game.world.addBoxCollider(wall.x, wall.z, wall.hx, wall.hz)
+    this.game.world.addBoxCollider(0, -CITY_WALL_BOUND, CITY_WALL_BOUND, 1)
+    this.game.world.addBoxCollider(0, CITY_WALL_BOUND, CITY_WALL_BOUND, 1)
+    this.game.world.addBoxCollider(-CITY_WALL_BOUND, 0, 1, CITY_WALL_BOUND)
+    this.game.world.addBoxCollider(CITY_WALL_BOUND, 0, 1, CITY_WALL_BOUND)
   }
 
   private addCreature(creature: Creature): void {
     const holder = new THREE.Group()
     holder.position.set(creature.pos.x, this.groundY(creature.pos.x, creature.pos.z), creature.pos.z)
     const rig = buildCreature3D(creature)
-    rig.group.scale.setScalar(1.2)
-    rig.group.position.y = .95
+    rig.group.scale.setScalar(1)
+    rig.group.position.y = creature.traits.size * 1.35
     holder.add(rig.group)
     holder.userData.model = rig.group
     const label = buildNameLabel(creature.name)
-    label.position.y = 3.05
+    label.position.y = 3.25
     holder.add(label)
     const ring = new THREE.Mesh(new THREE.RingGeometry(.8, 1.02, 28), new THREE.MeshBasicMaterial({ color: 0xffc45e, transparent: true, opacity: .95, side: THREE.DoubleSide, depthWrite: false }))
     ring.rotation.x = -Math.PI / 2
@@ -160,8 +157,9 @@ export class GameView {
 
   private onInteractKey = (event: KeyboardEvent): void => {
     const target = event.target instanceof Element ? event.target : null
-    if (document.querySelector('.overlay')) return
-    if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return
+    const active = document.activeElement instanceof Element ? document.activeElement : null
+    const isEditing = (element: Element | null): boolean => !!element?.closest('input, textarea, select, button, [contenteditable="true"]')
+    if (document.querySelector('.overlay') || isEditing(target) || isEditing(active)) return
     if (event.code === 'KeyF' && !event.repeat) this.interact()
   }
 
@@ -177,35 +175,64 @@ export class GameView {
     return hit && hit.distance <= 10 ? hit : null
   }
 
-  interactionHint(): string | null {
-    const hit = this.aimedHit()
-    if (!hit) return null
-    const place = cityPlaceById(String(hit.object.userData.placeId ?? ''))
-    if (place) return `Explore ${place.name} — ${place.purpose}`
-    for (const [id, view] of this.creatureViews) {
-      if (view.rig.group.getObjectById(hit.object.id)) return `Meet ${this.game.selectedCreature(id)?.name ?? 'citizen'}`
+  currentFocus(): FocusTarget | null {
+    const candidates: FocusCandidate[] = []
+    for (const creature of this.game.creatures) {
+      if (!creature.alive) continue
+      const view = this.creatureViews.get(creature.id)
+      if (view) candidates.push({ kind: 'creature', id: creature.id, name: creature.name, x: view.group.position.x, z: view.group.position.z })
     }
-    return null
+    const places = new Map<CityPlaceId, FocusCandidate>()
+    for (const object of this.placeTargets) {
+      const placeId = object.userData.placeId as CityPlaceId | undefined
+      const place = placeId ? cityPlaceById(placeId) : undefined
+      if (placeId && place && !places.has(placeId)) places.set(placeId, { kind: 'place', id: placeId, name: place.name, x: object.position.x, z: object.position.z })
+    }
+    candidates.push(...places.values())
+
+    let aimed: FocusCandidate | null = null
+    const hit = this.aimedHit()
+    if (hit) {
+      const placeId = hit.object.userData.placeId as CityPlaceId | undefined
+      if (placeId) aimed = places.get(placeId) ?? null
+      if (!aimed) {
+        for (const candidate of candidates) {
+          if (candidate.kind !== 'creature') continue
+          const view = this.creatureViews.get(candidate.id as number)
+          if (view?.rig.group.getObjectById(hit.object.id)) { aimed = candidate; break }
+        }
+      }
+    }
+    const forward = new THREE.Vector3()
+    this.camera.getWorldDirection(forward)
+    return pickFocusTarget(this.fps.position, forward, candidates, aimed)
+  }
+
+  interactionHint(): string | null {
+    const focus = this.currentFocus()
+    if (!focus) return null
+    if (focus.kind === 'place') {
+      const place = cityPlaceById(String(focus.id))
+      return place ? `Visit ${place.name} — ${place.purpose}` : `Visit ${focus.name}`
+    }
+    const creature = this.game.selectedCreature(focus.id as number)
+    return `Meet ${creature?.name ?? focus.name} · ${creature?.action ?? 'nearby'}`
   }
 
   interact(): InteractEvent | null {
-    const hit = this.aimedHit()
-    if (!hit) { this.select(null); return null }
-    const placeId = hit.object.userData.placeId as CityPlaceId | undefined
-    if (placeId) {
+    const focus = this.currentFocus()
+    if (!focus) return null
+    if (focus.kind === 'place') {
+      const placeId = focus.id as CityPlaceId
       const event: InteractEvent = { kind: 'place', placeId }
       this.callbacks.onInteract(event)
       return event
     }
-    for (const [id, view] of this.creatureViews) {
-      if (view.rig.group.getObjectById(hit.object.id)) {
-        this.select(id)
-        const event: InteractEvent = { kind: 'creature', creatureId: id }
-        this.callbacks.onInteract(event)
-        return event
-      }
-    }
-    return null
+    const id = focus.id as number
+    this.select(id)
+    const event: InteractEvent = { kind: 'creature', creatureId: id }
+    this.callbacks.onInteract(event)
+    return event
   }
 
   select(id: number | null): void {
@@ -237,6 +264,11 @@ export class GameView {
     this.renderer.setSize(width, height)
   }
 
+  setPaused(paused: boolean): void {
+    this.paused = paused
+    if (paused) this.simAccum = 0
+  }
+
   teleport(x: number, z: number): void {
     this.fps.position.set(x, this.groundY(x, z), z)
     this.fps.update(0)
@@ -247,10 +279,10 @@ export class GameView {
     const now = performance.now()
     const dt = Math.min((now - this.lastTime) / 1000, .1)
     this.lastTime = now
-    this.simAccum += dt
+    if (!this.paused) this.simAccum += dt
     const step = 1 / GameView.TICK_RATE
     let guard = 0
-    while (this.simAccum >= step && guard++ < 5) { this.game.tick(); this.simAccum -= step }
+    while (!this.paused && this.simAccum >= step && guard++ < 5) { this.game.tick(); this.simAccum -= step }
     this.world3d.update(this.game.world.state.dayTime)
     this.torchLight.intensity = this.game.player.torchLit ? 1.6 : 0
 
@@ -259,11 +291,14 @@ export class GameView {
       const creature = this.game.selectedCreature(id)
       if (!creature) continue
       const y = this.groundY(creature.pos.x, creature.pos.z)
-      view.group.position.set(creature.pos.x, y, creature.pos.z)
-      if (view.shadow) view.shadow.position.set(creature.pos.x, y + .015, creature.pos.z)
+      const smoothing = 1 - Math.exp(-dt * 9)
+      view.group.position.x = THREE.MathUtils.lerp(view.group.position.x, creature.pos.x, smoothing)
+      view.group.position.y = y
+      view.group.position.z = THREE.MathUtils.lerp(view.group.position.z, creature.pos.z, smoothing)
+      if (view.shadow) view.shadow.position.set(view.group.position.x, y + .015, view.group.position.z)
       view.rig.update(dt, now / 1000)
       if (WALK_ACTIONS.has(creature.action)) view.ring.rotation.z += dt
-      view.label.position.y = 3.05 + (creature.sleeping ? .2 : 0)
+      view.label.position.y = 3.25 + (creature.sleeping ? .2 : 0)
       view.label.visible = this.showNames && creature.alive
     }
     this.syncBeasts()

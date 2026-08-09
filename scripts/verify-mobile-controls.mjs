@@ -150,8 +150,10 @@ try {
       return originalInteract(...args)
     }
   })
+  await page.getByRole('button', { name: /Mind, memories & teaching/ }).click()
   const teachInput = page.getByPlaceholder('teach a word…')
   await teachInput.focus()
+  assert(await teachInput.evaluate((input) => document.activeElement === input), 'teach input could not receive focus')
   await teachInput.press('f')
   const interactCallsWhileTyping = await page.evaluate(() => window.__interactCalls)
   assert(interactCallsWhileTyping === 0, 'F interacted with the world while typing')

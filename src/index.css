@@ -554,3 +554,53 @@ button, .btn, input, label.btn { min-height: 44px; }
   .quickbar { max-width: calc(100vw - 220px); overflow-x: auto; left: 50%; }
   .panel .emotion-row { max-width: 100%; }
 }
+
+/* ── Proximity focus + compact creature action palette ── */
+.crosshair.has-focus {
+  width: 32px;
+  height: 32px;
+  border: 2px solid #f1cb76;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgb(241 203 118 / .18), 0 0 18px rgb(241 203 118 / .55);
+  animation: focus-breathe 1.4s ease-in-out infinite;
+}
+.crosshair.has-focus::before { left: 14px; top: 6px; height: 16px; }
+.crosshair.has-focus::after { left: 6px; top: 14px; width: 16px; }
+.crosshair.focus-creature { border-color: #9ccc82; box-shadow: 0 0 0 5px rgb(156 204 130 / .18), 0 0 18px rgb(156 204 130 / .5); }
+@keyframes focus-breathe { 50% { transform: translate(-50%, -50%) scale(1.1); } }
+.focus-chip { max-width: min(680px, calc(100vw - 190px)); font-weight: 700; border: 1px solid rgb(226 196 130 / .55); }
+.action-palette {
+  left: 50%;
+  right: auto;
+  bottom: 14px;
+  width: min(560px, calc(100vw - 300px));
+  transform: translateX(-50%);
+  max-height: 58vh;
+}
+.drive-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.drive-chip { padding: 5px 8px; border-radius: 7px; background: #d8ccb2; color: #534b3b; font-size: .7rem; font-weight: 750; text-transform: capitalize; }
+.details-toggle { width: 100%; border: 0; background: transparent; color: #655b45; padding: 6px; font-weight: 750; text-decoration: underline; text-underline-offset: 3px; }
+.panel-compact .needs-label,
+.panel-compact > .bar,
+.panel-compact .city-mind,
+.panel-compact .trust,
+.panel-compact .traumas,
+.panel-compact .teach,
+.panel-compact .give,
+.panel-compact .psyche-actions { display: none; }
+.panel-compact { max-height: 230px; overflow: hidden; }
+
+@media (max-width: 600px) {
+  .action-palette { left: 8px; right: 8px; bottom: 100px; width: auto; transform: none; max-height: 38vh; }
+  .panel-compact { max-height: 205px; }
+  .focus-chip { top: auto; bottom: 184px; max-width: calc(100vw - 150px); white-space: normal; text-align: center; }
+  .action-palette .actions { margin: 7px 0 0; gap: 5px; }
+  .action-palette .actions .btn { min-height: 48px; padding: 8px 9px; font-size: .72rem; }
+}
+
+@media (max-height: 450px) {
+  .action-palette { left: 175px; right: 170px; bottom: 8px; width: auto; max-height: 48vh; transform: none; }
+  .focus-chip { bottom: 74px; max-width: 52vw; }
+  .panel-compact { max-height: 176px; }
+  .drive-chips { display: none; }
+}

@@ -17,6 +17,15 @@ export interface Plant {
   regrow: number
 }
 
+export interface StaticCollider {
+  x: number
+  z: number
+  r: number
+  shape?: 'circle' | 'box'
+  hx?: number
+  hz?: number
+}
+
 export interface WorldState {
   seed: number
   dayTime: number
@@ -25,7 +34,7 @@ export interface WorldState {
   waterPoints: Vec2[]
   den: Vec2
   flatZones: { x: number; z: number; r: number; y: number }[]
-  colliders: { x: number; z: number; r: number }[]
+  colliders: StaticCollider[]
 }
 
 function latticeNoise(x: number, z: number, seed: number): number {
@@ -156,37 +165,87 @@ export class World {
     return null
   }
 
-  // ── collision: static colliders (rocks, trees, structures) ──
-  /** Register a static circular collider (world units). */
-  addCollider(x: number, z: number, r: number): void {
-    this.state.colliders.push({ x, z, r })
+  // ── collision: shared circles and axis-aligned building walls ──
+  /** Reset renderer-derived city collisions before rebuilding the scene. */
+  clearColliders(): void {
+    this.state.colliders = []
   }
 
-  /** Push a circle of radius `radius` out of any overlapping collider. */
-  resolveCollision(pos: Vec2, radius: number): Vec2 {
-    const out = { ...pos }
-    for (const c of this.state.colliders) {
-      const dx = out.x - c.x
-      const dz = out.z - c.z
+  /** Register a circular obstacle. */
+  addCollider(x: number, z: number, r: number): void {
+    this.state.colliders.push({ x, z, r, shape: 'circle' })
+  }
+
+  /** Register an axis-aligned solid wall using half extents. */
+  addBoxCollider(x: number, z: number, hx: number, hz: number): void {
+    this.state.colliders.push({ x, z, r: 0, shape: 'box', hx, hz })
+  }
+
+  private resolveOne(pos: Vec2, radius: number, c: StaticCollider): Vec2 {
+    if (c.shape !== 'box') {
+      const dx = pos.x - c.x
+      const dz = pos.z - c.z
       const d = Math.hypot(dx, dz)
       const min = c.r + radius
-      if (d < min && d > 0.0001) {
-        const push = min - d
-        out.x += (dx / d) * push
-        out.z += (dz / d) * push
-      } else if (d <= 0.0001) {
-        out.x = c.x + min
-      }
+      if (d >= min) return pos
+      if (d <= 0.0001) return { x: c.x + min, z: pos.z }
+      const push = min - d
+      return { x: pos.x + (dx / d) * push, z: pos.z + (dz / d) * push }
+    }
+
+    const hx = c.hx ?? 0
+    const hz = c.hz ?? 0
+    const minX = c.x - hx
+    const maxX = c.x + hx
+    const minZ = c.z - hz
+    const maxZ = c.z + hz
+    const qx = Math.max(minX, Math.min(maxX, pos.x))
+    const qz = Math.max(minZ, Math.min(maxZ, pos.z))
+    const dx = pos.x - qx
+    const dz = pos.z - qz
+    const d = Math.hypot(dx, dz)
+    if (d >= radius) return pos
+    if (d > 0.0001) {
+      const push = radius - d
+      return { x: pos.x + (dx / d) * push, z: pos.z + (dz / d) * push }
+    }
+
+    // Centre is inside the wall: leave through its nearest face.
+    const exits = [
+      { gap: Math.abs(pos.x - minX), pos: { x: minX - radius, z: pos.z } },
+      { gap: Math.abs(maxX - pos.x), pos: { x: maxX + radius, z: pos.z } },
+      { gap: Math.abs(pos.z - minZ), pos: { x: pos.x, z: minZ - radius } },
+      { gap: Math.abs(maxZ - pos.z), pos: { x: pos.x, z: maxZ + radius } },
+    ]
+    exits.sort((a, b) => a.gap - b.gap)
+    return exits[0].pos
+  }
+
+  /** Push a circle out of all overlapping obstacles. */
+  resolveCollision(pos: Vec2, radius: number): Vec2 {
+    let out = { ...pos }
+    // Two passes settle corners made from adjoining wall boxes without jitter.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const collider of this.state.colliders) out = this.resolveOne(out, radius, collider)
     }
     return out
   }
 
-  /** True if the circle at pos overlaps a collider (for spawning checks). */
-  collides(pos: Vec2, radius: number): boolean {
-    for (const c of this.state.colliders) {
-      if (Math.hypot(pos.x - c.x, pos.z - c.z) < c.r + radius) return true
+  /** Move with small swept, axis-separated steps so walls slide and never tunnel. */
+  moveWithCollisions(from: Vec2, delta: Vec2, radius: number): Vec2 {
+    let out = { ...from }
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(delta.x), Math.abs(delta.z)) / Math.max(0.15, radius * 0.7)))
+    for (let step = 0; step < steps; step++) {
+      out = this.resolveCollision({ x: out.x + delta.x / steps, z: out.z }, radius)
+      out = this.resolveCollision({ x: out.x, z: out.z + delta.z / steps }, radius)
     }
-    return false
+    return out
+  }
+
+  /** True if the circle at pos overlaps an obstacle. */
+  collides(pos: Vec2, radius: number): boolean {
+    const resolved = this.resolveCollision(pos, radius)
+    return Math.hypot(resolved.x - pos.x, resolved.z - pos.z) > 0.0001
   }
 
   toJSON(): WorldState {

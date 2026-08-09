@@ -127,7 +127,7 @@ describe('world', () => {
 
   it('makes the back alley more dangerous than the market by day', () => {
     const w = new World(43)
-    expect(w.dangerAt({ x: -31, z: -2 }, 0.5)).toBeGreaterThan(w.dangerAt({ x: -18, z: 12 }, 0.5))
+    expect(w.dangerAt({ x: -50, z: -4 }, 0.5)).toBeGreaterThan(w.dangerAt({ x: -28, z: 18 }, 0.5))
   })
 })
 

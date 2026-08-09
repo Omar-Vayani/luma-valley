@@ -14,13 +14,13 @@ export interface CityPlace {
 }
 
 export const CITY_PLACES: CityPlace[] = [
-  { id: 'market', name: 'Old Market', purpose: 'Food and trade', pos: { x: -18, z: 12 }, radius: 7, provides: ['bread', 'company'], danger: 0.05 },
-  { id: 'tavern', name: 'The Crooked Tankard', purpose: 'Ale, smoke and company', pos: { x: -18, z: -14 }, radius: 7, provides: ['ale', 'cigarettes', 'company'], danger: 0.28 },
-  { id: 'park', name: 'Ashen Park', purpose: 'Water, calm and conversation', pos: { x: 0, z: -17 }, radius: 8, provides: ['water', 'rest', 'company'], danger: 0.02 },
-  { id: 'apothecary', name: 'Saint Orra Apothecary', purpose: 'Medicine and recovery', pos: { x: 18, z: -13 }, radius: 6, provides: ['medicine', 'rest'], danger: 0.04 },
-  { id: 'homes', name: 'Lantern Row', purpose: 'Sleep and shelter', pos: { x: 18, z: 13 }, radius: 9, provides: ['rest', 'safety'], danger: 0.01 },
-  { id: 'watch', name: 'Old Watch Yard', purpose: 'Safety and order', pos: { x: 0, z: 18 }, radius: 7, provides: ['safety', 'company'], danger: 0.03 },
-  { id: 'back-alley', name: 'Moth Alley', purpose: 'Illegal dream-dust', pos: { x: -31, z: -2 }, radius: 5, provides: ['dream-dust'], danger: 0.72 },
+  { id: 'market', name: 'Old Market', purpose: 'Food, tools and trade', pos: { x: -28, z: 18 }, radius: 10, provides: ['bread', 'company'], danger: 0.05 },
+  { id: 'tavern', name: 'The Crooked Tankard', purpose: 'Ale, smoke and company', pos: { x: -32, z: -28 }, radius: 9, provides: ['ale', 'cigarettes', 'company'], danger: 0.28 },
+  { id: 'park', name: 'Ashen Park', purpose: 'Water, calm and conversation', pos: { x: 0, z: -28 }, radius: 11, provides: ['water', 'rest', 'company'], danger: 0.02 },
+  { id: 'apothecary', name: 'Saint Orra Apothecary', purpose: 'Medicine and recovery', pos: { x: 32, z: -28 }, radius: 9, provides: ['medicine', 'rest'], danger: 0.04 },
+  { id: 'homes', name: 'Lantern Row', purpose: 'Sleep and shelter', pos: { x: 32, z: 26 }, radius: 11, provides: ['rest', 'safety'], danger: 0.01 },
+  { id: 'watch', name: 'Old Watch Yard', purpose: 'Safety and order', pos: { x: 0, z: 34 }, radius: 9, provides: ['safety', 'company'], danger: 0.03 },
+  { id: 'back-alley', name: 'Moth Alley', purpose: 'Illegal dream-dust', pos: { x: -50, z: -4 }, radius: 7, provides: ['dream-dust'], danger: 0.72 },
 ]
 
 export interface PlaceKnowledge {

@@ -11,6 +11,7 @@ import { createQuestLog, questEvent, type QuestEvent, type QuestLogState } from 
 import { contagion, remember, updateAffinity } from './mind'
 import { affinityFor } from './mind'
 import { CITY_PLACES, resolveSocialEncounter, type CityPlaceId } from './city'
+import { CITY_BUILDINGS, FILLER_BUILDINGS, CITY_WALL_BOUND, CITY_WORLD_SIZE, avoidCityObstacles, buildingForPlace, buildingNavigationPoint, wallBoxes } from './city-layout'
 import type { ItemId } from './items'
 
 /**
@@ -45,8 +46,9 @@ export class Game {
   private beastNextId = 1
   private placeVisitAt: Partial<Record<CityPlaceId, number>> = {}
 
-  constructor(seed: number, size = 60, settings?: GameSettings) {
+  constructor(seed: number, size = CITY_WORLD_SIZE, settings?: GameSettings) {
     this.world = new World(seed, size)
+    this.installCityCollision()
 
     this.rng = mulberry32(seed)
     if (settings) this.settings = settings
@@ -54,16 +56,27 @@ export class Game {
     this.quests = createQuestLog()
   }
 
+  private installCityCollision(): void {
+    this.world.clearColliders()
+    for (const building of [...CITY_BUILDINGS, ...FILLER_BUILDINGS]) {
+      for (const wall of wallBoxes(building)) this.world.addBoxCollider(wall.x, wall.z, wall.hx, wall.hz)
+    }
+    this.world.addBoxCollider(0, -CITY_WALL_BOUND, CITY_WALL_BOUND, 1)
+    this.world.addBoxCollider(0, CITY_WALL_BOUND, CITY_WALL_BOUND, 1)
+    this.world.addBoxCollider(-CITY_WALL_BOUND, 0, 1, CITY_WALL_BOUND)
+    this.world.addBoxCollider(CITY_WALL_BOUND, 0, 1, CITY_WALL_BOUND)
+  }
+
   spawnInitial(count = 5): void {
-    this.player.pos = { x: 0, z: -11 }
+    this.player.pos = { x: 0, z: -14 }
     for (let i = 0; i < count; i++) {
       const c = new Creature(null, this.rng, this.nextId++, 0)
-      const arrival = CITY_PLACES[0]
-      const streetX = (i - (count - 1) / 2) * 2.6
+      const streetX = (i - (count - 1) / 2) * 2.8
       c.pos = this.world.resolveCollision(
-        { x: arrival.pos.x + streetX + range(this.rng, -0.35, 0.35), z: arrival.pos.z - 4.5 + range(this.rng, -0.25, 0.25) },
-        0.35,
+        { x: streetX + range(this.rng, -0.25, 0.25), z: -20 - (i % 2) * 1.4 + range(this.rng, -0.2, 0.2) },
+        0.5,
       )
+      c.facing = Math.PI / 2
       this.creatures.push(c)
       c.log('arrives in the old city')
     }
@@ -101,6 +114,13 @@ export class Game {
       resolveCollision: (p, r) => this.world.resolveCollision(p, r),
       discoverPlaces: (p) => CITY_PLACES.filter((place) => Math.hypot(place.pos.x - p.x, place.pos.z - p.z) <= place.radius + 3),
       findPlace: (id) => CITY_PLACES.find((place) => place.id === id) ?? null,
+      navigatePlace: (id, pos) => {
+        const place = CITY_PLACES.find((candidate) => candidate.id === id)
+        if (!place) return null
+        const building = buildingForPlace(id)
+        const destination = building ? buildingNavigationPoint(building, pos) : place.pos
+        return avoidCityObstacles(pos, destination, building?.id)
+      },
       usePlace: (_id, preferred) => preferred && preferred in ITEMS ? ITEMS[preferred as ItemId] : null,
       eatAt: (p) => {
         const fx = this.world.eatAt(p)
@@ -191,6 +211,7 @@ export class Game {
       }
       c.tick(this.ctxFor(c, bondFear.get(c.id) ?? 0))
     }
+    this.restorePersonalSpace()
     this.tickShadows(night)
     this.maybeBreed()
     if (this.breedCooldown > 0) this.breedCooldown--
@@ -201,15 +222,52 @@ export class Game {
     else if (!torchSafe) this.player.sanity = clamp(this.player.sanity - 0.0006, 0, 1)
   }
 
+  private restorePersonalSpace(): void {
+    const minimum = 1.8
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < this.creatures.length; i++) {
+        const a = this.creatures[i]
+        if (!a.alive || this.carriedId === a.id) continue
+        for (let j = i + 1; j < this.creatures.length; j++) {
+          const b = this.creatures[j]
+          if (!b.alive || this.carriedId === b.id) continue
+          let dx = b.pos.x - a.pos.x
+          let dz = b.pos.z - a.pos.z
+          let distance = Math.hypot(dx, dz)
+          if (distance >= minimum) continue
+          if (distance < 0.0001) {
+            const angle = ((a.id * 37 + b.id * 71) % 360) * Math.PI / 180
+            dx = Math.cos(angle)
+            dz = Math.sin(angle)
+            distance = 1
+          }
+          const push = (minimum - distance) / 2
+          const nx = dx / distance
+          const nz = dz / distance
+          a.pos = this.world.resolveCollision({ x: a.pos.x - nx * push, z: a.pos.z - nz * push }, 0.5)
+          b.pos = this.world.resolveCollision({ x: b.pos.x + nx * push, z: b.pos.z + nz * push }, 0.5)
+        }
+      }
+    }
+  }
+
   private tickShadows(night: boolean): void {
+    if (this.settings.gentle) {
+      this.shadowSpawnTimer = 0
+      this.shadowBeasts = []
+      return
+    }
     if (night) {
       this.shadowSpawnTimer++
       if (this.shadowSpawnTimer > 200 && this.shadowBeasts.length < 3) {
         this.shadowSpawnTimer = 0
-        const s = this.world.state.size
+        const alive = this.creatures.filter((creature) => creature.alive)
+        const anchor = alive[Math.floor(this.rng() * alive.length)]?.pos ?? { x: 0, z: 0 }
         const ang = this.rng() * Math.PI * 2
-        const dist = s - 2
-        this.shadowBeasts.push(new ShadowBeast(this.beastNextId++, { x: Math.cos(ang) * dist, z: Math.sin(ang) * dist }))
+        const dist = 24
+        const x = Math.max(-CITY_WALL_BOUND + 3, Math.min(CITY_WALL_BOUND - 3, anchor.x + Math.cos(ang) * dist))
+        const z = Math.max(-CITY_WALL_BOUND + 3, Math.min(CITY_WALL_BOUND - 3, anchor.z + Math.sin(ang) * dist))
+        this.shadowBeasts.push(new ShadowBeast(this.beastNextId++, { x, z }))
       }
     } else {
       this.shadowSpawnTimer = 0
@@ -366,6 +424,18 @@ export class Game {
     return true
   }
 
+  /** Greet without demanding obedience — a low-pressure social interaction. */
+  greet(creatureId: number): { ok: boolean; msg: string } {
+    const c = this.creatures.find((candidate) => candidate.id === creatureId && candidate.alive)
+    if (!c) return { ok: false, msg: 'No one answers.' }
+    c.chem.pleasure = clamp(c.chem.pleasure + .12, 0, 1)
+    c.chem.loneliness = clamp(c.chem.loneliness - .18, 0, 1)
+    c.psyche.trust = clamp(c.psyche.trust + .025, 0, 1)
+    c.log('exchanges a friendly greeting with you')
+    this.emit('meetCitizen', 1)
+    return { ok: true, msg: `${c.name} ${c.chem.fear > .55 ? 'answers cautiously' : 'greets you warmly'}.` }
+  }
+
   /** Tickle — pleasure + positive reinforcement. */
   tickle(creatureId: number): boolean {
     const c = this.creatures.find((x) => x.id === creatureId && x.alive)
@@ -463,10 +533,13 @@ export class Game {
 
   load(data: SaveData): void {
     const legacyValley = data.creatures.some((creature) => !creature.urban)
+    const compactCity = data.world.size < CITY_WORLD_SIZE
     this.settings = data.settings
     this.nextId = data.nextId
     this.time = data.time
     applySave(data, this.world, this.creatures)
+    this.world.state.size = Math.max(this.world.state.size, CITY_WORLD_SIZE)
+    this.installCityCollision()
     this.carriedId = (data as any).extra?.carriedId ?? null
     if (data.player) {
       this.player = {
@@ -486,16 +559,23 @@ export class Game {
         unlocked: [...data.quests.unlocked],
       }
     }
-    if (legacyValley) {
-      this.player.pos = { x: 0, z: -11 }
+    if (legacyValley || compactCity) {
+      this.player.pos = { x: 0, z: -14 }
       this.player.facingYaw = 0
       this.player.inventory.items.bread = Math.max(this.player.inventory.items.bread ?? 0, 2)
       this.player.inventory.items.medicine = Math.max(this.player.inventory.items.medicine ?? 0, 1)
       const alive = this.creatures.filter((creature) => creature.alive)
       alive.forEach((creature, index) => {
-        creature.pos = { x: (index - (alive.length - 1) / 2) * 2.6, z: -4.5 }
+        creature.pos = { x: (index - (alive.length - 1) / 2) * 2.8, z: -20 - (index % 2) * 1.4 }
+        creature.facing = Math.PI / 2
       })
-      this.quests = createQuestLog()
+      if (legacyValley) this.quests = createQuestLog()
+    }
+    for (const creature of this.creatures) {
+      for (const place of CITY_PLACES) {
+        const knowledge = creature.urban.knownPlaces[place.id]
+        if (knowledge) knowledge.pos = { ...place.pos }
+      }
     }
     if (data.shadowBeasts) {
       this.shadowBeasts = data.shadowBeasts.map((s) => new ShadowBeast(s.id, s.pos))

@@ -30,6 +30,31 @@ describe('game', () => {
     expect(g.creatures[0].learnedWords['berry']).toBeTruthy()
   })
 
+  it('offers a low-pressure greeting that improves connection', () => {
+    const g = new Game(33)
+    g.spawnInitial(1)
+    const citizen = g.creatures[0]
+    citizen.chem.loneliness = .8
+    const trust = citizen.psyche.trust
+    const result = g.greet(citizen.id)
+    expect(result.ok).toBe(true)
+    expect(citizen.chem.loneliness).toBeLessThan(.8)
+    expect(citizen.psyche.trust).toBeGreaterThan(trust)
+  })
+
+  it('spawns night threats inside the city and within hunting range', () => {
+    const g = new Game(77)
+    g.spawnInitial(5)
+    g.world.state.dayTime = .8
+    for (let i = 0; i < 205; i++) g.tick()
+    expect(g.shadowBeasts.length).toBeGreaterThan(0)
+    const beast = g.shadowBeasts[0]
+    expect(Math.abs(beast.state.pos.x)).toBeLessThan(70)
+    expect(Math.abs(beast.state.pos.z)).toBeLessThan(70)
+    const nearest = Math.min(...g.creatures.filter((creature) => creature.alive).map((creature) => Math.hypot(creature.pos.x - beast.state.pos.x, creature.pos.z - beast.state.pos.z)))
+    expect(nearest).toBeLessThan(40)
+  })
+
   it('save/load preserves world', () => {
     const g = new Game(42)
     g.spawnInitial(4)
@@ -53,9 +78,25 @@ describe('game', () => {
     save.player.pos = { x: 48, z: 48 }
     const city = new Game(0)
     city.load(save)
-    expect(city.player.pos).toEqual({ x: 0, z: -11 })
-    expect(city.creatures.every((creature) => creature.pos.z === -4.5)).toBe(true)
+    expect(city.world.state.size).toBe(96)
+    expect(city.player.pos).toEqual({ x: 0, z: -14 })
+    expect(city.creatures.every((creature) => creature.pos.z <= -20 && creature.pos.z >= -21.4)).toBe(true)
     expect(city.quests.active).toBe('q1_feed')
+  })
+
+  it('preserves quest progress when expanding a compact city save', () => {
+    const compact = new Game(14, 60)
+    compact.spawnInitial(2)
+    compact.quests = {
+      active: 'q2_teach',
+      progress: { q1_feed: 1, q2_teach: 0 },
+      completed: ['q1_feed'],
+      unlocked: ['q1_feed', 'q2_teach'],
+    }
+    const restored = new Game(0)
+    restored.load(compact.save())
+    expect(restored.world.state.size).toBe(96)
+    expect(restored.quests).toEqual(compact.quests)
   })
 
   it('save stays small', () => {

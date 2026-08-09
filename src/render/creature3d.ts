@@ -31,53 +31,58 @@ export function buildCreature3D(creature: Creature): Creature3D {
   const clothColor = new THREE.Color().setHSL((accentHue + .08) % 1, .38, .28)
   const clothMat = new THREE.MeshLambertMaterial({ color: clothColor })
 
-  // Body — rounded blob
-  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(size * 0.9, 1), bodyMat)
-  body.scale.set(1, 0.92, 0.85)
+  // Body and head are vertically stacked so posture reads clearly at mobile scale.
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(size * .38, size * .55, 4, 8), bodyMat)
+  body.position.y = 0
+  body.scale.set(.9, 1.04, .76)
   body.castShadow = true
   g.add(body)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(size * .5, 12, 10), bodyMat)
+  head.position.y = size
+  head.scale.set(.95, .92, .86)
+  head.castShadow = true
+  g.add(head)
 
   // Belly
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(size * 0.52, 12, 9), new THREE.MeshLambertMaterial({ color: '#fff3e0' }))
-  belly.position.set(0, -size * 0.1, size * 0.42)
-  belly.scale.set(1, 1.15, 0.75)
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(size * .28, 12, 9), new THREE.MeshLambertMaterial({ color: '#fff3e0' }))
+  belly.position.set(0, size * .1, size * .31)
+  belly.scale.set(.86, 1.08, .48)
   g.add(belly)
 
   // A high-contrast city silhouette: low tunic, back cloak and hood rim.
-  const tunic = new THREE.Mesh(new THREE.CylinderGeometry(size * .68, size * .82, size * 1.05, 8), clothMat)
-  tunic.position.y = -size * .28
+  const tunic = new THREE.Mesh(new THREE.CylinderGeometry(size * .42, size * .48, size * .7, 8), clothMat)
+  tunic.position.y = -size * .15
   tunic.castShadow = true
   g.add(tunic)
-  const cloak = new THREE.Mesh(new THREE.ConeGeometry(size * .76, size * 1.45, 8, 1, true), clothMat)
-  cloak.position.set(0, -size * .08, -size * .27)
-  cloak.rotation.x = -.12
+  const cloak = new THREE.Mesh(new THREE.BoxGeometry(size * .78, size * .85, size * .1), clothMat)
+  cloak.position.set(0, 0, -size * .34)
   cloak.castShadow = true
   g.add(cloak)
   const hood = new THREE.Mesh(new THREE.TorusGeometry(size * .62, size * .13, 6, 12, Math.PI), clothMat)
-  hood.position.set(0, size * .47, size * .06)
+  hood.position.set(0, size * 1.02, size * .01)
   hood.rotation.set(Math.PI / 2, 0, Math.PI)
   g.add(hood)
 
   // Eyes (big, expressive)
-  const eyeR = size * (0.16 + traits.eyeSize)
+  const eyeR = size * (.16 + traits.eyeSize * .09)
   const eyeGeo = new THREE.SphereGeometry(eyeR, 12, 10)
   const pupilGeo = new THREE.SphereGeometry(eyeR * 0.55, 10, 8)
   const eyeL = new THREE.Mesh(eyeGeo, whiteMat)
   const eyeR2 = new THREE.Mesh(eyeGeo, whiteMat)
   const pupilL = new THREE.Mesh(pupilGeo, pupilMat)
   const pupilR = new THREE.Mesh(pupilGeo, pupilMat)
-  const eyeY = size * 0.42
-  const eyeZ = size * 0.72
-  eyeL.position.set(-size * 0.3, eyeY, eyeZ)
-  eyeR2.position.set(size * 0.3, eyeY, eyeZ)
-  pupilL.position.set(-size * 0.3, eyeY, eyeZ + eyeR * 0.55)
-  pupilR.position.set(size * 0.3, eyeY, eyeZ + eyeR * 0.55)
+  const eyeY = size * 1.08
+  const eyeZ = size * .42
+  eyeL.position.set(-size * .21, eyeY, eyeZ)
+  eyeR2.position.set(size * .21, eyeY, eyeZ)
+  pupilL.position.set(-size * .21, eyeY, eyeZ + eyeR * .55)
+  pupilR.position.set(size * .21, eyeY, eyeZ + eyeR * .55)
   ;[eyeL, eyeR2].forEach((e) => g.add(e))
   ;[pupilL, pupilR].forEach((e) => g.add(e))
 
   // Mouth
   const mouth = new THREE.Mesh(new THREE.SphereGeometry(size * 0.1, 8, 6), darkMat)
-  mouth.position.set(0, size * 0.05, size * 0.82)
+  mouth.position.set(0, size * .76, size * .48)
   mouth.scale.set(1.4, 0.55, 0.5)
   g.add(mouth)
 
@@ -89,7 +94,7 @@ export function buildCreature3D(creature: Creature): Creature3D {
   const mkEar = (side: number): THREE.Mesh => {
     const geo = earType === 1 ? earGeo1 : earType === 2 ? earGeo2 : earGeo0
     const ear = new THREE.Mesh(geo, accentMat)
-    ear.position.set(side * size * 0.44, size * 0.78, size * 0.18)
+    ear.position.set(side * size * .42, size * 1.42, 0)
     if (earType === 1) ear.rotation.x = 0.35
     else if (earType === 2) ear.rotation.x = 1.1
     return ear
@@ -99,24 +104,35 @@ export function buildCreature3D(creature: Creature): Creature3D {
 
   // Tail
   const tail = new THREE.Mesh(new THREE.ConeGeometry(size * 0.12, size * 0.5, 6), accentMat)
-  tail.position.set(0, size * 0.05, -size * 0.85)
+  tail.position.set(0, 0, -size * .58)
   tail.rotation.x = Math.PI / 2 + 0.35
   g.add(tail)
 
-  // Legs
-  const legMat = bodyMat
-  const legGeo = new THREE.CylinderGeometry(size * 0.1, size * 0.12, size * 0.5, 6)
+  // Upright biped stance: two planted legs and readable counter-swinging arms.
+  const legMat = clothMat
+  const pawMat = darkMat
+  const legGeo = new THREE.CylinderGeometry(size * .15, size * .17, size * .65, 6)
   const legs: THREE.Mesh[] = []
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 2; i++) {
     const leg = new THREE.Mesh(legGeo, legMat)
-    const sx = i % 2 === 0 ? -0.32 : 0.32
-    const sz = i < 2 ? 0.45 : -0.45
-    leg.position.set(sx * size, -size * 0.62, sz * size)
+    const sx = i === 0 ? -.31 : .31
+    leg.position.set(sx * size, -size * .9, size * .08)
     leg.userData.homeX = sx * size
-    leg.userData.homeZ = sz * size
     leg.userData.phase = i * Math.PI
     g.add(leg)
     legs.push(leg)
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(size * .38, size * .22, size * .5), pawMat)
+    foot.position.set(sx * size, -size * 1.22, size * .2)
+    g.add(foot)
+  }
+  const arms: THREE.Mesh[] = []
+  for (let i = 0; i < 2; i++) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(size * .085, size * .11, size * .58, 6), accentMat)
+    arm.position.set((i === 0 ? -.52 : .52) * size, 0, size * .03)
+    arm.rotation.z = i === 0 ? -.16 : .16
+    arm.userData.phase = (i + 1) * Math.PI
+    g.add(arm)
+    arms.push(arm)
   }
 
   // Selection ring
@@ -138,6 +154,7 @@ export function buildCreature3D(creature: Creature): Creature3D {
   // state
   let blinkTimer = 2 + Math.random() * 3
   let blink = 0
+  let renderFacing = Math.PI / 2 - creature.facing
 
   function setPupils(scale: number): void {
     pupilL.scale.setScalar(scale)
@@ -176,30 +193,39 @@ export function buildCreature3D(creature: Creature): Creature3D {
         return
       }
       grave.visible = false
+      // Every pose starts from a stable upright base; transient fear/sleep offsets never accumulate.
       g.rotation.x = 0
+      g.rotation.z = 0
+      g.position.x = 0
+      g.position.z = 0
 
       const fear = c.chem.fear
       const pleasure = c.chem.pleasure
-      // fear → eyes wide, shake
       setPupils(fear > 0.4 ? 0.8 : 1)
       if (fear > 0.4) {
-        g.position.x += (Math.random() - 0.5) * 0.05
-        g.position.z += (Math.random() - 0.5) * 0.05
+        g.position.x = (Math.random() - 0.5) * 0.04
+        g.position.z = (Math.random() - 0.5) * 0.04
       }
 
-      const moving = c.action === 'toFood' || c.action === 'toWater' || c.action === 'toPlace' || c.action === 'social' || c.action === 'wander'
-      const bob = c.sleeping ? Math.sin(time * 2.2) * 0.015 : Math.sin(time * 3.2 + creature.id) * (moving ? 0.12 : 0.04)
-      // position from sim (ground height set by caller; we offset)
+      const moving = ['toFood', 'toWater', 'toPlace', 'social', 'wander', 'flee'].includes(c.action)
+      const gait = c.action === 'flee' ? 1.35 : c.action === 'wander' ? .7 : 1
+      const bob = c.sleeping ? Math.sin(time * 2.2) * 0.015 : Math.sin(time * (4.8 * gait) + creature.id) * (moving ? 0.07 * gait : 0.025)
       g.position.y = bob
 
-      // facing
-      g.rotation.y = c.facing
+      const targetFacing = Math.PI / 2 - c.facing
+      let facingDelta = ((targetFacing - renderFacing + Math.PI) % (Math.PI * 2)) - Math.PI
+      if (facingDelta < -Math.PI) facingDelta += Math.PI * 2
+      renderFacing += facingDelta * (1 - Math.exp(-dt * 9))
+      g.rotation.y = renderFacing
 
-      // legs walk
       for (const leg of legs) {
-        const swing = moving && !c.sleeping ? Math.sin(time * 9 + leg.userData.phase) * 0.35 : 0
-        leg.position.x = leg.userData.homeX + (moving ? swing * 0.15 : 0)
+        const swing = moving && !c.sleeping ? Math.sin(time * 6.2 * gait + leg.userData.phase) * .42 * gait : 0
+        leg.position.x = leg.userData.homeX
         leg.rotation.x = swing
+      }
+      for (const arm of arms) {
+        const swing = moving && !c.sleeping ? Math.sin(time * 6.2 * gait + arm.userData.phase) * .34 * gait : 0
+        arm.rotation.x = swing
       }
 
       // sleep pose

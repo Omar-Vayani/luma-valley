@@ -1,117 +1,203 @@
 import * as THREE from 'three'
 import { CITY_PLACES, type CityPlace, type CityPlaceId } from '../sim/city'
+import { CITY_BUILDINGS, FILLER_BUILDINGS, buildingForPlace, doorwayPoint, wallBoxes, type BoxFootprint, type BuildingFootprint } from '../sim/city-layout'
+import { collapseStaticModel } from './assets'
 
-export interface CityStructures {
-  group: THREE.Group
-  interactionMeshes: THREE.Object3D[]
-  lanterns: THREE.PointLight[]
-}
-
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
 const MAT = {
-  stone: new THREE.MeshLambertMaterial({ color: '#655f55' }),
-  dark: new THREE.MeshLambertMaterial({ color: '#302e2b' }),
-  roof: new THREE.MeshLambertMaterial({ color: '#403a36' }),
-  wood: new THREE.MeshLambertMaterial({ color: '#5e412c' }),
-  amber: new THREE.MeshLambertMaterial({ color: '#ffc15c', emissive: '#a95818', emissiveIntensity: 1.1 }),
-  green: new THREE.MeshLambertMaterial({ color: '#354b39' }),
-  purple: new THREE.MeshLambertMaterial({ color: '#9854c7', emissive: '#55206f', emissiveIntensity: 0.8 }),
-  cloth: new THREE.MeshLambertMaterial({ color: '#7d5035' }),
+  sand: new THREE.MeshLambertMaterial({ color: 0x9c7b52 }),
+  brick: new THREE.MeshLambertMaterial({ color: 0x68483c }),
+  stone: new THREE.MeshLambertMaterial({ color: 0x55524c }),
+  road: new THREE.MeshLambertMaterial({ color: 0x6f6252 }),
+  plaster: new THREE.MeshLambertMaterial({ color: 0xb6aa8e }),
+  timber: new THREE.MeshLambertMaterial({ color: 0x3e2d22 }),
+  roof: new THREE.MeshLambertMaterial({ color: 0x29282a }),
+  dark: new THREE.MeshLambertMaterial({ color: 0x17191a }),
+  amber: new THREE.MeshLambertMaterial({ color: 0xe6a14a }),
+  green: new THREE.MeshLambertMaterial({ color: 0x526646 }),
+  water: new THREE.MeshLambertMaterial({ color: 0x5b8190 }),
+  purple: new THREE.MeshLambertMaterial({ color: 0x71547d }),
+  cloth: new THREE.MeshLambertMaterial({ color: 0x9e503e }),
 }
 
-function box(group: THREE.Group, size: [number, number, number], pos: [number, number, number], material: THREE.Material, ry = 0): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material)
+function box(parent: THREE.Object3D, size: [number, number, number], pos: [number, number, number], material: THREE.Material): THREE.Mesh {
+  const mesh = new THREE.Mesh(UNIT_BOX, material)
+  mesh.scale.set(...size)
   mesh.position.set(...pos)
-  mesh.rotation.y = ry
-  mesh.castShadow = true
+  mesh.castShadow = size[1] > 1
   mesh.receiveShadow = true
-  group.add(mesh)
+  parent.add(mesh)
   return mesh
 }
 
-function building(group: THREE.Group, x: number, z: number, w: number, d: number, floors: number, entrance: 'n' | 's' | 'e' | 'w'): void {
-  const h = floors * 2.6
-  box(group, [w, h, d], [x, h / 2, z], MAT.stone)
-  box(group, [w + 0.35, 0.55, d + 0.35], [x, h + 0.25, z], MAT.roof)
-  const doorPos: [number, number, number] = entrance === 'n' ? [x, 1.05, z - d / 2 - 0.02] : entrance === 's' ? [x, 1.05, z + d / 2 + 0.02] : entrance === 'e' ? [x - w / 2 - 0.02, 1.05, z] : [x + w / 2 + 0.02, 1.05, z]
-  box(group, entrance === 'n' || entrance === 's' ? [1.3, 2.1, 0.12] : [0.12, 2.1, 1.3], doorPos, MAT.dark)
-}
-
-function labelSprite(place: CityPlace): THREE.Sprite {
+function labelSprite(title: string, purpose: string): THREE.Sprite {
   const canvas = document.createElement('canvas')
-  canvas.width = 512; canvas.height = 96
-  const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = 'rgba(26,24,22,.9)'; ctx.roundRect(8, 8, 496, 80, 14); ctx.fill()
-  ctx.strokeStyle = '#c49b58'; ctx.lineWidth = 3; ctx.stroke()
-  ctx.fillStyle = '#fff0cc'; ctx.font = '700 29px Georgia, serif'; ctx.textAlign = 'center'; ctx.fillText(place.name, 256, 43)
-  ctx.fillStyle = '#d2c4a5'; ctx.font = '19px system-ui, sans-serif'; ctx.fillText(place.purpose, 256, 70)
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }))
-  sprite.scale.set(6.8, 1.28, 1)
+  canvas.width = 512
+  canvas.height = 112
+  const context = canvas.getContext('2d')!
+  context.fillStyle = 'rgba(30,27,24,.9)'
+  context.fillRect(6, 6, 500, 100)
+  context.strokeStyle = '#d7bd84'
+  context.lineWidth = 3
+  context.strokeRect(6, 6, 500, 100)
+  context.fillStyle = '#fff2d0'
+  context.textAlign = 'center'
+  context.font = '700 27px Georgia,serif'
+  context.fillText(title, 256, 45)
+  context.fillStyle = '#cfc4aa'
+  context.font = '18px system-ui,sans-serif'
+  context.fillText(purpose, 256, 78)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }))
+  sprite.scale.set(7.2, 1.58, 1)
+  sprite.renderOrder = 4
   return sprite
 }
 
-function marker(group: THREE.Group, place: CityPlace, interactionMeshes: THREE.Object3D[]): void {
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 2.6, 8), MAT.wood)
-  post.position.set(place.pos.x, 1.3, place.pos.z)
-  post.userData = { interact: 'place', placeId: place.id }
-  group.add(post)
-  const label = labelSprite(place)
-  label.position.set(place.pos.x, 3.25, place.pos.z)
-  label.userData = post.userData
-  group.add(label)
-  interactionMeshes.push(post, label)
+function marker(place: CityPlace, root: THREE.Group, interactions: THREE.Object3D[]): void {
+  const building = buildingForPlace(place.id)
+  const point = building ? doorwayPoint(building, 1.6) : place.pos
+  const post = box(root, [.16, 2.1, .16], [point.x, 1.05, point.z], MAT.timber)
+  const plate = box(root, [2.2, .58, .14], [point.x, 2.05, point.z], MAT.dark)
+  const label = labelSprite(place.name, place.purpose)
+  label.position.set(point.x, building ? building.height + 1.25 : 3.15, point.z)
+  for (const object of [post, plate, label]) object.userData.placeId = place.id
+  interactions.push(post, plate, label)
 }
 
-function lantern(group: THREE.Group, lanterns: THREE.PointLight[], x: number, z: number): void {
-  box(group, [0.12, 2.7, 0.12], [x, 1.35, z], MAT.dark)
-  const lamp = box(group, [0.4, 0.55, 0.4], [x, 2.65, z], MAT.amber)
-  lamp.castShadow = false
-  const light = new THREE.PointLight(0xff9e3d, 1.25, 9, 2)
-  light.position.set(x, 2.7, z); group.add(light); lanterns.push(light)
-}
+function buildBuilding(root: THREE.Group, building: BuildingFootprint): BoxFootprint[] {
+  const material = MAT[building.color]
+  for (const wall of wallBoxes(building)) {
+    box(root, [wall.hx * 2, building.height, wall.hz * 2], [wall.x, building.height / 2, wall.z], material)
+  }
+  const door = doorwayPoint(building)
+  const horizontal = building.entrance === 'n' || building.entrance === 's'
+  box(root, horizontal ? [building.doorWidth, building.height - 2.8, .4] : [.4, building.height - 2.8, building.doorWidth], [door.x, 2.8 + (building.height - 2.8) / 2, door.z], material)
+  box(root, [building.width - .7, .16, building.depth - .7], [building.x, .08, building.z], MAT.stone)
+  box(root, [building.width + .5, .5, building.depth + .5], [building.x, building.height + .25, building.z], MAT.roof)
 
-function district(group: THREE.Group, place: CityPlace): void {
-  const { x, z } = place.pos
-  if (place.id === 'market') {
-    for (const dx of [-3, 0, 3]) { box(group, [2.3, .75, 1.4], [x + dx, .38, z + 2], MAT.wood); box(group, [2.6, .12, 1.8], [x + dx, 2.1, z + 2], MAT.cloth); box(group, [.55, .35, .35], [x + dx, .95, z + 2], MAT.amber) }
-  } else if (place.id === 'tavern') {
-    building(group, x, z + 2, 7, 5, 2, 'n')
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(.65, .65, 1.2, 12), MAT.wood); barrel.rotation.z = Math.PI / 2; barrel.position.set(x - 2.5, .65, z - 1); group.add(barrel)
-    box(group, [1.8, 1.1, .12], [x + 2.2, 2.5, z - .55], MAT.dark)
-    // cigarette pictogram: pale stem and ember, clearly a warning-style trade sign.
-    box(group, [1.05, .12, .12], [x + 2.2, 2.55, z - .64], new THREE.MeshLambertMaterial({ color: '#d9d1bd' }), .18)
-  } else if (place.id === 'park') {
-    const well = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.4, 1, 16), MAT.stone); well.position.set(x, .5, z); group.add(well)
-    box(group, [3.3, .25, .7], [x + 3, .7, z + 2], MAT.wood)
-    for (const [dx, dz] of [[-3, -2], [3, -2], [-3, 3]] as const) { const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.3, .45, 2.5, 7), MAT.wood); trunk.position.set(x + dx, 1.25, z + dz); group.add(trunk); const crown = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.8, 8), MAT.green); crown.position.set(x + dx, 3.3, z + dz); group.add(crown) }
-  } else if (place.id === 'apothecary') {
-    building(group, x + 1, z + 1, 6, 5, 2, 'n')
-    box(group, [.55, 2, .18], [x - 1.2, 3.2, z - 1.55], MAT.green); box(group, [2, .55, .18], [x - 1.2, 3.2, z - 1.55], MAT.green)
-    for (const dx of [-2, -1.2, -.4]) { const bottle = new THREE.Mesh(new THREE.CylinderGeometry(.15, .22, .65, 8), MAT.amber); bottle.position.set(x + dx, .35, z - 2); group.add(bottle) }
-  } else if (place.id === 'homes') {
-    for (const [dx, floors] of [[-4, 2], [0, 3], [4, 2]] as const) { building(group, x + dx, z + 2, 3.4, 5, floors, 'n'); box(group, [2.1, .4, 1], [x + dx, .35, z - 1.2], MAT.wood) }
-  } else if (place.id === 'watch') {
-    building(group, x + 4, z + 2, 4, 4, 3, 'n')
-    const brazier = new THREE.Mesh(new THREE.CylinderGeometry(.65, .45, .7, 8), MAT.dark); brazier.position.set(x - 2.2, .5, z); group.add(brazier)
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(.35, 1.1, 8), MAT.amber); flame.position.set(x - 2.2, 1.3, z); group.add(flame)
-    for (const dx of [-2, 0, 2]) box(group, [.18, 2.2, .18], [x + dx, 1.1, z + 3], MAT.wood)
+  // Chunky one-unit details make every facade and doorway readable at phone scale.
+  const trimY = 1.45
+  if (horizontal) {
+    box(root, [.18, 2.9, .42], [door.x - building.doorWidth / 2, trimY, door.z], MAT.timber)
+    box(root, [.18, 2.9, .42], [door.x + building.doorWidth / 2, trimY, door.z], MAT.timber)
+    box(root, [1.05, 1.15, .12], [building.x - building.width * .28, 2.6, door.z - (building.entrance === 's' ? .22 : -.22)], MAT.amber)
+    box(root, [1.05, 1.15, .12], [building.x + building.width * .28, 2.6, door.z - (building.entrance === 's' ? .22 : -.22)], MAT.amber)
   } else {
-    box(group, [6, 4.2, 1], [x - 2, 2.1, z + 2.5], MAT.dark, -.15)
-    const contraband = new THREE.Mesh(new THREE.OctahedronGeometry(.8, 0), MAT.purple); contraband.position.set(x, 1.15, z); contraband.userData = { interact: 'place', placeId: place.id }; group.add(contraband)
+    box(root, [.42, 2.9, .18], [door.x, trimY, door.z - building.doorWidth / 2], MAT.timber)
+    box(root, [.42, 2.9, .18], [door.x, trimY, door.z + building.doorWidth / 2], MAT.timber)
+    box(root, [.12, 1.15, 1.05], [door.x - (building.entrance === 'e' ? .22 : -.22), 2.6, building.z - building.depth * .28], MAT.amber)
+    box(root, [.12, 1.15, 1.05], [door.x - (building.entrance === 'e' ? .22 : -.22), 2.6, building.z + building.depth * .28], MAT.amber)
+  }
+
+  // A simple usable interior: table, benches, warm hearth and district colour.
+  box(root, [2.5, .18, 1.1], [building.x, 1.05, building.z], MAT.timber)
+  box(root, [.18, 1, .18], [building.x - .9, .5, building.z], MAT.timber)
+  box(root, [.18, 1, .18], [building.x + .9, .5, building.z], MAT.timber)
+  box(root, [1.4, .85, .35], [building.x, .55, building.z + building.depth / 2 - .55], building.placeId === 'back-alley' ? MAT.purple : MAT.amber)
+  return wallBoxes(building)
+}
+
+function stall(root: THREE.Group, x: number, z: number, cloth: THREE.Material): void {
+  box(root, [3.2, .2, 2.2], [x, 2.35, z], cloth)
+  box(root, [3, .18, 1.6], [x, .9, z], MAT.timber)
+  for (const sx of [-1.35, 1.35]) box(root, [.14, 2.3, .14], [x + sx, 1.15, z], MAT.timber)
+  for (const ox of [-.8, 0, .8]) box(root, [.48, .42, .48], [x + ox, 1.2, z], ox === 0 ? MAT.amber : MAT.green)
+}
+
+function tree(root: THREE.Group, x: number, z: number): void {
+  box(root, [.42, 2.5, .42], [x, 1.25, z], MAT.timber)
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3.2, 6), MAT.green)
+  crown.position.set(x, 3.45, z)
+  crown.castShadow = true
+  root.add(crown)
+}
+
+function streetLife(root: THREE.Group): void {
+  // Dense but deliberate props: market stalls, park, carts, crates, wells and lamps.
+  stall(root, -33, 18, MAT.cloth)
+  stall(root, -28, 18, MAT.green)
+  stall(root, -23, 18, MAT.amber)
+  // A welcoming first street: stalls frame the arriving creatures without blocking them.
+  stall(root, -9, -27, MAT.cloth)
+  stall(root, 9, -27, MAT.green)
+  stall(root, -11, -14, MAT.amber)
+  stall(root, 11, -14, MAT.cloth)
+  box(root, [3.8, .4, 2], [-28, .35, 12.5], MAT.timber)
+  for (const x of [-29.4, -26.6]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.72, .72, .22, 12), MAT.dark)
+    wheel.rotation.z = Math.PI / 2
+    wheel.position.set(x, .72, 11.45)
+    root.add(wheel)
+  }
+
+  for (const [x, z] of [[-7, -29], [7, -29], [-7, -22], [7, -22]] as const) tree(root, x, z)
+  const fountain = new THREE.Mesh(new THREE.CylinderGeometry(3.3, 3.7, .65, 12), MAT.stone)
+  fountain.position.set(0, .33, -28)
+  root.add(fountain)
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(2.7, 2.7, .08, 18), MAT.water)
+  water.position.set(0, .7, -28)
+  root.add(water)
+
+  for (const [x, z, r] of [[-12, 7, 0], [12, 7, Math.PI], [-12, -9, 0], [12, -9, Math.PI]] as const) {
+    const bench = new THREE.Group()
+    box(bench, [2.6, .22, .7], [0, .65, 0], MAT.timber)
+    box(bench, [2.6, .9, .18], [0, 1.1, .3], MAT.timber)
+    bench.position.set(x, 0, z)
+    bench.rotation.y = r
+    root.add(bench)
+  }
+
+  for (const [x, z] of [[-17, 5], [17, 5], [-17, -14], [17, -14], [-17, 27], [17, 27], [0, 15]] as const) {
+    box(root, [.16, 3.4, .16], [x, 1.7, z], MAT.timber)
+    box(root, [.52, .52, .52], [x, 3.35, z], MAT.amber)
+  }
+
+  for (const [x, z] of [[-21, 9], [-18.8, 9], [22, 17], [24, 17], [-43, -11], [39, -11]] as const) {
+    box(root, [1.25, 1.05, 1.25], [x, .53, z], MAT.timber)
+  }
+
+  // Layered stone pavers, curb blocks and a street arch break up the broad ground plane.
+  for (let z = -50, i = 0; z <= 18; z += 4, i++) {
+    box(root, [4.4, .06, 2.65], [i % 2 === 0 ? -2.3 : 2.3, .035, z], i % 3 === 0 ? MAT.stone : MAT.road)
+    box(root, [.42, .25, 2.2], [-5.35, .13, z], MAT.stone)
+    box(root, [.42, .25, 2.2], [5.35, .13, z], MAT.stone)
+  }
+  box(root, [.65, 4.8, .65], [-6.2, 2.4, -37], MAT.timber)
+  box(root, [.65, 4.8, .65], [6.2, 2.4, -37], MAT.timber)
+  box(root, [13, .55, .65], [0, 4.65, -37], MAT.timber)
+  for (const x of [-4, 0, 4]) {
+    const banner = box(root, [2.3, .8, .08], [x, 4.05, -36.62], x === 0 ? MAT.amber : MAT.cloth)
+    banner.rotation.z = x === 0 ? 0 : x < 0 ? -.08 : .08
   }
 }
 
-export function buildCityStructures(): CityStructures {
+export interface CityBuild {
+  group: THREE.Group
+  interactionMeshes: THREE.Object3D[]
+  colliders: BoxFootprint[]
+}
+
+export function buildCityStructures(): CityBuild {
+  const staticRoot = new THREE.Group()
+  const interactionRoot = new THREE.Group()
+  const interactions: THREE.Object3D[] = []
+  const colliders: BoxFootprint[] = []
+
+  for (const building of [...CITY_BUILDINGS, ...FILLER_BUILDINGS]) colliders.push(...buildBuilding(staticRoot, building))
+  streetLife(staticRoot)
+  for (const place of CITY_PLACES) marker(place, interactionRoot, interactions)
+
   const group = new THREE.Group()
-  const interactionMeshes: THREE.Object3D[] = []
-  const lanterns: THREE.PointLight[] = []
-  for (const place of CITY_PLACES) { district(group, place); marker(group, place, interactionMeshes) }
-  for (const [x, z] of [[-8, 8], [8, 8], [-8, -8], [8, -8], [0, 29], [29, 0], [-29, 0]] as const) lantern(group, lanterns, x, z)
-  return { group, interactionMeshes, lanterns }
+  group.add(collapseStaticModel(staticRoot), interactionRoot)
+  return { group, interactionMeshes: interactions, colliders }
 }
 
 export function cityPlaceById(id: string): CityPlace | undefined {
-  return CITY_PLACES.find((place) => place.id === id as CityPlaceId)
+  return CITY_PLACES.find((place) => place.id === id)
 }
 
-/** Flat terrain compatibility for older callers. */
-export function groundY(_world: { height: (x: number, z: number) => number }, _x: number, _z: number): number { return 0 }
+export function cityPlaceName(id: CityPlaceId): string {
+  return cityPlaceById(id)?.name ?? id
+}

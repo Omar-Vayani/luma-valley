@@ -9,6 +9,7 @@ import { toggleTorch as toggleTorchFn } from './sim/player'
 import { ITEMS } from './sim/items'
 import { trustLabel, triggerName } from './sim/trauma'
 import type { SaveData } from './sim/save'
+import { CITY_WORLD_SIZE } from './sim/city-layout'
 
 import './index.css'
 
@@ -73,6 +74,7 @@ export default function App() {
   const [storyDone, setStoryDone] = useState(false)
   const [exploring, setExploring] = useState(false)
   const [hasLooked, setHasLooked] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const isTouch = typeof window !== 'undefined' && (
     navigator.maxTouchPoints > 0 ||
     'ontouchstart' in window ||
@@ -87,7 +89,7 @@ export default function App() {
 
   const startNew = (seed?: number): void => {
     const s = seed ?? Math.floor(Math.random() * 1e9)
-    const g = new Game(s, 60, { gentle })
+    const g = new Game(s, CITY_WORLD_SIZE, { gentle })
     g.spawnInitial(5)
     bootGame(g)
   }
@@ -100,7 +102,7 @@ export default function App() {
 
     if (viewRef.current) viewRef.current.dispose()
     const view = new GameView(mountRef.current!, g, sound, {
-      onSelect: (id) => setSelectedId(id),
+      onSelect: (id) => { setSelectedId(id); setDetailsOpen(false) },
       onInteract: (ev) => handleInteract(ev),
       onLockChange: (l) => setLocked(l),
       onQuestHint: (t) => setToast(t),
@@ -144,6 +146,12 @@ export default function App() {
     const id = window.setInterval(() => setTick((t) => t + 1), 250)
     return () => window.clearInterval(id)
   }, [started])
+
+  // Keep autonomous lives staged at the arrival square while the desktop
+  // pointer-lock card is open. Mobile enters play immediately.
+  useEffect(() => {
+    viewRef.current?.setPaused(started && !inGame)
+  }, [started, inGame])
 
   const game = gameRef.current
   const selected = selectedId !== null ? game?.selectedCreature(selectedId) ?? null : null
@@ -225,7 +233,7 @@ export default function App() {
   }
 
   const interact = (): void => {
-    if (!viewRef.current?.interact()) setToast('Nothing within reach — aim at a citizen or district sign.')
+    viewRef.current?.interact()
   }
 
   const dayLabel =
@@ -251,6 +259,7 @@ export default function App() {
     { label: 'lonely', value: selected.chem.loneliness, color: '#cf82a8' },
   ].sort((a, b) => b.value - a.value) : []
   const interactionHint = inGame ? viewRef.current?.interactionHint() ?? null : null
+  const interactionFocus = inGame ? viewRef.current?.currentFocus() ?? null : null
   const urban = selected ? (selected as typeof selected & { urban?: {
     emotions?: Partial<Record<'joy' | 'sadness' | 'anger' | 'fear' | 'empathy' | 'intoxication', number>>
     currentGoal?: string | null
@@ -302,7 +311,7 @@ export default function App() {
       {started && !quest && <div className="quest-tracker quest-done">✦ {questText}</div>}
 
       {/* Crosshair — always visible so the player can see where they're looking */}
-      {inGame && <div className="crosshair" />}
+      {inGame && <div className={`crosshair ${interactionFocus ? `has-focus focus-${interactionFocus.kind}` : ''}`} />}
 
       {/* Full-screen LOOK SURFACE (touch): same synthetic events as the joystick.
           Drag anywhere to move the world under your finger; tap to interact. */}
@@ -322,7 +331,7 @@ export default function App() {
         <div className="control-tip">Drag the street to look around<br /><span>The city follows your finger</span></div>
       )}
 
-      {interactionHint && <div className="interaction-prompt">✦ {interactionHint} · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
+      {interactionHint && <div className="interaction-prompt focus-chip">✦ {interactionHint} · {Math.round(interactionFocus?.distance ?? 0)}m · {isTouch ? 'tap or use hand' : 'click or F'}</div>}
 
       {/* City survival quick actions */}
       {started && inGame && !toast && (
@@ -339,7 +348,7 @@ export default function App() {
 
       {/* Selected creature panel */}
       {started && selected && (
-        <aside className="panel">
+        <aside className={`panel action-palette ${detailsOpen ? 'panel-expanded' : 'panel-compact'}`}>
           <div className="panel-head">
             <h2>{selected.name}</h2>
             <span className={`mood mood-${MOOD(selected.chem.pleasure, selected.chem.fear, selected.chem.health)}`}>
@@ -348,6 +357,11 @@ export default function App() {
             <button className="panel-close" aria-label="Close creature care" onClick={() => { setSelectedId(null); viewRef.current?.select(null) }}>×</button>
           </div>
           <p className="age">age {Math.floor(selected.age / 100)} · {selected.alive ? selected.action : 'deceased'}</p>
+          {selected.alive && <div className="drive-chips">
+            {selectedNeeds.slice(0, 3).map((need) => <span className="drive-chip" key={need.label}>{need.label} {Math.round(need.value * 100)}</span>)}
+            {urban?.currentGoal && <span className="drive-chip">goal {urban.currentGoal}</span>}
+          </div>}
+          {selected.alive && <button className="details-toggle" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'Hide mind & memories' : 'Mind, memories & teaching'}</button>}
           {selected.alive && (
             <>
               <p className="needs-label">Needs · most urgent first</p>
@@ -385,8 +399,14 @@ export default function App() {
                 )}
               </div>
               <div className="actions">
+                <button className="btn" onClick={() => {
+                  const result = game?.greet(selected.id)
+                  if (result) setToast(result.msg)
+                  soundRef.current?.voice(selected.traits.voicePitch, 'happy')
+                  setTick((t) => t + 1)
+                }}>👋 Greet</button>
                 <button className="btn" onClick={feedSelected}>🍞 Share bread ({game?.player.inventory.items.bread ?? 0})</button>
-                <button className="btn" onClick={() => act(() => game?.tickle(selected.id), () => soundRef.current?.voice(selected.traits.voicePitch, 'happy'))}>✨ Tickle</button>
+                <button className="btn" onClick={() => act(() => game?.tickle(selected.id), () => soundRef.current?.voice(selected.traits.voicePitch, 'happy'))}>💛 Comfort / play</button>
                 <button
                   className={`btn ${game?.carriedId === selected.id ? 'btn-active' : ''}`}
                   onClick={() => {
@@ -562,7 +582,7 @@ export default function App() {
       {/* Touch jump button */}
       {isTouch && inGame && (
         <button className="interact-btn" onPointerDown={(e) => { e.preventDefault(); interact() }} aria-label="Interact">
-          🤲<span>{interactionHint ?? 'Interact'}</span>
+          🤲<span>{interactionFocus ? `${interactionFocus.kind === 'creature' ? 'Meet' : 'Visit'} ${interactionFocus.name}` : 'Walk closer'}</span>
         </button>
       )}
 
