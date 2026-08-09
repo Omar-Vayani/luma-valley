@@ -41,20 +41,21 @@ const GROUND_Y = 0
 
 function makeTextSprite(text: string, opts: { size?: number; color?: string; bg?: string; radius?: number } = {}): THREE.Sprite {
   const size = opts.size ?? 64
+  // canvas must be taller than the font or the glyphs get clipped to a sliver
   const canvas = document.createElement('canvas')
-  canvas.width = size * 4
-  canvas.height = size
+  canvas.width = size * 8
+  canvas.height = size * 3
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   if (opts.bg) {
     ctx.fillStyle = opts.bg
     const r = (opts.radius ?? 12) * 4
     ctx.beginPath()
-    ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, r)
+    ctx.roundRect(12, 12, canvas.width - 24, canvas.height - 24, r)
     ctx.fill()
   }
   ctx.fillStyle = opts.color ?? '#fff8e8'
-  ctx.font = `700 ${size * 2.4}px system-ui, sans-serif`
+  ctx.font = `800 ${size * 2.2}px system-ui, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2)
@@ -62,7 +63,8 @@ function makeTextSprite(text: string, opts: { size?: number; color?: string; bg?
   tex.colorSpace = THREE.SRGBColorSpace
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })
   const sprite = new THREE.Sprite(mat)
-  sprite.scale.set(size / 40, size / 160, 1)
+  // world-space size: wider + taller so labels stay readable at zoomed-out view
+  sprite.scale.set(size / 14, size / 42, 1)
   return sprite
 }
 
@@ -81,7 +83,7 @@ export class LabView {
   // camera control
   private camTarget = new THREE.Vector3(0, 0, 0)
   private camTilt = 1.0 // radians
-  private camDist = 62
+  private camDist = 40
 
   // pointer state (pan + pinch + tap)
   private pointers = new Map<number, { x: number; y: number }>()
@@ -875,6 +877,6 @@ export class LabView {
 
   resetCamera(): void {
     this.camTarget.set(0, 0, 0)
-    this.camDist = 62
+    this.camDist = 40
   }
 }
