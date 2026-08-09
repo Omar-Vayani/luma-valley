@@ -1,7 +1,9 @@
 /**
- * Luma Valley — Test Lab V2 observer UI.
- * Mobile-first: a live world (Three.js via LabView) is the feedback.
+ * Luma Lab — Test Lab V2 observer UI.
+ * Mobile-first: the live world (Three.js via LabView) is the feedback.
  * No text logs — the dock acts on the world, taps inspect.
+ * Tools: spawn + bread/money placement + a Benevolence group (comfort, heal,
+ * gift) and a Malice group (poke, hit, scare, rob).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LabView } from './render/labview'
@@ -10,21 +12,40 @@ import { deriveEmotion, type EmotionType } from './lab/emotion'
 
 import './lab.css'
 
-type ToolMode = 'bread' | 'money' | 'poke' | 'hit' | null
+type ToolMode =
+  | 'bread'
+  | 'money'
+  | 'comfort'
+  | 'heal'
+  | 'gift'
+  | 'poke'
+  | 'hit'
+  | 'scare'
+  | 'rob'
+  | null
 
-interface DockItem {
-  id: 'spawn' | Exclude<ToolMode, null>
+type ToolGroup = 'benevolence' | 'malice' | null
+
+interface ToolDef {
+  id: Exclude<ToolMode, null>
   label: string
   emoji: string
+  onCreature: boolean // true = act on tapped creature, false = place on world
 }
 
-const DOCK: ReadonlyArray<DockItem> = [
-  { id: 'spawn', label: 'spawn', emoji: '🐣' },
-  { id: 'bread', label: 'bread', emoji: '🍞' },
-  { id: 'money', label: 'money', emoji: '🪙' },
-  { id: 'poke', label: 'poke', emoji: '✋' },
-  { id: 'hit', label: 'hit', emoji: '⚔️' },
-]
+const GROUP_TOOLS: Record<NonNullable<ToolGroup>, ToolDef[]> = {
+  benevolence: [
+    { id: 'comfort', label: 'comfort', emoji: '🫂', onCreature: true },
+    { id: 'heal', label: 'heal', emoji: '✨', onCreature: true },
+    { id: 'gift', label: 'gift', emoji: '💝', onCreature: true },
+  ],
+  malice: [
+    { id: 'poke', label: 'poke', emoji: '✋', onCreature: true },
+    { id: 'hit', label: 'hit', emoji: '💥', onCreature: true },
+    { id: 'scare', label: 'scare', emoji: '👻', onCreature: true },
+    { id: 'rob', label: 'rob', emoji: '🫳', onCreature: true },
+  ],
+}
 
 const EMOJI: Record<EmotionType, string> = {
   content: '🙂',
@@ -58,6 +79,7 @@ export default function App() {
 
   const [, setTick] = useState(0)
   const [tool, setTool] = useState<ToolMode>(null)
+  const [openGroup, setOpenGroup] = useState<ToolGroup>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState<1 | 2>(1)
@@ -80,12 +102,15 @@ export default function App() {
     const view = new LabView(mount, sim, {
       onTapCreature: (id: number) => {
         const mode = toolRef.current
-        if (mode === 'poke') {
-          sim.poke(id)
-          return
-        }
-        if (mode === 'hit') {
-          sim.hit(id)
+        const def = Object.values(GROUP_TOOLS).flat().find((d) => d.id === mode)
+        if (def?.onCreature) {
+          if (mode === 'comfort') sim.comfort(id)
+          else if (mode === 'heal') sim.heal(id)
+          else if (mode === 'gift') sim.gift(id, 8)
+          else if (mode === 'poke') sim.poke(id)
+          else if (mode === 'hit') sim.hit(id)
+          else if (mode === 'scare') sim.scare(id)
+          else if (mode === 'rob') sim.rob(id)
           return
         }
         setSelectedId(id)
@@ -127,17 +152,26 @@ export default function App() {
     setTick((t) => t + 1)
   }, [])
 
-  const toggleTool = useCallback(
-    (mode: Exclude<ToolMode, null>): void => {
-      if (toolRef.current === mode) {
+  const toggleTool = useCallback((mode: Exclude<ToolMode, null>): void => {
+    if (toolRef.current === mode) {
+      setToolMode(null)
+      setOpenGroup(null)
+    } else {
+      setToolMode(mode)
+      setOpenGroup(null)
+      setSelectedId(null)
+    }
+  }, [setToolMode])
+
+  const toggleGroup = useCallback((group: NonNullable<ToolGroup>): void => {
+    setOpenGroup((prev) => {
+      const next = prev === group ? null : group
+      if (!next) {
         setToolMode(null)
-      } else {
-        setToolMode(mode)
-        setSelectedId(null)
       }
-    },
-    [setToolMode],
-  )
+      return next
+    })
+  }, [setToolMode])
 
   const togglePause = useCallback((): void => {
     const next = !pausedRef.current
@@ -238,24 +272,81 @@ export default function App() {
         </section>
       )}
 
+      {/* Tool palettes open above the dock */}
+      {openGroup && (
+        <div className="tool-palette" data-tool-palette={openGroup} aria-label={`${openGroup} tools`}>
+          {GROUP_TOOLS[openGroup].map((def) => (
+            <button
+              key={def.id}
+              type="button"
+              className={`palette-btn ${tool === def.id ? 'palette-btn-active' : ''}`}
+              data-lab-tool={def.id}
+              aria-pressed={tool === def.id}
+              aria-label={def.label}
+              onClick={() => toggleTool(def.id)}
+            >
+              <span className="dock-emoji">{def.emoji}</span>
+              <span className="dock-label">{def.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <nav className="dock" data-dock aria-label="Lab tools">
-        {DOCK.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`dock-btn ${tool === item.id ? 'dock-btn-active' : ''}`}
-            data-lab-tool={item.id}
-            aria-pressed={tool === item.id}
-            aria-label={item.label}
-            onClick={() => {
-              if (item.id === 'spawn') spawn()
-              else toggleTool(item.id)
-            }}
-          >
-            <span className="dock-emoji">{item.emoji}</span>
-            <span className="dock-label">{item.label}</span>
-          </button>
-        ))}
+        <button
+          type="button"
+          className="dock-btn"
+          data-lab-tool="spawn"
+          aria-label="spawn"
+          onClick={spawn}
+        >
+          <span className="dock-emoji">🐣</span>
+          <span className="dock-label">spawn</span>
+        </button>
+        <button
+          type="button"
+          className={`dock-btn ${tool === 'bread' ? 'dock-btn-active' : ''}`}
+          data-lab-tool="bread"
+          aria-pressed={tool === 'bread'}
+          aria-label="drop bread"
+          onClick={() => toggleTool('bread')}
+        >
+          <span className="dock-emoji">🍞</span>
+          <span className="dock-label">bread</span>
+        </button>
+        <button
+          type="button"
+          className={`dock-btn ${tool === 'money' ? 'dock-btn-active' : ''}`}
+          data-lab-tool="money"
+          aria-pressed={tool === 'money'}
+          aria-label="drop money"
+          onClick={() => toggleTool('money')}
+        >
+          <span className="dock-emoji">🪙</span>
+          <span className="dock-label">money</span>
+        </button>
+        <button
+          type="button"
+          className={`dock-btn ${openGroup === 'benevolence' || GROUP_TOOLS.benevolence.some((d) => d.id === tool) ? 'dock-btn-active' : ''}`}
+          data-dock-group="benevolence"
+          aria-pressed={openGroup === 'benevolence'}
+          aria-label="benevolence tools"
+          onClick={() => toggleGroup('benevolence')}
+        >
+          <span className="dock-emoji">💖</span>
+          <span className="dock-label">kind</span>
+        </button>
+        <button
+          type="button"
+          className={`dock-btn ${openGroup === 'malice' || GROUP_TOOLS.malice.some((d) => d.id === tool) ? 'dock-btn-active' : ''}`}
+          data-dock-group="malice"
+          aria-pressed={openGroup === 'malice'}
+          aria-label="malice tools"
+          onClick={() => toggleGroup('malice')}
+        >
+          <span className="dock-emoji">⚔️</span>
+          <span className="dock-label">mean</span>
+        </button>
       </nav>
     </div>
   )

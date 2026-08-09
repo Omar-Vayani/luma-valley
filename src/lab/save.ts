@@ -18,6 +18,7 @@ export interface LabSave {
   time: number
   nextId: number
   creatures: SavedCreature[]
+  drops: { kind: 'food' | 'money'; x: number; z: number; amount: number }[]
 }
 
 interface SavedCreature {
@@ -64,7 +65,14 @@ export function saveSim(sim: Sim): LabSave {
     weapon: c.weapon,
     fightCooldown: c.fightCooldown,
   }))
-  return { version: 3, seed: sim.seed, time: sim.time, nextId: sim.nextId, creatures }
+  return {
+    version: 3,
+    seed: sim.seed,
+    time: sim.time,
+    nextId: sim.nextId,
+    creatures,
+    drops: sim.drops.map((d) => ({ ...d })),
+  }
 }
 
 export function loadSim(data: LabSave): Sim {
@@ -94,5 +102,6 @@ export function loadSim(data: LabSave): Sim {
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)
+  sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
   return sim
 }

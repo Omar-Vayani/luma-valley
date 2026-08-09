@@ -282,3 +282,45 @@ button { font: inherit; cursor: pointer; }
   font-size: 0.78rem;
   color: #f08fb0;
 }
+
+/* Tool palettes: a row of action buttons above the dock when a group
+   (benevolence / malice) is open. 56px targets, same dark theme. */
+.tool-palette {
+  position: fixed;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 78px);
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(28, 27, 24, 0.92);
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  backdrop-filter: blur(8px);
+  z-index: 12;
+}
+.palette-btn {
+  min-width: 60px;
+  min-height: 56px;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  border: 1px solid rgba(244, 202, 128, 0.3);
+  border-radius: 12px;
+  background: rgba(42, 36, 24, 0.85);
+  color: #fff7df;
+  cursor: pointer;
+}
+.palette-btn .dock-emoji { font-size: 1.15rem; line-height: 1; }
+.palette-btn .dock-label { font-size: 0.6rem; font-weight: 750; letter-spacing: 0.02em; }
+.palette-btn-active {
+  background: rgba(84, 67, 43, 0.95);
+  border-color: #e0b46a;
+  box-shadow: 0 0 0 3px rgba(224, 180, 106, 0.2);
+}
+[data-tool-palette="malice"] .palette-btn-active {
+  background: rgba(111, 49, 38, 0.95);
+  border-color: #e39a75;
+  box-shadow: 0 0 0 3px rgba(209, 112, 79, 0.22);
+}

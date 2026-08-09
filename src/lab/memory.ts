@@ -17,13 +17,14 @@ export interface MemoryState {
   facts: Partial<Record<FactKey, number>>
   vendettas: Record<number, number> // creatureId -> intensity
   placePrefs: Record<string, number> // towerId -> 0..1 positive bias
+  seenPlaces: Record<string, number> // towerId -> how many times visited
 }
 
 const EPISODE_CAP = 12
 const PLACE_DECAY = 0.02
 
 export function createMemory(): MemoryState {
-  return { episodes: [], facts: {}, vendettas: {}, placePrefs: {} }
+  return { episodes: [], facts: {}, vendettas: {}, placePrefs: {}, seenPlaces: {} }
 }
 
 export function remember(m: MemoryState, kind: string, entityId: number | null, valence: number, intensity: number, tick: number): void {

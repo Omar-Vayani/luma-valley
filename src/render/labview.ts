@@ -9,6 +9,7 @@ import { TOWERS, WORLD_HALF, type Tower } from '../lab/world'
 import type { Sim, SimEvent } from '../lab/sim'
 import type { Creature } from '../lab/creature'
 import { deriveEmotion } from '../lab/emotion'
+import { hairStyle } from '../lab/hair'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -23,11 +24,15 @@ interface CreatureRig {
   rightEye: THREE.Mesh
   leftBrow: THREE.Mesh
   rightBrow: THREE.Mesh
+  mouth: THREE.Mesh
   sleepZ: THREE.Sprite
   nameLabel: THREE.Sprite
+  stick: THREE.Mesh
+  hair: THREE.Group
   phase: number
   targetX: number
   targetZ: number
+  swing: number
 }
 
 const TICK_RATE = 6
@@ -76,7 +81,7 @@ export class LabView {
   // camera control
   private camTarget = new THREE.Vector3(0, 0, 0)
   private camTilt = 1.0 // radians
-  private camDist = 40
+  private camDist = 62
 
   // pointer state (pan + pinch + tap)
   private pointers = new Map<number, { x: number; y: number }>()
@@ -90,6 +95,7 @@ export class LabView {
   private rigs: CreatureRig[] = []
   private knownIds = new Set<number>()
   private towerMeshes: THREE.Object3D[] = []
+  private dropMarkers: { drop: { kind: string; x: number; z: number }; mesh: THREE.Object3D }[] = []
   private particles: { mesh: THREE.Mesh | THREE.Sprite; life: number; max: number; vy: number; vx: number; vz: number }[] = []
 
   private raycaster = new THREE.Raycaster()
@@ -154,84 +160,156 @@ export class LabView {
     this.renderer.domElement.remove()
   }
 
-  // ── towers ──
+  // ── towers: little square buildings with triangle roofs + windows ──
   private buildTower(t: Tower): void {
     const group = new THREE.Group()
     const color = new THREE.Color(t.color)
-    // square base
+    // square base (the walls)
     const base = new THREE.Mesh(
-      new THREE.BoxGeometry(5, 1.2, 5),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+      new THREE.BoxGeometry(6, 3.2, 6),
+      new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.85), roughness: 0.9 })
     )
-    base.position.y = 0.6
+    base.position.y = 1.6
     group.add(base)
-    // tower column
-    const column = new THREE.Mesh(
-      new THREE.BoxGeometry(3, 6, 3),
-      new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.75), roughness: 0.9 })
-    )
-    column.position.y = 4.2
-    group.add(column)
-    // roof
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(4.2, 0.8, 4.2),
-      new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(1.2), roughness: 0.6 })
-    )
-    roof.position.y = 8.0
+    // triangle roof (a prism: two roof planes) — user asked for squares+triangles
+    const roofMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(1.25), roughness: 0.6 })
+    const roof = new THREE.Group()
+    const roofPlane = (rotZ: number): THREE.Mesh => {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3.6), roofMat)
+      p.rotation.x = rotZ
+      p.position.y = 1.8
+      return p
+    }
+    roof.add(roofPlane(Math.PI / 2 - 0.9))
+    roof.add(roofPlane(-Math.PI / 2 + 0.9))
+    roof.position.y = 3.2
     group.add(roof)
-    // label + icon
-    const label = makeTextSprite(`${t.icon} ${t.label}`, { color: '#1c1a14', bg: '#fff4d8' })
-    label.position.set(0, 9.2, 0)
+    // ridge cap
+    const ridge = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.3, 0.3), roofMat)
+    ridge.position.y = 6.0
+    group.add(ridge)
+    // windows: small dark squares on two walls
+    const winMat = new THREE.MeshStandardMaterial({ color: 0x241d14, roughness: 0.4 })
+    for (const [wx, wz] of [[-2.05, 0], [2.05, 0], [0, -2.05], [0, 2.05]] as const) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.08), winMat)
+      win.position.set(wx, 2.0, wz)
+      group.add(win)
+    }
+    // door
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.6, 0.08), new THREE.MeshStandardMaterial({ color: 0x3a2a18 }))
+    door.position.set(0, 0.8, 2.06)
+    group.add(door)
+    // special decoration per tower
+    if (t.id === 'homes') {
+      // beds inside the homes building: little raised rectangles
+      for (let i = 0; i < 3; i++) {
+        const bed = new THREE.Group()
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.25, 0.9), new THREE.MeshStandardMaterial({ color: 0x6a4a2a }))
+        frame.position.y = 0.5
+        const mat = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.15, 0.9), new THREE.MeshStandardMaterial({ color: 0xcfc4a6 }))
+        mat.position.y = 0.72
+        bed.add(frame)
+        bed.add(mat)
+        bed.position.set(-2.4 + i * 2.4, 0, -2.6)
+        group.add(bed)
+      }
+    } else if (t.id === 'play') {
+      // playground: a swing set + rings (simple shapes, decoration)
+      const postMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5a })
+      const swing = new THREE.Group()
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.6, 0.25), postMat)
+      p1.position.set(-1.6, 1.3, 0)
+      const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.6, 0.25), postMat)
+      p2.position.set(1.6, 1.3, 0)
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.2, 0.2), postMat)
+      bar.position.y = 2.6
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, 0.4), new THREE.MeshStandardMaterial({ color: 0xd9a13d }))
+      seat.position.y = 1.1
+      swing.add(p1, p2, bar, seat)
+      swing.position.set(0, 0, 0)
+      group.add(swing)
+      // a pair of rings
+      for (const [rx, rz] of [[-2.2, -1.6], [2.2, -1.6]] as const) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.08, 8, 12), new THREE.MeshStandardMaterial({ color: 0xe0b46a }))
+        ring.position.set(rx, 1.4, rz)
+        group.add(ring)
+      }
+    }
+    // label + icon, floating clearly above the roof
+    const label = makeTextSprite(`${t.icon} ${t.label}`, { color: '#1c1a14', bg: '#fff4d8', size: 40 })
+    label.position.set(0, 7.6, 0)
     group.add(label)
     group.position.set(t.x, 0, t.z)
     this.scene.add(group)
     this.towerMeshes.push(group)
   }
 
-  // ── creatures: ball + eyes + brows ──
+  // ── creatures: bigger ball + eyes + brows + mouth + carried stick ──
   private addCreature(c: Creature): void {
     const group = new THREE.Group()
     const hue = (c.id * 47) % 360
     const body = new THREE.Mesh(
-      new THREE.SphereGeometry(0.55, 20, 16),
-      new THREE.MeshStandardMaterial({ color: `hsl(${hue} 40% 70%)`, roughness: 0.6 })
+      new THREE.SphereGeometry(0.85, 22, 18),
+      new THREE.MeshStandardMaterial({ color: `hsl(${hue} 40% 70%)`, roughness: 0.55 })
     )
-    body.position.y = 0.55
+    body.position.y = 0.85
     group.add(body)
 
     const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff })
     const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
     const makeEye = (x: number, z: number): THREE.Mesh => {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), eyeWhite)
-      eye.position.set(x, 0.78, z)
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 6), pupilMat)
-      pupil.position.set(0, 0, 0.12)
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), eyeWhite)
+      eye.position.set(x, 1.16, z)
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), pupilMat)
+      pupil.position.set(0, 0, 0.16)
       eye.add(pupil)
       group.add(eye)
       return eye
     }
-    const leftEye = makeEye(-0.22, 0.42)
-    const rightEye = makeEye(0.22, 0.42)
+    const leftEye = makeEye(-0.32, 0.6)
+    const rightEye = makeEye(0.32, 0.6)
 
     const browMat = new THREE.MeshStandardMaterial({ color: 0x2a2418 })
     const makeBrow = (x: number): THREE.Mesh => {
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.05), browMat)
-      brow.position.set(x, 1.02, 0.42)
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.07), browMat)
+      brow.position.set(x, 1.5, 0.6)
       group.add(brow)
       return brow
     }
-    const leftBrow = makeBrow(-0.22)
-    const rightBrow = makeBrow(0.22)
+    const leftBrow = makeBrow(-0.32)
+    const rightBrow = makeBrow(0.32)
+
+    // mouth: a small flattened box that the emotion shapes (smile / frown / O)
+    const mouth = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.07, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0x2a2418 })
+    )
+    mouth.position.set(0, 0.86, 0.62)
+    group.add(mouth)
+
+    // genetics-based hair — each ball looks different, children inherit
+    const hair = this.buildHair(c, hue)
+    group.add(hair)
+
+    // carried stick: a simple rectangle on the creature's side (visible when equipped)
+    const stick = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.14, 1.5),
+      new THREE.MeshStandardMaterial({ color: 0x76502f, roughness: 0.9 })
+    )
+    stick.position.set(1.15, 0.85, 0)
+    stick.rotation.z = Math.PI / 2
+    stick.visible = false
+    group.add(stick)
 
     // sleeping Zzz
-    const sleepZ = makeTextSprite('💤', { size: 28 })
-    sleepZ.position.set(0.7, 1.9, 0.2)
+    const sleepZ = makeTextSprite('💤', { size: 30 })
+    sleepZ.position.set(1.0, 2.4, 0.2)
     sleepZ.visible = false
     group.add(sleepZ)
 
     // name label (small, toggle via opacity)
-    const nameLabel = makeTextSprite(c.name, { size: 20, color: '#fff', bg: 'rgba(20,20,16,0.7)', radius: 10 })
-    nameLabel.position.set(0, 2.3, 0)
+    const nameLabel = makeTextSprite(c.name, { size: 22, color: '#fff', bg: 'rgba(20,20,16,0.7)', radius: 10 })
+    nameLabel.position.set(0, 2.9, 0)
     group.add(nameLabel)
 
     group.position.set(c.pos.x, GROUND_Y, c.pos.z)
@@ -245,12 +323,73 @@ export class LabView {
       rightEye,
       leftBrow,
       rightBrow,
+      mouth,
       sleepZ,
       nameLabel,
+      stick,
+      hair,
       phase: Math.random() * Math.PI * 2,
       targetX: c.pos.x,
       targetZ: c.pos.z,
+      swing: 0,
     })
+  }
+
+  /** Simple genetic hair: spiky cones, a tuft, curls, long strands, buzz, or bald. */
+  private buildHair(c: Creature, idHue: number): THREE.Group {
+    const g = new THREE.Group()
+    const h = hairStyle(c.genome, idHue)
+    const mat = new THREE.MeshStandardMaterial({ color: h.color, roughness: 0.8 })
+    const topY = 1.05
+    const size = 0.55 + h.size * 0.3
+
+    switch (h.style) {
+      case 'spiky': {
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2
+          const spike = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.42 * h.size + 0.25, 5), mat)
+          spike.position.set(Math.cos(a) * 0.5, topY + 0.3, Math.sin(a) * 0.5)
+          spike.rotation.x = Math.cos(a) * 0.5
+          spike.rotation.z = -Math.sin(a) * 0.5
+          g.add(spike)
+        }
+        break
+      }
+      case 'tuft': {
+        const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5 * size, 6), mat)
+        tuft.position.set(0, topY + 0.32, 0)
+        g.add(tuft)
+        break
+      }
+      case 'curly': {
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2
+          const curl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), mat)
+          curl.position.set(Math.cos(a) * 0.62, topY + 0.18, Math.sin(a) * 0.62)
+          g.add(curl)
+        }
+        break
+      }
+      case 'long': {
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2
+          const strand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.1), mat)
+          strand.position.set(Math.cos(a) * 0.6, topY - 0.1, Math.sin(a) * 0.6)
+          g.add(strand)
+        }
+        break
+      }
+      case 'buzz': {
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.86, 16, 8), mat)
+        cap.scale.y = 0.55
+        cap.position.y = topY - 0.15
+        g.add(cap)
+        break
+      }
+      default: // bald: a tiny sheen on top
+        break
+    }
+    return g
   }
 
   // ── events → particles ──
@@ -267,6 +406,29 @@ export class LabView {
         this.scene.remove(this.rigs[i].group)
         this.rigs.splice(i, 1)
       }
+    }
+  }
+
+  /** Keep ground markers for every live drop; remove the ones creatures ate. */
+  private syncDrops(): void {
+    const live = new Set(this.sim.drops.map((d) => `${d.kind}:${d.x.toFixed(2)}:${d.z.toFixed(2)}`))
+    for (let i = this.dropMarkers.length - 1; i >= 0; i--) {
+      const m = this.dropMarkers[i]
+      const key = `${m.drop.kind}:${m.drop.x.toFixed(2)}:${m.drop.z.toFixed(2)}`
+      if (!live.has(key)) {
+        this.scene.remove(m.mesh)
+        this.dropMarkers.splice(i, 1)
+      }
+    }
+    for (const d of this.sim.drops) {
+      const key = `${d.kind}:${d.x.toFixed(2)}:${d.z.toFixed(2)}`
+      if (this.dropMarkers.some((m) => `${m.drop.kind}:${m.drop.x.toFixed(2)}:${m.drop.z.toFixed(2)}` === key)) continue
+      const mesh = d.kind === 'food'
+        ? makeTextSprite('🍞', { size: 26 })
+        : makeTextSprite('🪙', { size: 24 })
+      mesh.position.set(d.x, 0.5, d.z)
+      this.scene.add(mesh)
+      this.dropMarkers.push({ drop: { kind: d.kind, x: d.x, z: d.z }, mesh })
     }
   }
 
@@ -337,6 +499,51 @@ export class LabView {
         this.spawnParticle(bang, x, 1.6, z, 0, 2.8, 0, 0.6)
         break
       }
+      case 'comfort': {
+        for (let i = 0; i < 4; i++) {
+          const heart = makeTextSprite('🫂', { size: 24 })
+          heart.position.set(x + (Math.random() - 0.5) * 0.6, 1.8, z + (Math.random() - 0.5) * 0.6)
+          this.spawnParticle(heart, x + (Math.random() - 0.5) * 0.6, 1.8, z + (Math.random() - 0.5) * 0.6, 0, 2.2, 0, 0.9)
+        }
+        break
+      }
+      case 'heal': {
+        const spark = makeTextSprite('✨', { size: 28 })
+        spark.position.set(x, 1.6, z)
+        this.spawnParticle(spark, x, 1.6, z, 0, 2.6, 0, 0.8)
+        break
+      }
+      case 'gift': {
+        const coin = makeTextSprite('💝', { size: 28 })
+        coin.position.set(x, 1.6, z)
+        this.spawnParticle(coin, x, 1.6, z, 0, 2.6, 0, 0.9)
+        break
+      }
+      case 'scare': {
+        const ghost = makeTextSprite('👻', { size: 30 })
+        ghost.position.set(x, 1.8, z)
+        this.spawnParticle(ghost, x, 1.8, z, 0, 2.2, 0, 1.0)
+        break
+      }
+      case 'rob': {
+        const hand = makeTextSprite('🫳', { size: 28 })
+        hand.position.set(x, 1.6, z)
+        this.spawnParticle(hand, x, 1.6, z, 0, 2.4, 0, 0.8)
+        break
+      }
+      case 'play': {
+        const ball = makeTextSprite('⚽', { size: 26 })
+        ball.position.set(x, 1.6, z)
+        this.spawnParticle(ball, x, 1.6, z, 0, 2.6, 0, 0.8)
+        break
+      }
+      case 'drop': {
+        // food/coin piles are drawn persistently in syncDrops; sparkle to confirm
+        const spark = makeTextSprite('✦', { size: 22, color: '#fff4d8' })
+        spark.position.set(x, 1.0, z)
+        this.spawnParticle(spark, x, 1.0, z, 0, 1.6, 0, 0.8)
+        break
+      }
       case 'hit': {
         const bam = makeTextSprite('💥', { size: 30 })
         bam.position.set(x, 1.6, z)
@@ -378,6 +585,7 @@ export class LabView {
 
     this.consumeEvents()
     this.syncNewCreatures()
+    this.syncDrops()
     this.syncRigs(dt)
     this.updateParticles(dt)
     this.updateCamera(dt)
@@ -399,6 +607,16 @@ export class LabView {
       rig.group.position.x += (rig.targetX - rig.group.position.x) * 0.35
       rig.group.position.z += (rig.targetZ - rig.group.position.z) * 0.35
 
+      // carried stick: visible when the creature owns a weapon, swings during fights
+      rig.stick.visible = c.weapon === 'stick'
+      if (c.action === 'fight') rig.swing = 1
+      if (rig.swing > 0) {
+        rig.swing = Math.max(0, rig.swing - dt * 3)
+        rig.stick.rotation.z = Math.PI / 2 + Math.sin((1 - rig.swing) * Math.PI) * 1.4
+      } else {
+        rig.stick.rotation.z = Math.PI / 2
+      }
+
       // bob / hop / tremble / sleep / dead
       const baseY = 0
       let y = baseY
@@ -415,17 +633,17 @@ export class LabView {
         rig.sleepZ.visible = false
         const speedFactor = 0.4 + c.chem.energy * 0.5
         if (emo.type === 'afraid') {
-          y = baseY + Math.abs(Math.sin(t * 22 + rig.phase)) * 0.12
-          rig.group.position.x += Math.sin(t * 30 + rig.phase) * 0.012
+          y = baseY + Math.abs(Math.sin(t * 22 + rig.phase)) * 0.18
+          rig.group.position.x += Math.sin(t * 30 + rig.phase) * 0.015
         } else if (emo.type === 'happy') {
-          y = baseY + Math.abs(Math.sin(t * 8 + rig.phase)) * 0.35
+          y = baseY + Math.abs(Math.sin(t * 8 + rig.phase)) * 0.5
         } else {
-          y = baseY + Math.abs(Math.sin(t * speedFactor * 4 + rig.phase)) * 0.06
+          y = baseY + Math.abs(Math.sin(t * speedFactor * 4 + rig.phase)) * 0.09
         }
       }
       rig.group.position.y = y
 
-      // face: brows + eye size
+      // face: brows + eye size + mouth
       this.applyFace(rig, emo.type, emo.intensity)
 
       // name label subtle
@@ -438,53 +656,71 @@ export class LabView {
     const scale = 1 + (intensity - 0.5) * 0.2
     rig.leftEye.scale.setScalar(scale)
     rig.rightEye.scale.setScalar(scale)
-    rig.leftEye.position.z = 0.42 + (0.55 - scale) * 0.6
-    rig.rightEye.position.z = 0.42 + (0.55 - scale) * 0.6
+    rig.leftEye.position.z = 0.6 + (0.55 - scale) * 0.6
+    rig.rightEye.position.z = 0.6 + (0.55 - scale) * 0.6
 
+    const mouth = rig.mouth
     switch (emo) {
       case 'happy':
         rig.leftBrow.rotation.z = -0.35 * tilt
         rig.rightBrow.rotation.z = 0.35 * tilt
-        rig.leftBrow.position.y = 1.06
-        rig.rightBrow.position.y = 1.06
+        rig.leftBrow.position.y = 1.56
+        rig.rightBrow.position.y = 1.56
+        mouth.scale.set(1.2, 0.5, 1) // wide smile
+        mouth.position.y = 0.8
         break
       case 'angry':
         rig.leftBrow.rotation.z = 0.5 * tilt
         rig.rightBrow.rotation.z = -0.5 * tilt
-        rig.leftBrow.position.y = 1.0
-        rig.rightBrow.position.y = 1.0
+        rig.leftBrow.position.y = 1.5
+        rig.rightBrow.position.y = 1.5
+        mouth.scale.set(1.1, 0.5, 1) // gritted
+        mouth.position.y = 0.82
         break
       case 'afraid':
         rig.leftBrow.rotation.z = -0.2
         rig.rightBrow.rotation.z = 0.2
-        rig.leftBrow.position.y = 1.14
-        rig.rightBrow.position.y = 1.14
+        rig.leftBrow.position.y = 1.66
+        rig.rightBrow.position.y = 1.66
+        mouth.scale.set(0.7, 1.4, 1) // small O
+        mouth.position.y = 0.8
         break
       case 'sad':
         rig.leftBrow.rotation.z = 0.22
         rig.rightBrow.rotation.z = -0.22
-        rig.leftBrow.position.y = 0.96
-        rig.rightBrow.position.y = 0.96
+        rig.leftBrow.position.y = 1.44
+        rig.rightBrow.position.y = 1.44
+        mouth.scale.set(0.9, 0.5, 1) // small frown
+        mouth.rotation.x = 0.5
+        mouth.position.y = 0.74
         break
       case 'sleepy':
         rig.leftBrow.rotation.z = 0.1
         rig.rightBrow.rotation.z = -0.1
-        rig.leftBrow.position.y = 1.0
-        rig.rightBrow.position.y = 1.0
+        rig.leftBrow.position.y = 1.5
+        rig.rightBrow.position.y = 1.5
         rig.leftEye.scale.y = 0.35
         rig.rightEye.scale.y = 0.35
+        mouth.scale.set(0.8, 0.4, 1)
+        mouth.rotation.x = 0
+        mouth.position.y = 0.82
         break
       case 'loving':
         rig.leftBrow.rotation.z = -0.25
         rig.rightBrow.rotation.z = 0.25
-        rig.leftBrow.position.y = 1.08
-        rig.rightBrow.position.y = 1.08
+        rig.leftBrow.position.y = 1.58
+        rig.rightBrow.position.y = 1.58
+        mouth.scale.set(1.1, 0.6, 1) // warm smile
+        mouth.position.y = 0.82
         break
       default: // content
         rig.leftBrow.rotation.z = 0
         rig.rightBrow.rotation.z = 0
-        rig.leftBrow.position.y = 1.02
-        rig.rightBrow.position.y = 1.02
+        rig.leftBrow.position.y = 1.5
+        rig.rightBrow.position.y = 1.5
+        mouth.scale.set(1, 0.6, 1)
+        mouth.rotation.x = 0
+        mouth.position.y = 0.86
     }
   }
 
@@ -543,7 +779,7 @@ export class LabView {
         const d = Math.hypot(a.x - b.x, a.y - b.y)
         if (this.pinchStart > 0) {
           const ratio = d / this.pinchStart
-          this.camDist = Math.min(75, Math.max(14, this.camDist / ratio))
+          this.camDist = Math.min(130, Math.max(20, this.camDist / ratio))
           this.pinchStart = d
         }
       } else if (this.panLast) {
@@ -569,7 +805,7 @@ export class LabView {
     // wheel zoom for desktop
     el.addEventListener('wheel', (e) => {
       e.preventDefault()
-      this.camDist = Math.min(75, Math.max(14, this.camDist + e.deltaY * 0.03))
+      this.camDist = Math.min(130, Math.max(20, this.camDist + e.deltaY * 0.03))
     }, { passive: false })
 
     // process taps after each frame
@@ -639,6 +875,6 @@ export class LabView {
 
   resetCamera(): void {
     this.camTarget.set(0, 0, 0)
-    this.camDist = 40
+    this.camDist = 62
   }
 }

@@ -42,7 +42,7 @@ describe('sim — decisions and movement', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 0.15
-    c.pos = { x: -18, z: -14 } // at food tower
+    c.pos = { x: -28, z: -28 } // at food tower
     s.tick()
     expect(c.chem.hunger).toBeGreaterThan(0.2)
   })
@@ -53,7 +53,7 @@ describe('sim — economy and stealing', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 1
-    c.pos = { x: 0, z: -20 } // at bank
+    c.pos = { x: 0, z: -32 } // at bank
     c.wallet = 0
     s.tick()
     expect(c.wallet).toBeGreaterThan(0)
@@ -91,7 +91,7 @@ describe('sim — economy and stealing', () => {
     c.chem.hunger = 1
     c.wallet = 10
     c.memory.facts.bankIsSafe = 1
-    c.pos = { x: 0, z: -20 } // at bank
+    c.pos = { x: 0, z: -32 } // at bank
     s.tick()
     expect(c.banked).toBeGreaterThan(0)
   })
@@ -103,7 +103,7 @@ describe('sim — gangs and fighting', () => {
     const c = s.creatures[0]
     c.genome.aggression = 0.9
     c.genome.loyalty = 0.9
-    c.pos = { x: -4, z: 4 } // at gang tower
+    c.pos = { x: 0, z: 32 } // at gang tower
     s.tick()
     expect(c.gangId).not.toBeNull()
   })
@@ -163,8 +163,8 @@ describe('sim — love, procreation, sleep, addiction', () => {
     b.partnerId = a.id
     a.chem.bond = 1
     b.chem.bond = 1
-    a.pos = { x: -20, z: 14 } // at homes
-    b.pos = { x: -19, z: 14 }
+    a.pos = { x: -32, z: 0 } // at homes
+    b.pos = { x: -31, z: 0 }
     const before = s.creatures.length
     s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
@@ -177,7 +177,7 @@ describe('sim — love, procreation, sleep, addiction', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.energy = 0.1
-    c.pos = { x: -20, z: 14 } // at homes
+    c.pos = { x: -32, z: 0 } // at homes
     s.tick()
     expect(c.chem.energy).toBeGreaterThan(0.3)
   })
@@ -195,7 +195,7 @@ describe('sim — love, procreation, sleep, addiction', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.genome.addictionProne = 0.95
-    c.pos = { x: 20, z: 12 } // at tavern
+    c.pos = { x: -28, z: 28 } // at tavern
     s.tick()
     expect(c.chem.addiction.drink ?? 0).toBeGreaterThan(0)
   })

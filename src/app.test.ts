@@ -18,11 +18,16 @@ describe('App test-lab UI', () => {
     expect(app).toContain('export default function App')
   })
 
-  it('has all five dock buttons with data-lab-tool attrs', () => {
+  it('has the dock and the full tool set (spawn/bread/money + benevolence + malice)', () => {
     expect(app).toContain('data-dock')
-    expect(app).toContain('data-lab-tool={item.id}')
-    for (const id of ['spawn', 'bread', 'money', 'poke', 'hit']) {
-      expect(app).toContain(`id: '${id}'`)
+    expect(app).toContain('data-dock-group="benevolence"')
+    expect(app).toContain('data-dock-group="malice"')
+    expect(app).toContain('data-lab-tool="spawn"')
+    expect(app).toContain('data-lab-tool="bread"')
+    expect(app).toContain('data-lab-tool="money"')
+    for (const id of ['comfort', 'heal', 'gift', 'poke', 'hit', 'scare', 'rob']) {
+      expect(app).toContain(`'${id}'`)
+      expect(app).toContain(`data-lab-tool={def.id}`)
     }
     expect(app).toContain('aria-pressed')
   })

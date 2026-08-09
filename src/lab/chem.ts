@@ -16,6 +16,7 @@ export interface ChemState {
   intoxication: number
   bond: number // attachment to a partner
   grief: number // mourning after a partner/friend dies (0..1, heals slowly)
+  strength: number // physical power, built by play/exercise (0..1)
   addiction: Record<string, number> // substance -> 0..1 dependence
   lastDose: Record<string, number> // tick index of last dose (withdrawal timer)
 }
@@ -32,17 +33,18 @@ export function createChem(): ChemState {
     intoxication: 0,
     bond: 0,
     grief: 0,
+    strength: 0.3,
     addiction: {},
     lastDose: {},
   }
 }
 
 const DECAY = {
-  hunger: 0.004,
-  thirst: 0.005,
-  energy: 0.003,
-  social: 0.002,
-  pleasure: 0.0015,
+  hunger: 0.002, // slow — creatures need free time to play, bond, steal
+  thirst: 0.0022,
+  energy: 0.0014,
+  social: 0.001,
+  pleasure: 0.0008,
 }
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
@@ -53,9 +55,10 @@ export function tickChem(c: ChemState, tick = 1): void {
   c.energy = clamp01(c.energy - DECAY.energy)
   c.social = clamp01(c.social - DECAY.social)
   c.pleasure = clamp01(c.pleasure - DECAY.pleasure)
-  c.intoxication = clamp01(c.intoxication - 0.01)
-  c.bond = clamp01(c.bond - 0.0005)
+  c.intoxication = clamp01(c.intoxication - 0.008)
+  c.bond = clamp01(c.bond - 0.0003)
   c.grief = clamp01(c.grief - 0.004) // mourning heals slowly
+  c.strength = clamp01(c.strength - 0.0003)
 
   // withdrawal: addicted creatures panic when deprived (timer via lastDose)
   for (const sub of Object.keys(c.addiction)) {
@@ -99,4 +102,11 @@ export function applySocial(c: ChemState): void {
   c.social = clamp01(c.social + 0.4)
   c.pleasure = clamp01(c.pleasure + 0.12)
   c.bond = clamp01(c.bond + 0.03)
+}
+
+export function applyPlay(c: ChemState): void {
+  c.pleasure = clamp01(c.pleasure + 0.18)
+  c.social = clamp01(c.social + 0.1)
+  c.strength = clamp01(c.strength + 0.12) // real exercise: visible strength gain
+  c.energy = clamp01(c.energy - 0.01) // exercise costs a little energy
 }
