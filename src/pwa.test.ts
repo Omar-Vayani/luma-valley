@@ -47,8 +47,8 @@ describe('PWA manifest', () => {
   })
 
   it('matches the game palette (theme + world background)', () => {
-    expect(manifest.theme_color.toLowerCase()).toBe('#30271f') // existing meta theme-color
-    expect(manifest.background_color.toLowerCase()).toBe('#79766e') // world DAY sky color
+    expect(manifest.theme_color.toLowerCase()).toBe('#1c1a14') // existing meta theme-color
+    expect(manifest.background_color.toLowerCase()).toBe('#6b7f6b') // world ground color
   })
 
   it('declares 192/512 "any" icons plus a maskable 512', () => {
@@ -123,7 +123,7 @@ describe('index.html', () => {
 
   it('declares a safe-area-aware viewport and matching theme color', () => {
     expect(html).toContain('viewport-fit=cover')
-    expect(html).toContain('<meta name="theme-color" content="#30271f" />')
+    expect(html).toContain('<meta name="theme-color" content="#1c1a14" />')
   })
 })
 
