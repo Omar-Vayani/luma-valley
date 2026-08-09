@@ -7,6 +7,7 @@ import { createSim, type Sim } from './sim'
 import { createCreature } from './creature'
 import { createChem, type ChemState } from './chem'
 import { createMemory, type MemoryState } from './memory'
+import { createEconomy, type Economy } from './economy'
 import type { Genome } from './genetics'
 import { mulberry32 } from './rng'
 
@@ -19,6 +20,7 @@ export interface LabSave {
   nextId: number
   creatures: SavedCreature[]
   drops: { kind: 'food' | 'money'; x: number; z: number; amount: number }[]
+  economy: Economy
 }
 
 interface SavedCreature {
@@ -41,6 +43,8 @@ interface SavedCreature {
   age: number
   weapon: string | null
   fightCooldown: number
+  workProgress: number
+  gratitude: Record<number, number>
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -64,6 +68,8 @@ export function saveSim(sim: Sim): LabSave {
     age: c.age,
     weapon: c.weapon,
     fightCooldown: c.fightCooldown,
+    workProgress: c.workProgress,
+    gratitude: { ...c.gratitude },
   }))
   return {
     version: 3,
@@ -72,6 +78,7 @@ export function saveSim(sim: Sim): LabSave {
     nextId: sim.nextId,
     creatures,
     drops: sim.drops.map((d) => ({ ...d })),
+    economy: JSON.parse(JSON.stringify(sim.economy)),
   }
 }
 
@@ -99,9 +106,12 @@ export function loadSim(data: LabSave): Sim {
     c.age = sc.age
     c.weapon = sc.weapon
     c.fightCooldown = sc.fightCooldown ?? 0
+    c.workProgress = sc.workProgress ?? 0
+    c.gratitude = { ...sc.gratitude }
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)
   sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
+  sim.economy = data.economy ? JSON.parse(JSON.stringify(data.economy)) : createEconomy()
   return sim
 }

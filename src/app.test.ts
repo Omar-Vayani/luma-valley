@@ -38,11 +38,14 @@ describe('App test-lab UI', () => {
     expect(app).toContain('deriveEmotion(')
     expect(app).toContain('selected.chem.hunger')
     expect(app).toContain('selected.chem.energy')
+    expect(app).toContain('selected.chem.strength')
     expect(app).toContain('selected.chem.fear')
     expect(app).toContain('selected.wallet')
     expect(app).toContain('selected.banked')
+    expect(app).toContain('selected.weapon')
     expect(app).toContain('selected.gangId')
     expect(app).toContain('selected.action')
+    expect(app).toContain('selected.gratitude[0]')
     expect(app).toContain('partner.name')
   })
 
@@ -55,6 +58,7 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-speed="pause"')
     expect(app).toContain('data-speed="1"')
     expect(app).toContain('data-speed="2"')
+    expect(app).toContain('data-speed="10"')
   })
 
   it('has zero action-message text or toasts — the world is the feedback', () => {

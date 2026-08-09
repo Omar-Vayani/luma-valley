@@ -82,7 +82,7 @@ export default function App() {
   const [openGroup, setOpenGroup] = useState<ToolGroup>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [paused, setPaused] = useState(false)
-  const [speed, setSpeed] = useState<1 | 2>(1)
+  const [speed, setSpeed] = useState<1 | 2 | 10>(1)
 
   // Boot the sim + renderer exactly once. StrictMode double-mounts in dev:
   // the cleanup disposes the previous view before the effect re-runs, and the
@@ -180,7 +180,7 @@ export default function App() {
     viewRef.current?.setPaused(next)
   }, [])
 
-  const applySpeed = useCallback((s: 1 | 2): void => {
+  const applySpeed = useCallback((s: 1 | 2 | 10): void => {
     pausedRef.current = false
     setPaused(false)
     setSpeed(s)
@@ -234,6 +234,15 @@ export default function App() {
             >
               2×
             </button>
+            <button
+              type="button"
+              className={`speed-btn ${!paused && speed === 10 ? 'speed-btn-active' : ''}`}
+              data-speed="10"
+              aria-pressed={!paused && speed === 10}
+              onClick={() => applySpeed(10)}
+            >
+              10×
+            </button>
           </div>
         </div>
       </header>
@@ -261,13 +270,16 @@ export default function App() {
           <div className="chip-bars">
             <Bar label="hunger" value={selected.chem.hunger} color="#e8876a" />
             <Bar label="energy" value={selected.chem.energy} color="#e0b46a" />
+            <Bar label="strength" value={selected.chem.strength} color="#c96f3d" />
             <Bar label="fear" value={selected.chem.fear} color="#9fc7e8" />
           </div>
           <div className="chip-stats">
             <span>🪙 {Math.round(selected.wallet)}</span>
             <span>🏦 {Math.round(selected.banked)}</span>
+            {selected.weapon && <span>🪓 {selected.weapon}</span>}
             <span className="chip-action">{selected.action}</span>
           </div>
+          {selected.gratitude[0] > 0.2 && <p className="chip-grateful">💛 grateful to you</p>}
           {partner && <p className="chip-partner">💛 {partner.name}</p>}
         </section>
       )}

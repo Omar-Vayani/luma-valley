@@ -10,6 +10,8 @@ import { tickChem, applyPlay } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
+import { createEconomy, tickEconomy, buyFromTower, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 
@@ -38,6 +40,7 @@ export interface Sim {
   rng: () => number
   events: SimEvent[]
   drops: SimDrop[]
+  economy: Economy
   spawnCreature(genome?: Genome, x?: number, z?: number): Creature
   tick(): void
   poke(id: number): void
@@ -73,6 +76,7 @@ export function createSim(seed = 1): Sim {
     rng: mulberry32(seed),
     events: [],
     drops: [],
+    economy: createEconomy(),
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
@@ -117,6 +121,7 @@ export function createSim(seed = 1): Sim {
       const c = sim.creatureById(id)
       if (!c || !c.alive) return
       c.wallet += amount
+      c.gratitude[0] = clamp01((c.gratitude[0] ?? 0) + 0.5) // grateful to the observer
       emit(sim, 'gift', c, undefined, c.pos.x, c.pos.z)
     },
     scare(id: number): void {
@@ -187,6 +192,7 @@ export function createSim(seed = 1): Sim {
           grieve(sim, c)
         }
       }
+      tickEconomy(sim.economy)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
     },
@@ -205,20 +211,21 @@ export function emit(sim: Sim, type: SimEventType, a: Creature | undefined, b: C
   })
 }
 
-/** One decision: choose a goal + act on arrival. */
+/**
+ * Decide — the heart of rational behavior.
+ *
+ * Every tick the mind scores all candidate actions (need × gene × memory ×
+ * opportunity) and CHOOSES with a noise term (free will). The chosen action
+ * is committed to for a few ticks so creatures don't flip-flop; emergencies
+ * (collapse, terror, death) override the mind.
+ */
 function decide(sim: Sim, c: Creature): void {
-  // Mourning: no love, no socializing, slow wandering — depression visible.
-  if (c.chem.grief > 0.4) {
-    const t = TOWERS[Math.floor(sim.rng() * TOWERS.length)]
-    goTo(sim, c, t.id)
-    c.action = 'mourn' // goTo sets 'go X'; keep the visible mourning label
-    return
-  }
-
+  // Emergencies first — these override even a committed intention.
   if (c.sleeping) {
     if (c.chem.energy > 0.8) {
       c.sleeping = false
       c.action = 'idle'
+      c.intention = null
     } else {
       c.action = 'sleep'
       c.chem.energy = clamp01(c.chem.energy + 0.35)
@@ -226,137 +233,19 @@ function decide(sim: Sim, c: Creature): void {
     }
   }
 
-  const at = towerAt(c.pos.x, c.pos.z)
-
-  // 1. exhausted: collapse
   if (c.chem.energy < 0.08) {
     c.sleeping = true
     c.action = 'sleep'
     return
   }
 
-  // 1b. afraid (high fear + fearful genes): flee away from danger
-  if (c.chem.fear > 0.6 && c.genome.fearfulness > 0.5 && c.genome.courage < 0.5) {
+  if (c.chem.fear > 0.75 && c.genome.fearfulness > 0.5 && c.genome.courage < 0.5) {
     flee(sim, c)
     return
   }
 
-  // 1c. wounded: seek the pharmacy to heal before doing anything else
-  if (c.chem.health < 0.4) {
-    if (at?.id === 'pharmacy') {
-      const dose = 0.1 + c.genome.addictionProne * 0.25
-      c.chem.health = clamp01(c.chem.health + 0.3)
-      c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
-      c.chem.lastDose.medicine = sim.time
-      emit(sim, 'medicine', c, undefined, c.pos.x, c.pos.z)
-      c.action = 'medicine'
-      return
-    }
-    goTo(sim, c, 'pharmacy')
-    return
-  }
-
-  // 2. at homes + tired: sleep
-  if (at?.id === 'homes' && c.chem.energy < 0.6) {
-    c.sleeping = true
-    c.action = 'sleep'
-    c.chem.energy = clamp01(c.chem.energy + 0.35)
-    return
-  }
-
-  // 3. hunger: go to food, eat there
-  if (c.chem.hunger < 0.3) {
-    if (at?.id === 'food') {
-      c.eat()
-      preferPlace(c.memory, 'food')
-      emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
-      c.action = 'eat'
-      return
-    }
-    // a nearby food drop is closer than the tower
-    const foodDrop = nearestDrop(sim, c, 'food', 30)
-    if (foodDrop) {
-      goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
-      return
-    }
-    goTo(sim, c, 'food')
-    return
-  }
-
-  // 4. bank: deposit if learned safe, else work
-  if (at?.id === 'bank') {
-    if (c.memory.facts.bankIsSafe && c.wallet > 4) {
-      c.deposit(Math.min(4, c.wallet))
-      c.action = 'deposit'
-      return
-    }
-    c.work(2)
-    emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
-    c.action = 'work'
-    return
-  }
-
-  // 5. tavern: pleasure + drink (addiction hooks)
-  if (at?.id === 'tavern') {
-    c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
-    c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
-    const dose = 0.06 + c.genome.addictionProne * 0.2
-    c.chem.addiction.drink = clamp01((c.chem.addiction.drink ?? 0) + dose)
-    c.chem.lastDose.drink = sim.time
-    emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
-    c.action = 'drink'
-    return
-  }
-
-  // 6. pharmacy: medicine when hurt (addictive)
-  if (at?.id === 'pharmacy' && c.chem.health < 0.7) {
-    const dose = 0.1 + c.genome.addictionProne * 0.25
-    c.chem.health = clamp01(c.chem.health + 0.3)
-    c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
-    c.chem.lastDose.medicine = sim.time
-    emit(sim, 'medicine', c, undefined, c.pos.x, c.pos.z)
-    c.action = 'medicine'
-    return
-  }
-
-  // 7. tools: buy a weapon when able
-  if (at?.id === 'tools' && !c.weapon && c.wallet >= 5) {
-    c.pay(5)
-    c.weapon = 'stick'
-    c.action = 'buy'
-    return
-  }
-
-  // 8. gang: aggressive + loyal join
-  if (at?.id === 'gang' && c.gangId === null && c.genome.aggression > 0.6 && c.genome.loyalty > 0.5) {
-    c.gangId = 1
-    emit(sim, 'joinGang', c, undefined, c.pos.x, c.pos.z)
-    c.action = 'gang'
-    return
-  }
-
-  // 8b. play/exercise: bored or weak creatures seek the playground
-  if (c.chem.pleasure < 0.4 || c.chem.strength < 0.2) {
-    if (at?.id === 'play') {
-      applyPlay(c.chem)
-      emit(sim, 'play', c, undefined, c.pos.x, c.pos.z)
-      c.action = 'play'
-      return
-    }
-    goTo(sim, c, 'play')
-    return
-  }
-
-  // 8c. money: poor or greedy creatures collect dropped coins
-  if (c.wallet < 4 || c.genome.greed > 0.6) {
-    const coin = nearestDrop(sim, c, 'money', 40)
-    if (coin) {
-      goToPoint(c, coin.x, coin.z, 'collect')
-      return
-    }
-  }
-
-  // 9. partner + homes + bond: procreate (with cooldown)
+  // Emergent bonds: a partnered creature at home with a strong bond procreates.
+  const at = towerAt(c.pos.x, c.pos.z)
   if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
     const partner = sim.creatureById(c.partnerId)
     const lastBirth = c.memory.facts.partnerIsHere ?? -1000
@@ -368,32 +257,188 @@ function decide(sim: Sim, c: Creature): void {
     }
   }
 
-  // 10. social: near creatures — vendetta fight, steal, bond, or socialize
-  const near = nearestOther(sim, c, SOCIAL_RANGE)
-  if (near) {
-    const d = dist(c.pos.x, c.pos.z, near.pos.x, near.pos.z)
-    if (c.fightCooldown <= 0 && c.memory.vendettas[near.id] && d <= FIGHT_RANGE) {
-      fight(sim, c, near)
-      return
-    }
-    if (c.genome.theft > 0.6 && near.wallet > 0 && d <= STEAL_RANGE && c.wallet < 6) {
-      steal(sim, c, near)
-      return
-    }
-    if (c.genome.sociability > 0.5 && c.bonds[near.id] === undefined && d <= SOCIAL_RANGE) {
-      c.socialize(near)
-      emit(sim, 'love', c, near, c.pos.x, c.pos.z)
-      c.action = 'social'
-      return
-    }
-    if (c.fightCooldown <= 0 && c.genome.aggression > 0.7 && d <= FIGHT_RANGE) {
-      fight(sim, c, near)
-      return
-    }
+  // Aggressive + loyal creatures join the gang when they find it.
+  if (at?.id === 'gang' && c.gangId === null && c.genome.aggression > 0.6 && c.genome.loyalty > 0.5) {
+    c.gangId = 1
+    emit(sim, 'joinGang', c, undefined, c.pos.x, c.pos.z)
+    c.action = 'gang'
+    return
   }
 
-  // 11. wander: pick a tower to explore
-  wander(sim, c)
+  // Continue a committed action while it remains sensible.
+  if (c.intention && c.intentionTicks > 0 && actionValid(sim, c, c.intention)) {
+    c.intentionTicks--
+    execute(sim, c, c.intention)
+    return
+  }
+
+  // Re-score and pick a fresh action (mind + free will).
+  const scores = scoreActions(sim, c)
+  const chosen = chooseAction(scores, sim.rng)
+  c.intention = chosen
+  c.intentionTicks = COMMITMENT_TICKS
+  execute(sim, c, chosen)
+}
+
+/** Run one tick of a chosen action. */
+function execute(sim: Sim, c: Creature, action: ActionName): void {
+  const at = towerAt(c.pos.x, c.pos.z)
+
+  switch (action) {
+    case 'food': {
+      if (at?.id === 'food') {
+        if (c.chem.hunger < 0.85 && buyFromTower(sim.economy, 'food', c)) {
+          c.eat()
+          preferPlace(c.memory, 'food')
+          emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'eat'
+          return
+        }
+      }
+      const foodDrop = nearestDrop(sim, c, 'food', 40)
+      if (foodDrop) {
+        goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+        return
+      }
+      goTo(sim, c, 'food')
+      return
+    }
+    case 'work': {
+      if (at?.id === 'work') {
+        c.workProgress += 1
+        c.action = 'work'
+        if (c.workProgress >= WORK_SHIFT_TICKS) {
+          c.wallet += WORK_PAY
+          c.workProgress = 0
+          emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'work done'
+        }
+        return
+      }
+      goTo(sim, c, 'work')
+      return
+    }
+    case 'sleep': {
+      if (at?.id === 'homes' || c.chem.energy < 0.2) {
+        c.sleeping = true
+        c.action = 'sleep'
+        c.chem.energy = clamp01(c.chem.energy + 0.35)
+        return
+      }
+      goTo(sim, c, 'homes')
+      return
+    }
+    case 'heal': {
+      if (at?.id === 'pharmacy' && buyFromTower(sim.economy, 'pharmacy', c)) {
+        const dose = 0.1 + c.genome.addictionProne * 0.25
+        c.chem.health = clamp01(c.chem.health + 0.3)
+        c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
+        c.chem.lastDose.medicine = sim.time
+        emit(sim, 'medicine', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'medicine'
+        return
+      }
+      goTo(sim, c, 'pharmacy')
+      return
+    }
+    case 'drink': {
+      if (at?.id === 'tavern' && buyFromTower(sim.economy, 'tavern', c)) {
+        c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
+        c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
+        const dose = 0.06 + c.genome.addictionProne * 0.2
+        c.chem.addiction.drink = clamp01((c.chem.addiction.drink ?? 0) + dose)
+        c.chem.lastDose.drink = sim.time
+        emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'drink'
+        return
+      }
+      goTo(sim, c, 'tavern')
+      return
+    }
+    case 'buyWeapon': {
+      if (at?.id === 'tools' && !c.weapon && buyFromTower(sim.economy, 'tools', c)) {
+        c.weapon = 'stick'
+        c.action = 'buy'
+        return
+      }
+      goTo(sim, c, 'tools')
+      return
+    }
+    case 'deposit': {
+      if (at?.id === 'bank' && c.wallet > 2) {
+        c.deposit(Math.min(4, c.wallet))
+        c.action = 'deposit'
+        return
+      }
+      goTo(sim, c, 'bank')
+      return
+    }
+    case 'play': {
+      if (at?.id === 'play') {
+        applyPlay(c.chem)
+        emit(sim, 'play', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'play'
+        return
+      }
+      goTo(sim, c, 'play')
+      return
+    }
+    case 'social': {
+      const near = nearestOther(sim, c, SOCIAL_RANGE)
+      if (near) {
+        c.socialize(near)
+        emit(sim, 'love', c, near, c.pos.x, c.pos.z)
+        c.action = 'social'
+        return
+      }
+      wander(sim, c)
+      return
+    }
+    case 'steal': {
+      const near = nearestOther(sim, c, STEAL_RANGE)
+      if (near && near.wallet > 0) {
+        steal(sim, c, near)
+        return
+      }
+      wander(sim, c)
+      return
+    }
+    case 'share': {
+      const near = nearestOther(sim, c, SOCIAL_RANGE)
+      if (near && near.wallet < 2 && c.wallet > 8) {
+        const gift = Math.min(3, c.wallet - 2)
+        c.wallet -= gift
+        near.wallet += gift
+        near.gratitude[c.id] = clamp01((near.gratitude[c.id] ?? 0) + 0.3)
+        emit(sim, 'gift', c, near, c.pos.x, c.pos.z)
+        c.action = 'share'
+        return
+      }
+      wander(sim, c)
+      return
+    }
+    case 'fight': {
+      const near = nearestOther(sim, c, FIGHT_RANGE)
+      if (near && c.fightCooldown <= 0) {
+        fight(sim, c, near)
+        return
+      }
+      wander(sim, c)
+      return
+    }
+    case 'collect': {
+      const coin = nearestDrop(sim, c, 'money', 40)
+      if (coin) {
+        goToPoint(c, coin.x, coin.z, 'collect')
+        return
+      }
+      wander(sim, c)
+      return
+    }
+    default: {
+      wander(sim, c)
+    }
+  }
 }
 
 function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {

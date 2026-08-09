@@ -283,6 +283,12 @@ button { font: inherit; cursor: pointer; }
   color: #f08fb0;
 }
 
+.chip-grateful {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #e0b46a;
+}
+
 /* Tool palettes: a row of action buttons above the dock when a group
    (benevolence / malice) is open. 56px targets, same dark theme. */
 .tool-palette {

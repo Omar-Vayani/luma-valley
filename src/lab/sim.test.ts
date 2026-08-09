@@ -49,13 +49,14 @@ describe('sim — decisions and movement', () => {
 })
 
 describe('sim — economy and stealing', () => {
-  it('a creature works at the bank and earns money', () => {
+  it('a creature works a shift at the work tower and earns money', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
-    c.chem.hunger = 1
-    c.pos = { x: 0, z: -32 } // at bank
+    c.chem.hunger = 0.3 // hungry + broke → motivated to work
+    c.pos = { x: 0, z: 44 } // at work tower
     c.wallet = 0
-    s.tick()
+    // needs ~24 ticks of staying put before payday
+    for (let i = 0; i < 30; i++) s.tick()
     expect(c.wallet).toBeGreaterThan(0)
   })
 
@@ -65,10 +66,12 @@ describe('sim — economy and stealing', () => {
     const victim = s.creatures[1]
     thief.genome.theft = 0.95
     thief.genome.greed = 0.95
+    thief.chem.hunger = 0.3 // desperate — hungry enough to steal
+    thief.wallet = 0 // and broke — cannot afford food
     victim.wallet = 10
     thief.pos = { x: 0, z: 0 }
     victim.pos = { x: 0.5, z: 0 }
-    s.tick()
+    for (let i = 0; i < 10; i++) s.tick()
     expect(victim.wallet).toBeLessThan(10)
     expect(thief.wallet).toBeGreaterThan(0)
   })
@@ -78,10 +81,12 @@ describe('sim — economy and stealing', () => {
     const thief = s.creatures[0]
     const victim = s.creatures[1]
     thief.genome.theft = 0.95
+    thief.chem.hunger = 0.3 // desperate
+    thief.wallet = 0 // broke — cannot afford food
     victim.wallet = 5
     thief.pos = { x: 0, z: 0 }
     victim.pos = { x: 0.5, z: 0 }
-    s.tick()
+    for (let i = 0; i < 10; i++) s.tick()
     expect(victim.memory.facts.bankIsSafe).toBeGreaterThan(0)
   })
 
@@ -92,7 +97,7 @@ describe('sim — economy and stealing', () => {
     c.wallet = 10
     c.memory.facts.bankIsSafe = 1
     c.pos = { x: 0, z: -32 } // at bank
-    s.tick()
+    for (let i = 0; i < 10; i++) s.tick()
     expect(c.banked).toBeGreaterThan(0)
   })
 })
@@ -195,8 +200,10 @@ describe('sim — love, procreation, sleep, addiction', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.genome.addictionProne = 0.95
+    c.chem.pleasure = 0.1 // sad — the tavern is the rational escape
+    c.wallet = 10 // can afford a drink
     c.pos = { x: -28, z: 28 } // at tavern
-    s.tick()
+    for (let i = 0; i < 10; i++) s.tick()
     expect(c.chem.addiction.drink ?? 0).toBeGreaterThan(0)
   })
 })

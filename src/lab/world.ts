@@ -6,7 +6,7 @@
 export const WORLD_SIZE = 96
 export const WORLD_HALF = WORLD_SIZE / 2
 
-export type TowerId = 'food' | 'bank' | 'pharmacy' | 'homes' | 'tools' | 'tavern' | 'gang' | 'play'
+export type TowerId = 'food' | 'bank' | 'pharmacy' | 'homes' | 'tools' | 'tavern' | 'gang' | 'play' | 'work'
 
 export interface Tower {
   id: TowerId
@@ -18,7 +18,7 @@ export interface Tower {
   radius: number // interaction radius
 }
 
-export const TOWER_IDS: TowerId[] = ['food', 'bank', 'pharmacy', 'homes', 'tools', 'tavern', 'gang', 'play']
+export const TOWER_IDS: TowerId[] = ['food', 'bank', 'pharmacy', 'homes', 'tools', 'tavern', 'gang', 'play', 'work']
 
 /**
  * Pure data registry shared by sim, renderer, and QA.
@@ -26,6 +26,7 @@ export const TOWER_IDS: TowerId[] = ['food', 'bank', 'pharmacy', 'homes', 'tools
  *   food        bank       pharmacy
  *   homes       [plaza]    tools
  *   tavern      gang       play
+ *   work        (south)    work
  */
 export const TOWERS: Tower[] = [
   { id: 'food', label: 'food', icon: '🍞', color: '#c98a3d', x: -28, z: -28, radius: 5 },
@@ -34,8 +35,9 @@ export const TOWERS: Tower[] = [
   { id: 'homes', label: 'homes', icon: '🏠', color: '#9a7bc9', x: -32, z: 0, radius: 6 },
   { id: 'tools', label: 'tools', icon: '🪓', color: '#c96f3d', x: 32, z: 0, radius: 5 },
   { id: 'tavern', label: 'tavern', icon: '🍺', color: '#c93d6a', x: -28, z: 28, radius: 5 },
-  { id: 'gang', label: 'gang', icon: '⚔️', color: '#5a5a68', x: 0, z: 32, radius: 6 },
-  { id: 'play', label: 'play', icon: '🎪', color: '#d9a13d', x: 28, z: 28, radius: 6 },
+  { id: 'gang', label: 'gang', icon: '⚔️', color: '#5a5a68', x: 0, z: 32, radius: 5 },
+  { id: 'play', label: 'play', icon: '🎪', color: '#d9a13d', x: 28, z: 28, radius: 5 },
+  { id: 'work', label: 'work', icon: '⚒️', color: '#b5794a', x: 0, z: 44, radius: 5 },
 ]
 
 export function findTower(id: TowerId): Tower | undefined {

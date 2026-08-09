@@ -40,11 +40,11 @@ export function createChem(): ChemState {
 }
 
 const DECAY = {
-  hunger: 0.002, // slow — creatures need free time to play, bond, steal
-  thirst: 0.0022,
-  energy: 0.0014,
-  social: 0.001,
-  pleasure: 0.0008,
+  hunger: 0.001, // very slow — creatures should live long, complex lives
+  thirst: 0.0011,
+  energy: 0.0007,
+  social: 0.0006,
+  pleasure: 0.0005,
 }
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
@@ -59,6 +59,11 @@ export function tickChem(c: ChemState, tick = 1): void {
   c.bond = clamp01(c.bond - 0.0003)
   c.grief = clamp01(c.grief - 0.004) // mourning heals slowly
   c.strength = clamp01(c.strength - 0.0003)
+
+  // starvation: an empty belly slowly damages health — food is not optional
+  if (c.hunger < 0.05) {
+    c.health = clamp01(c.health - 0.003)
+  }
 
   // withdrawal: addicted creatures panic when deprived (timer via lastDose)
   for (const sub of Object.keys(c.addiction)) {

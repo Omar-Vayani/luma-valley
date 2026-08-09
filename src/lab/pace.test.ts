@@ -9,16 +9,16 @@ const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5
 describe('sim pace — creatures get free time', () => {
   it('a full-fed creature stays above half hunger for a long stretch', () => {
     const c = createChem()
-    for (let i = 0; i < 150; i++) tickChem(c) // ~25s of lab time
+    for (let i = 0; i < 400; i++) tickChem(c) // ~66s of lab time
     expect(c.hunger).toBeGreaterThan(0.5)
-    expect(c.energy).toBeGreaterThan(0.4)
+    expect(c.energy).toBeGreaterThan(0.5)
   })
 
   it('needs decay slowly enough that a creature can socialize before starving', () => {
     const c = createChem()
-    for (let i = 0; i < 120; i++) tickChem(c) // 20s
+    for (let i = 0; i < 300; i++) tickChem(c) // 50s
     expect(c.hunger).toBeGreaterThan(0.6)
-    expect(c.social).toBeGreaterThan(0.5)
+    expect(c.social).toBeGreaterThan(0.6)
   })
 })
 
