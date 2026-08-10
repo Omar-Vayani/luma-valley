@@ -40,11 +40,11 @@ export function createChem(): ChemState {
 }
 
 const DECAY = {
-  hunger: 0.001, // very slow — creatures should live long, complex lives
-  thirst: 0.0011,
-  energy: 0.0007,
-  social: 0.0006,
-  pleasure: 0.0005,
+  hunger: 0.0005, // very slow — creatures live long, complex lives, and the
+  thirst: 0.00055, // player has TIME to watch, interact, and teach them
+  energy: 0.00035,
+  social: 0.0003,
+  pleasure: 0.00025,
 }
 
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))

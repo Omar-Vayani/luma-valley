@@ -134,7 +134,6 @@ export default function App() {
   // first-person (player) mode — ALWAYS on: you are the visitor. No observer.
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
   const [pointerLocked, setPointerLocked] = useState(false)
-  const [joyVec, setJoyVec] = useState({ x: 0, y: 0 })
   const joyPointerRef = useRef<number | null>(null)
   const joyCenterRef = useRef({ x: 0, y: 0 })
   const lookPointerRef = useRef<number | null>(null)
@@ -310,7 +309,6 @@ export default function App() {
   }, [])
 
   const applyJoystick = useCallback((x: number, y: number): void => {
-    setJoyVec({ x, y })
     if (viewRef.current) viewRef.current.joystick = { x, y }
   }, [])
 
@@ -324,30 +322,34 @@ export default function App() {
     applyJoystick((dx * cl) / R, (-dy * cl) / R) // up on the stick = forward
   }, [applyJoystick])
 
-  // The joystick base stays fixed where it was first touched (its own center),
-  // so the thumb never jumps and the deflection reads predictably.
+  // Floating joystick: wherever you touch the LEFT half of the screen becomes
+  // the stick's center. This lets the thumb rest anywhere and keeps the camera
+  // out of it (stopPropagation on the move zone).
   const onJoyPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (joyPointerRef.current !== null) return
+    e.stopPropagation()
     joyPointerRef.current = e.pointerId
-    const rect = e.currentTarget.getBoundingClientRect()
-    joyCenterRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    joyCenterRef.current = { x: e.clientX, y: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
     updateJoyFromPointer(e.clientX, e.clientY)
   }, [updateJoyFromPointer])
 
   const onJoyPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (joyPointerRef.current !== e.pointerId) return
+    e.stopPropagation()
     updateJoyFromPointer(e.clientX, e.clientY)
   }, [updateJoyFromPointer])
 
   const onJoyPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (joyPointerRef.current !== e.pointerId) return
+    e.stopPropagation()
     joyPointerRef.current = null
     applyJoystick(0, 0)
   }, [applyJoystick])
 
   const onLookPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (lookPointerRef.current !== null) return
+    e.stopPropagation()
     lookPointerRef.current = e.pointerId
     lookLastRef.current = { x: e.clientX, y: e.clientY }
     lookDownRef.current = { x: e.clientX, y: e.clientY, t: performance.now() }
@@ -357,6 +359,7 @@ export default function App() {
 
   const onLookPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (lookPointerRef.current !== e.pointerId) return
+    e.stopPropagation()
     const last = lookLastRef.current
     const dx = e.clientX - last.x
     const dy = e.clientY - last.y
@@ -368,6 +371,7 @@ export default function App() {
 
   const onLookPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (lookPointerRef.current !== e.pointerId) return
+    e.stopPropagation()
     lookPointerRef.current = null
     // a still tap on the look zone raycasts like any other tap
     if (!lookMovedRef.current && performance.now() - lookDownRef.current.t < 350) {
@@ -425,9 +429,23 @@ export default function App() {
         </div>
       )}
 
-      {/* touch controls: full-screen look zone + thumb joystick (player mode) */}
+      {/* touch controls: LEFT half = move (floating joystick, invisible),
+          RIGHT half = look. The move zone stops propagation so touching it
+          NEVER moves the camera. */}
       {fpOn && isTouch && (
         <>
+          <div
+            className="fp-move"
+            data-move
+            onPointerDown={onJoyPointerDown}
+            onPointerMove={onJoyPointerMove}
+            onPointerUp={onJoyPointerUp}
+            onPointerCancel={onJoyPointerUp}
+            onLostPointerCapture={() => {
+              joyPointerRef.current = null
+              applyJoystick(0, 0)
+            }}
+          />
           <div
             className="fp-look"
             data-look
@@ -439,24 +457,6 @@ export default function App() {
               lookPointerRef.current = null
             }}
           />
-          <div
-            className="fp-joystick"
-            data-joystick
-            onPointerDown={onJoyPointerDown}
-            onPointerMove={onJoyPointerMove}
-            onPointerUp={onJoyPointerUp}
-            onPointerCancel={onJoyPointerUp}
-            onLostPointerCapture={() => {
-              joyPointerRef.current = null
-              applyJoystick(0, 0)
-            }}
-          >
-            <div
-              className="fp-joystick-thumb"
-              data-joystick-thumb
-              style={{ transform: `translate(${joyVec.x * 48}px, ${-joyVec.y * 48}px)` }}
-            />
-          </div>
         </>
       )}
 

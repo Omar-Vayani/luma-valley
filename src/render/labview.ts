@@ -1563,30 +1563,23 @@ export class LabView {
   private updateCamera(dt: number): void {
     // TRUE first-person: the camera sits AT the player's eye height looking
     // along facing + fpPitch — you never see your own figure, you ARE it.
+    // Orientation is set DIRECTLY with YXZ Euler (no lookAt): Three.js cameras
+    // look down local −Z, so at facing=0 the view looks toward world −Z.
+    // Movement uses the same convention (−Z forward) → screen-right is
+    // world-right and the view is never upside-down.
     if (this.playerId !== null) {
       const p = this.sim.player
       if (p && p.alive) {
-        const f = p.facing
-        const sin = Math.sin(f)
-        const cos = Math.cos(f)
         const eye = new THREE.Vector3(p.pos.x, 1.65, p.pos.z)
         this.camera.position.lerp(eye, 1 - Math.pow(0.001, dt))
-        // Orient via lookAt with an INVERTED up vector. Three.js cameras look
-        // down −Z; lookAt points −Z at the target, which rotates the camera
-        // 180° around Y and MIRRORS left/right (the "controls are inverted"
-        // bug). Setting up = −Y cancels that mirror: screen-right becomes
-        // world-right while the view still points along (sin f, cos f).
-        this.camera.up.set(0, -1, 0)
-        // up=−Y also flips the pitch sign — negate so +pitch still looks up
-        const look = eye
-          .clone()
-          .add(new THREE.Vector3(sin * Math.cos(-this.fpPitch), Math.sin(-this.fpPitch), cos * Math.cos(-this.fpPitch)))
-        this.camera.lookAt(look)
+        this.camera.rotation.order = 'YXZ'
+        this.camera.rotation.y = p.facing
+        this.camera.rotation.x = this.fpPitch
+        this.camera.rotation.z = 0
         return
       }
       // player dead → drop back to the observer camera
       this.playerId = null
-      this.camera.up.set(0, 1, 0) // restore normal up for the observer view
     }
     const look = new THREE.Vector3(this.camTarget.x, 0, this.camTarget.z)
     const offset = new THREE.Vector3(0, Math.sin(this.camTilt), Math.cos(this.camTilt)).multiplyScalar(this.camDist)
@@ -1768,10 +1761,12 @@ export class LabView {
   }
 
   /** Turn the first-person view: yaw changes player.facing, pitch is fpPitch.
-   *  Drag right (positive dx) turns RIGHT; drag up (negative dy) looks UP. */
+   *  Camera forward is (−sin f, −cos f); increasing f rotates it toward −X
+   *  (screen-left), so NEGATE yaw: drag right (positive yaw) turns RIGHT.
+   *  Drag up (negative dy on screen) looks UP. */
   playerLook(yaw: number, pitch: number): void {
     const p = this.sim.player
-    if (p) p.facing += yaw
+    if (p) p.facing -= yaw
     this.fpPitch = Math.min(1.2, Math.max(-1.2, this.fpPitch + pitch))
   }
 
@@ -1813,24 +1808,26 @@ export class LabView {
     let mz = 0
     const mag = Math.hypot(jx, jy)
     if (mag > 0.08) {
-      // joystick is facing-relative: up = forward, right = strafe right
+      // Camera looks down −Z at facing=0 (YXZ Euler). So "forward" is the
+      // direction the camera faces: (−sin f, −cos f); screen-right is
+      // (cos f, −sin f). Joystick up = forward, right = strafe right.
       const sin = Math.sin(p.facing)
       const cos = Math.cos(p.facing)
-      mx = sin * jy + cos * jx
-      mz = cos * jy - sin * jx
+      mx = -sin * jy + cos * jx
+      mz = -cos * jy - sin * jx
     }
     if (this.pointerLocked) {
       const sin = Math.sin(p.facing)
       const cos = Math.cos(p.facing)
-      if (this.keys.has('w')) { mx += sin; mz += cos }
-      if (this.keys.has('s')) { mx -= sin; mz -= cos }
-      if (this.keys.has('d')) { mx += cos; mz -= sin }
-      if (this.keys.has('a')) { mx -= cos; mz += sin }
+      if (this.keys.has('w')) { mx += -sin; mz += -cos }
+      if (this.keys.has('s')) { mx += sin; mz += cos }
+      if (this.keys.has('d')) { mx += cos; mz += -sin }
+      if (this.keys.has('a')) { mx += -cos; mz += sin }
     }
     const len = Math.hypot(mx, mz)
     if (len > 0.001) {
       // speed scales with joystick deflection, capped at full speed
-      const step = 6.5 * dt * Math.min(1, len)
+      const step = 5.0 * dt * Math.min(1, len)
       this.playerMove((mx / len) * step, (mz / len) * step)
     }
   }

@@ -82,7 +82,7 @@ describe('App test-lab UI', () => {
 
   it('has first-person mode: always-on player, joystick, look zone, pointer lock, social dock', () => {
     expect(app).toContain('data-view-mode="first-person"')
-    expect(app).toContain('data-joystick')
+    expect(app).toContain('data-move')
     expect(app).toContain('data-look')
     expect(app).toContain('data-pointerlock')
     expect(app).toContain('data-lab-tool="social"')
@@ -90,7 +90,7 @@ describe('App test-lab UI', () => {
     expect(app).toContain('playerSocialize')
     expect(app).toContain("import { LabView } from './render/labview'")
     expect(css).toContain('.view-toggle')
-    expect(css).toContain('.fp-joystick')
+    expect(css).toContain('.fp-move')
     expect(css).toContain('.fp-look')
     expect(css).toContain('.fp-btn')
   })

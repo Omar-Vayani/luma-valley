@@ -78,6 +78,7 @@ export interface SavedPlayer {
   bondWith: number[]
   name: string
   hunger: number
+  language: { vocab: { concept: string; word: string; strength: number }[] }
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -137,6 +138,7 @@ export function saveSim(sim: Sim): LabSave {
       bondWith: [...sim.player.bondWith],
       name: sim.player.name,
       hunger: sim.player.hunger,
+      language: { vocab: Array.from(sim.player.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })) },
     },
   }
 }
@@ -211,6 +213,12 @@ export function loadSim(data: LabSave): Sim {
     sim.player.bondWith = [...sp.bondWith]
     sim.player.name = sp.name
     sim.player.hunger = sp.hunger ?? 0.75
+    if (sp.language?.vocab) {
+      for (const v of sp.language.vocab) {
+        sim.player.language.vocab.set(v.concept, { word: v.word, strength: v.strength })
+        sim.player.language.wordToConcept.set(v.word, v.concept)
+      }
+    }
   }
   return sim
 }

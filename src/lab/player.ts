@@ -5,6 +5,7 @@
  * sim's need/mind loop — the player acts by direct control.
  */
 import { createInventory, type Inventory, type ItemId } from './inventory'
+import { createLanguage, type LanguageState } from './language'
 
 export interface Player {
   pos: { x: number; z: number }
@@ -16,8 +17,8 @@ export interface Player {
   weapon: ItemId | null
   bondWith: number[] // creature ids the player has bonded with
   name: string
-  /** 0..1 — how full the player is; bread restores it, time drains it. */
-  hunger: number
+  hunger: number // 0..1 — how full the player is; bread restores it
+  language: LanguageState // the words the player has taught/learned
 }
 
 export function createPlayer(x: number, z: number, name = 'Visitor'): Player {
@@ -32,6 +33,7 @@ export function createPlayer(x: number, z: number, name = 'Visitor'): Player {
     bondWith: [],
     name,
     hunger: 0.75,
+    language: createLanguage(0),
   }
 }
 

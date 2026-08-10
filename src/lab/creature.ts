@@ -55,6 +55,8 @@ export interface Creature {
   ageLimit: number // ticks until natural aging begins (genetic)
   inventory: Inventory // items the creature bought and keeps
   vengeance: VengeanceState // grudges + revenge planning
+  talkingTo: number | null // creature id being talked to (stops to interact)
+  busyTicks: number // remaining ticks of a committed interaction (talk/fight)
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -110,6 +112,8 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     ageLimit: ageLimitFor(Math.random()),
     inventory: createInventory(),
     vengeance: createVengeance(),
+    talkingTo: null,
+    busyTicks: 0,
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },

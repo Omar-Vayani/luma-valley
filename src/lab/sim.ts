@@ -12,7 +12,7 @@ import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
 import { createEconomy, tickEconomy, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
-import { learnWord, shareWithNeighbors, sayWord } from './language'
+import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
 import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
@@ -76,6 +76,8 @@ export interface Sim {
   rob(id: number): void
   creatureById(id: number): Creature | undefined
   playerSocialize(): void
+  playerTeach(concept: string, word: string): void
+  playerSay(concept: string): void
   player: Player
   playerFight(targetId: number): void
   playerPickUp(): void
@@ -84,7 +86,7 @@ export interface Sim {
   creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean
 }
 
-const SPEED = 0.45
+const SPEED = 0.3 // calm, visible pace — the player can keep up and interact
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
@@ -132,12 +134,67 @@ export function createSim(seed = 1): Sim {
       if (!isPlayerAlive(p)) return
       const near = nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE)
       if (!near) return
+      // Interaction etiquette: a creature STOPS to talk unless it is genuinely
+      // busy (working, fighting, fleeing, sleeping, mourning) or too wary of
+      // the player. Stopping lets the player actually interact with them.
+      const busy = near.busyTicks > 0 || near.action === 'fight' || near.action === 'flee' ||
+        near.action === 'sleep' || near.action === 'work' || near.action === 'carry'
+      const wary = near.chem.fear > 0.6 || (near.memory.vendettas[0] ?? 0) > 0.5
+      if (busy) {
+        near.action = `${near.action} (busy)`
+        return
+      }
+      if (wary) {
+        near.action = 'wary'
+        near.chem.fear = clamp01(near.chem.fear - 0.02)
+        return
+      }
       near.bonds[0] = clamp01((near.bonds[0] ?? 0) + 0.12)
       near.chem.fear = clamp01(near.chem.fear - 0.05)
       applySocial(near.chem)
       if (!p.bondWith.includes(near.id)) p.bondWith.push(near.id)
-      near.action = 'social'
+      // stop and face the player for a friendly chat
+      near.talkingTo = 0 // the player
+      near.busyTicks = 30
+      near.action = 'chat'
+      near.facing = Math.atan2(p.pos.x - near.pos.x, p.pos.z - near.pos.z)
       emit(sim, 'love', near, undefined, near.pos.x, near.pos.z)
+    },
+    playerTeach(concept: string, word: string): void {
+      // The player teaches a word: creatures in earshot learn the mapping
+      // concept ⇄ word (e.g. teach "wum" while pointing at bread → they learn
+      // food ⇄ wum). Teaching also boosts the bond with nearby creatures.
+      const p = sim.player
+      if (!isPlayerAlive(p) || !word) return
+      const cleaned = word.trim().toLowerCase().slice(0, 12)
+      if (!cleaned) return
+      if (!CONCEPTS.includes(concept)) return
+      for (const c of sim.creatures) {
+        if (!c.alive) continue
+        if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
+        hearWord(c.language, cleaned, concept, 0.85)
+        c.bonds[0] = clamp01((c.bonds[0] ?? 0) + 0.08)
+        c.action = 'learn'
+        c.talkingTo = 0
+        c.busyTicks = Math.max(c.busyTicks, 15)
+        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+      }
+    },
+    playerSay(concept: string): void {
+      // The player says the word they know for a concept — creatures nearby
+      // hear it and (with the context) reinforce their own mapping.
+      const p = sim.player
+      if (!isPlayerAlive(p)) return
+      const word = sim.player.language ? getWord(sim.player.language, concept) : null
+      for (const c of sim.creatures) {
+        if (!c.alive) continue
+        if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
+        if (word) hearWord(c.language, word, concept, 0.4)
+        c.action = 'hear'
+        c.talkingTo = 0
+        c.busyTicks = Math.max(c.busyTicks, 12)
+        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+      }
     },
     poke(id: number): void {
       const c = sim.creatureById(id)
@@ -283,6 +340,16 @@ export function createSim(seed = 1): Sim {
       // decisions for every alive creature
       for (const c of sim.creatures) {
         if (!c.alive) continue
+        // INTERACTION HOLD: a creature mid-chat stands still facing the player.
+        // It ignores its own wants for a few ticks so the player can interact.
+        if (c.busyTicks > 0) {
+          c.busyTicks--
+          c.action = c.talkingTo === 0 ? 'chat' : c.action
+          c.goalTowerId = null
+          c.intention = null
+          if (c.busyTicks === 0) c.talkingTo = null
+          continue // no decide, no movement, no brain work while chatting
+        }
         // SLEEP SUSPENSION: a sleeping creature does zero brain/decision work
         // until energy recovers or a proximity event wakes it.
         if (c.sleeping) {
