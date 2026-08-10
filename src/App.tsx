@@ -18,6 +18,8 @@ import { TOWERS } from './lab/world'
 import { SUBSTANCES } from './lab/substances'
 import { dist } from './lab/util'
 import type { ItemId } from './lab/inventory'
+import { GOODS, marketPrice, priceTrend } from './lab/economy'
+import { CONCEPTS } from './lab/language'
 
 import './lab.css'
 
@@ -130,6 +132,10 @@ export default function App() {
   const [speed, setSpeed] = useState<1 | 2 | 10>(1)
   const [showMore, setShowMore] = useState(false)
   const [muted, setMuted] = useState(false)
+  const [marketOpen, setMarketOpen] = useState(false)
+  const [teachOpen, setTeachOpen] = useState(false)
+  const [teachConcept, setTeachConcept] = useState<string>(CONCEPTS[0])
+  const [teachWord, setTeachWord] = useState('')
 
   // view mode: first-person (you ARE the visitor) or top view (watch the world)
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
@@ -320,6 +326,17 @@ export default function App() {
     simRef.current?.playerSocialize()
     setTick((t) => t + 1)
   }, [])
+
+  const submitTeach = useCallback((): void => {
+    const sim = simRef.current
+    const word = teachWord.trim()
+    if (!sim || !word) return
+    sim.playerTeach(teachConcept, word)
+    sim.playerSay(teachConcept)
+    setTeachWord('')
+    setTeachOpen(false)
+    setTick((t) => t + 1)
+  }, [teachConcept, teachWord])
 
   const usePlayerItem = useCallback((id: ItemId): void => {
     simRef.current?.playerUseItem(id)
@@ -557,6 +574,28 @@ export default function App() {
           >
             {muted ? '🔇' : '🔊'}
           </button>
+          {/* market: goods + price trends (the economy, made legible) */}
+          <button
+            type="button"
+            className="speed-btn market-btn"
+            data-market-btn
+            aria-pressed={marketOpen}
+            aria-label={marketOpen ? 'Close market prices' : 'Open market prices'}
+            onClick={() => setMarketOpen((o) => !o)}
+          >
+            📈
+          </button>
+          {/* teach words: type a word for a concept — creatures nearby learn it */}
+          <button
+            type="button"
+            className="speed-btn teach-btn"
+            data-teach-btn
+            aria-pressed={teachOpen}
+            aria-label={teachOpen ? 'Close word teaching' : 'Teach creatures a word'}
+            onClick={() => setTeachOpen((o) => !o)}
+          >
+            💬
+          </button>
           {/* view toggle: first-person ↔ top view */}
           <button
             type="button"
@@ -571,6 +610,114 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* market popover: current price + ▲▼ trend per good, and the market day */}
+      {marketOpen && sim && (
+        <section className="market" data-market aria-label="market prices">
+          <header className="market-head">
+            <h2>📈 market</h2>
+            <span className="market-day" data-market-day>
+              day {sim.economy.day}
+            </span>
+            <button
+              type="button"
+              className="market-close"
+              data-market-close
+              aria-label="Close market prices"
+              onClick={() => setMarketOpen(false)}
+            >
+              ✕
+            </button>
+          </header>
+          <ul className="market-list" data-market-list>
+            {GOODS.map((id) => {
+              const trend = priceTrend(sim.economy, id)
+              return (
+                <li key={id} className="market-row" data-market-good={id}>
+                  <span className="market-good">
+                    {ITEM_EMOJI[id as ItemId] ?? '🪓'} {id}
+                  </span>
+                  <span className="market-price">🪙 {marketPrice(sim.economy, id)}</span>
+                  <span
+                    className={`market-trend market-trend-${trend}`}
+                    data-market-trend={trend}
+                    aria-label={trend === 'up' ? 'price rising' : trend === 'down' ? 'price falling' : 'price flat'}
+                  >
+                    {trend === 'up' ? '▲' : trend === 'down' ? '▼' : '—'}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* teach popover: pick a concept + type a word — creatures nearby learn it */}
+      {teachOpen && sim && (
+        <section className="teach" data-teach aria-label="teach a word">
+          <header className="teach-head">
+            <h2>💬 teach a word</h2>
+            <button
+              type="button"
+              className="teach-close"
+              data-teach-close
+              aria-label="Close word teaching"
+              onClick={() => setTeachOpen(false)}
+            >
+              ✕
+            </button>
+          </header>
+          <div className="teach-concepts" data-teach-concepts role="group" aria-label="pick a concept">
+            {CONCEPTS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`chip teach-concept ${teachConcept === c ? 'active' : ''}`}
+                data-teach-concept={c}
+                aria-pressed={teachConcept === c}
+                onClick={() => setTeachConcept(c)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <div className="teach-row">
+            <input
+              className="teach-input"
+              data-teach-word
+              type="text"
+              maxLength={12}
+              placeholder={`word for "${teachConcept}"…`}
+              value={teachWord}
+              onChange={(e) => setTeachWord(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitTeach()
+              }}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="dock-btn teach-submit"
+              data-teach-submit
+              disabled={!teachWord.trim()}
+              onClick={submitTeach}
+            >
+              teach
+            </button>
+          </div>
+          {playerC && playerC.language && Array.from(playerC.language.vocab.entries()).length > 0 && (
+            <div className="teach-vocab" data-teach-vocab aria-label="words you know">
+              {Array.from(playerC.language.vocab.entries()).map(([concept, entry]) => (
+                <span key={concept} className="chip vocab-chip" data-vocab={concept}>
+                  {concept} <b>{entry.word}</b>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* player HUD — compact, only while the player is out in the world */}
       {fpOn && playerC && (

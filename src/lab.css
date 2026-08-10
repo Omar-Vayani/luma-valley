@@ -718,6 +718,110 @@ button { font: inherit; cursor: pointer; }
 
 .player-fight:active { transform: scale(0.94); }
 
+/* ── Market popover: goods + price trends — economy made legible ── */
+.market-btn {
+  min-width: 56px;
+  min-height: 48px;
+  font-size: 1rem;
+}
+
+.market {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 56px);
+  right: max(8px, env(safe-area-inset-right));
+  z-index: 29;
+  width: min(280px, calc(100vw - 16px));
+  max-height: calc(100dvh - 150px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--amber-dim);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.market-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.market-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.market-day {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.market-close {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid rgba(224, 180, 106, 0.22);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.market-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.market-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.8rem;
+}
+
+.market-good {
+  flex: 1;
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-price {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.market-trend {
+  width: 18px;
+  flex-shrink: 0;
+  text-align: center;
+  font-weight: 800;
+}
+
+.market-trend-up { color: #7fd07f; }
+.market-trend-down { color: #e8876a; }
+.market-trend-flat { color: var(--muted); }
+
 /* ── Landscape layout (wide-short screens: S24 Ultra ≈915×412) ── */
 @media (orientation: landscape) and (max-height: 620px) {
   .topbar { padding-top: calc(env(safe-area-inset-top) + 4px); }
@@ -759,4 +863,89 @@ button { font: inherit; cursor: pointer; }
   .player-hud {
     top: calc(env(safe-area-inset-top) + 44px);
   }
+}
+
+/* ── Teach popover: teach creatures a word for a concept ── */
+.teach {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 56px);
+  right: max(8px, env(safe-area-inset-right));
+  z-index: 29;
+  width: min(300px, calc(100vw - 16px));
+  max-height: calc(100dvh - 150px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--amber-dim);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.teach-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.teach-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.teach-close {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid rgba(224, 180, 106, 0.22);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.teach-concepts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.teach-concept.active {
+  background: var(--amber);
+  color: #1c1a14;
+  border-color: var(--amber);
+}
+.teach-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.teach-input {
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  padding: 0 12px;
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 1rem;
+}
+.teach-input:focus {
+  outline: 2px solid var(--amber-dim);
+  border-color: var(--amber);
+}
+.teach-submit {
+  height: 56px;
+}
+.teach-vocab {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.vocab-chip b {
+  color: var(--amber);
 }

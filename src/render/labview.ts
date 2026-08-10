@@ -506,8 +506,9 @@ export class LabView {
 
   /** The standard tower: gabled house with overhanging roof, chimney, framed windows, door + step. */
   private buildHouse(group: THREE.Group, t: Tower, color: THREE.Color): void {
-    const wallMat = mkMat(color.clone().multiplyScalar(0.8), { roughness: 0.95 })
-    const trimMat = mkMat(color.clone().multiplyScalar(1.18), { roughness: 0.8 })
+    // the pharmacy reads as a clinic: white plaster walls under the same roof
+    const wallMat = mkMat(t.id === 'pharmacy' ? 0xf2f2ee : color.clone().multiplyScalar(0.8), { roughness: 0.95 })
+    const trimMat = mkMat(t.id === 'pharmacy' ? 0xb8e0d0 : color.clone().multiplyScalar(1.18), { roughness: 0.8 })
     const roofMat = mkMat(color.clone().multiplyScalar(1.3), { roughness: 0.55 })
     const ridgeMat = mkMat(color.clone().multiplyScalar(0.85), { roughness: 0.6 })
 
@@ -554,6 +555,22 @@ export class LabView {
       const barrel = mkCyl(0.42, 0.42, 0.95, 10, 0x9a7a4a)
       barrel.position.set(-3.2, 0.475, 1.2)
       group.add(barrel)
+      // café/shop identity: a striped awning over the door, tilted out
+      const awning = mkBox(2.9, 0.1, 1.4, 0xb8473a)
+      awning.position.set(0, 3.6, 3.95)
+      awning.rotation.x = 0.28
+      group.add(awning)
+      for (const sx of [-0.75, 0, 0.75]) {
+        const stripe = mkBox(0.45, 0.13, 1.42, 0xf0e8d0)
+        stripe.position.set(sx, 3.66, 3.95)
+        stripe.rotation.x = 0.28
+        group.add(stripe)
+      }
+      const poleL = mkBox(0.09, 1.5, 0.09, 0x6e4a2e)
+      poleL.position.set(-1.42, 3.0, 4.35)
+      const poleR = mkBox(0.09, 1.5, 0.09, 0x6e4a2e)
+      poleR.position.set(1.42, 3.0, 4.35)
+      group.add(poleL, poleR)
     } else if (t.id === 'bank') {
       // columns flanking the entrance + a stack of gold coins
       for (const sx of [-1.35, 1.35] as const) {
@@ -567,8 +584,8 @@ export class LabView {
         group.add(coin)
       }
     } else if (t.id === 'pharmacy') {
-      // white cross over the door + potted plant
-      const crossMat = mkMat(0xf4f4f4)
+      // clinic identity: red cross over the door + potted plant on white walls
+      const crossMat = mkMat(0xd94a4a)
       const v = mkBox(0.3, 1.0, 0.06, crossMat)
       v.position.set(0, 2.7, 3.33)
       const hbar = mkBox(0.6, 0.3, 0.06, crossMat)
@@ -636,7 +653,21 @@ export class LabView {
         group.add(ring)
       }
     } else if (t.id === 'work') {
-      // work tower: anvil + stacked crates in the side yard (factory look)
+      // work tower: factory identity — tall brick smokestack with puffs,
+      // plus anvil + stacked crates in the side yard
+      const stackMat = mkMat(0x9a5a3a, { roughness: 0.9 })
+      const stack = mkCyl(0.42, 0.6, 3.0, 10, stackMat)
+      stack.position.set(2.7, 6.2, -2.5)
+      group.add(stack)
+      const cap = mkCyl(0.62, 0.62, 0.28, 10, 0x6e3a2e)
+      cap.position.set(2.7, 7.85, -2.5)
+      group.add(cap)
+      const smokeMat = mkMat(0xffffff, { transparent: true, opacity: 0.45, roughness: 1 })
+      for (let i = 0; i < 3; i++) {
+        const puff = mkSphere(0.2 + i * 0.07, smokeMat)
+        puff.position.set(2.7 + i * 0.12, 8.1 + i * 0.38, -2.5 + (i % 2 === 0 ? -0.08 : 0.1))
+        group.add(puff)
+      }
       const anvil = mkCyl(0.5, 0.7, 0.6, 8, 0x666)
       anvil.position.set(-3.6, 0.3, -2.2)
       group.add(anvil)
@@ -1431,6 +1462,14 @@ export class LabView {
         const sword = makeTextSprite('⚔️', { size: 30 })
         sword.position.set(x, 1.6, z)
         this.spawnParticle(sword, x, 1.6, z, 0, 2.4, 0, 0.8)
+        break
+      }
+      case 'say': {
+        // speech bubble: the creature's spoken word (or player's taught word)
+        const label = ev.word && ev.word.length > 0 ? ev.word : ev.learned ? '💭' : '💬'
+        const bubble = makeTextSprite(label, { size: 30, color: ev.fromPlayer ? '#7fe0a0' : '#ffffff' })
+        bubble.position.set(x, 2.4, z)
+        this.spawnParticle(bubble, x, 2.4, z, 0, 2.4, 0, 1.6)
         break
       }
       default:

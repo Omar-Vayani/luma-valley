@@ -36,6 +36,14 @@ export interface SimEvent {
   x: number
   z: number
   tick: number
+  /** the word spoken / taught — feeds the speech-bubble renderer */
+  word?: string
+  /** the concept that word refers to (food, danger, love, …) */
+  concept?: string
+  /** true when the creature heard/learned a word (thought-bubble, not speech) */
+  learned?: boolean
+  /** true when the event comes from the player character (not a creature) */
+  fromPlayer?: boolean
 }
 
 export interface SimDrop {
@@ -164,12 +172,21 @@ export function createSim(seed = 1): Sim {
     playerTeach(concept: string, word: string): void {
       // The player teaches a word: creatures in earshot learn the mapping
       // concept ⇄ word (e.g. teach "wum" while pointing at bread → they learn
-      // food ⇄ wum). Teaching also boosts the bond with nearby creatures.
+      // food ⇄ wum). Teaching also boosts the bond with nearby creatures and
+      // the player records the word into their own vocab.
       const p = sim.player
       if (!isPlayerAlive(p) || !word) return
       const cleaned = word.trim().toLowerCase().slice(0, 12)
       if (!cleaned) return
       if (!CONCEPTS.includes(concept)) return
+      // the player knows this word too — teaching teaches the teacher.
+      // hearWord first so the exact taught word wins, then boost the strength.
+      hearWord(p.language, cleaned, concept, 1)
+      learnWord(p.language, concept, 1)
+      if (p.language.vocab.get(concept)) {
+        p.language.vocab.get(concept)!.word = cleaned
+      }
+      emit(sim, 'say', undefined, undefined, p.pos.x, p.pos.z, { word: cleaned, concept, fromPlayer: true })
       for (const c of sim.creatures) {
         if (!c.alive) continue
         if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
@@ -178,7 +195,7 @@ export function createSim(seed = 1): Sim {
         c.action = 'learn'
         c.talkingTo = 0
         c.busyTicks = Math.max(c.busyTicks, 15)
-        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z, { word: cleaned, concept, learned: true })
       }
     },
     playerSay(concept: string): void {
@@ -187,6 +204,7 @@ export function createSim(seed = 1): Sim {
       const p = sim.player
       if (!isPlayerAlive(p)) return
       const word = sim.player.language ? getWord(sim.player.language, concept) : null
+      emit(sim, 'say', undefined, undefined, p.pos.x, p.pos.z, { word: word ?? '', concept, fromPlayer: true })
       for (const c of sim.creatures) {
         if (!c.alive) continue
         if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
@@ -194,7 +212,7 @@ export function createSim(seed = 1): Sim {
         c.action = 'hear'
         c.talkingTo = 0
         c.busyTicks = Math.max(c.busyTicks, 12)
-        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+        emit(sim, 'say', c, undefined, c.pos.x, c.pos.z, { word: word ?? '', concept })
       }
     },
     poke(id: number): void {
@@ -450,7 +468,15 @@ export function createSim(seed = 1): Sim {
 }
 
 /** Push a renderer-visible event. */
-export function emit(sim: Sim, type: SimEventType, a: Creature | undefined, b: Creature | undefined, x: number, z: number): void {
+export function emit(
+  sim: Sim,
+  type: SimEventType,
+  a: Creature | undefined,
+  b: Creature | undefined,
+  x: number,
+  z: number,
+  payload?: { word?: string; concept?: string; learned?: boolean; fromPlayer?: boolean },
+): void {
   sim.events.push({
     type,
     aId: a?.id ?? 0,
@@ -458,6 +484,7 @@ export function emit(sim: Sim, type: SimEventType, a: Creature | undefined, b: C
     x,
     z,
     tick: sim.time,
+    ...payload,
   })
 }
 
@@ -1142,7 +1169,7 @@ function gossipNearby(sim: Sim): void {
     }
     if (best) {
       gossipSpread(c, best, aboutId)
-      emit(sim, 'say', c, best, c.pos.x, c.pos.z)
+      emit(sim, 'say', c, best, c.pos.x, c.pos.z, { word: sayWord(c.language, 'danger') ?? '', concept: 'danger' })
     }
   }
 }
@@ -1521,7 +1548,7 @@ function learnLanguageFromAction(sim: Sim, c: Creature, action: ActionName): voi
   if (sim.rng() < 0.25) {
     const word = sayWord(c.language, concept)
     if (word) {
-      emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+      emit(sim, 'say', c, undefined, c.pos.x, c.pos.z, { word, concept })
       for (const o of sim.creatures) {
         if (o.id !== c.id && o.alive && dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 12) {
           shareWithNeighbors(c.language, o.language, concept, 0.4)
