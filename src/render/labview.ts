@@ -270,7 +270,8 @@ export class LabView {
   }
   private onLockedMouseMove = (e: MouseEvent): void => {
     if (!this.pointerLocked || this.playerId === null) return
-    this.playerLook(e.movementX * 0.0022, e.movementY * 0.0022)
+    // mouse right → look right; mouse up (movementY−) → look up → negate
+    this.playerLook(e.movementX * 0.0022, -e.movementY * 0.0022)
   }
 
   // camera control
@@ -1555,22 +1556,17 @@ export class LabView {
 
   // ── camera ──
   private updateCamera(dt: number): void {
-    // first-person: follow the PLAYER (a distinct human character) from just
-    // behind their head, looking along facing with fpPitch — the figure stays
-    // visible below the frame center.
+    // TRUE first-person: the camera sits AT the player's eye height looking
+    // along facing + fpPitch — you never see your own figure, you ARE it.
     if (this.playerId !== null) {
       const p = this.sim.player
       if (p && p.alive) {
         const f = p.facing
         const sin = Math.sin(f)
         const cos = Math.cos(f)
-        const target = new THREE.Vector3(
-          p.pos.x - sin * this.fpDist,
-          1.7,
-          p.pos.z - cos * this.fpDist
-        )
-        this.camera.position.lerp(target, 1 - Math.pow(0.001, dt))
-        const look = target
+        const eye = new THREE.Vector3(p.pos.x, 1.65, p.pos.z)
+        this.camera.position.lerp(eye, 1 - Math.pow(0.001, dt))
+        const look = eye
           .clone()
           .add(new THREE.Vector3(sin * Math.cos(this.fpPitch), Math.sin(this.fpPitch), cos * Math.cos(this.fpPitch)))
         this.camera.lookAt(look)
@@ -1758,11 +1754,12 @@ export class LabView {
     p.pos.z = clampCoord(p.pos.z + dz)
   }
 
-  /** Turn the first-person view: yaw changes player.facing, pitch is fpPitch. */
+  /** Turn the first-person view: yaw changes player.facing, pitch is fpPitch.
+   *  Drag right (positive dx) turns RIGHT; drag up (negative dy) looks UP. */
   playerLook(yaw: number, pitch: number): void {
     const p = this.sim.player
-    if (p) p.facing -= yaw
-    this.fpPitch = Math.min(1.2, Math.max(-1.2, this.fpPitch - pitch))
+    if (p) p.facing += yaw
+    this.fpPitch = Math.min(1.2, Math.max(-1.2, this.fpPitch + pitch))
   }
 
   /** Raycast a tap at screen coordinates (used by the touch look zone). */
@@ -1790,7 +1787,7 @@ export class LabView {
 
   /** Drag-look (touch / mouse fallback): dx yaws, dy pitches. */
   private fpLook(dx: number, dy: number): void {
-    this.playerLook(dx * 0.008, dy * 0.008)
+    this.playerLook(dx * 0.008, -dy * 0.008) // up-drag (dy−) looks up
   }
 
   /** Consume the joystick vector + WASD keys into player movement each frame. */

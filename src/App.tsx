@@ -16,7 +16,6 @@ import { deriveEmotion, type EmotionType } from './lab/emotion'
 import { DRIVE_KEYS, driveTitles, type DriveKey } from './lab/drives'
 import { TOWERS } from './lab/world'
 import { SUBSTANCES } from './lab/substances'
-import { healPlayer } from './lab/player'
 import { dist } from './lab/util'
 import type { ItemId } from './lab/inventory'
 
@@ -132,8 +131,8 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [muted, setMuted] = useState(false)
 
-  // first-person (player) mode state
-  const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('observer')
+  // first-person (player) mode — ALWAYS on: you are the visitor. No observer.
+  const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
   const [pointerLocked, setPointerLocked] = useState(false)
   const [joyVec, setJoyVec] = useState({ x: 0, y: 0 })
   const joyPointerRef = useRef<number | null>(null)
@@ -149,10 +148,19 @@ export default function App() {
     [],
   )
 
-  // orientation: the game plays landscape; portrait still works with a hint
+  // orientation: the game plays LANDSCAPE and loads in it automatically.
   const [landscape, setLandscape] = useState(() => window.matchMedia?.('(orientation: landscape)').matches ?? true)
   const [rotateHint, setRotateHint] = useState(false)
   useEffect(() => {
+    // ask the browser to stay landscape (best-effort; iOS needs fullscreen)
+    try {
+      const so = (window.screen as unknown as { orientation?: { lock?: (o: string) => Promise<void> } }).orientation
+      if (so?.lock && typeof so.lock === 'function') {
+        void so.lock('landscape').catch(() => undefined)
+      }
+    } catch {
+      // orientation lock unavailable (desktop / old browsers) — fine
+    }
     const mq = window.matchMedia?.('(orientation: landscape)')
     if (!mq) return
     const onChange = (): void => setLandscape(mq.matches)
@@ -214,6 +222,9 @@ export default function App() {
       },
     })
     viewRef.current = view
+    // The game is FIRST-PERSON ONLY — you start as the visitor immediately.
+    view.setFirstPerson(1)
+    setViewMode('first-person')
 
     setTick((t) => t + 1)
     const id = window.setInterval(() => setTick((t) => t + 1), 300)
@@ -287,23 +298,6 @@ export default function App() {
   }, [])
 
   // ── player mode (a distinct character — never a creature) ──
-  const toggleViewMode = useCallback((): void => {
-    const sim = simRef.current
-    const view = viewRef.current
-    if (!sim || !view) return
-    if (viewMode === 'observer') {
-      // a fallen visitor gets back up at the lab entrance
-      if (!sim.player.alive) {
-        healPlayer(sim.player, 1)
-        sim.player.pos = { x: 0, z: 0 }
-      }
-      view.setFirstPerson(1)
-      setViewMode('first-person')
-    } else {
-      view.setFirstPerson(null)
-      setViewMode('observer')
-    }
-  }, [viewMode])
 
   const socializePlayer = useCallback((): void => {
     simRef.current?.playerSocialize()
@@ -368,7 +362,8 @@ export default function App() {
     const dy = e.clientY - last.y
     lookLastRef.current = { x: e.clientX, y: e.clientY }
     if (Math.hypot(dx, dy) > 3) lookMovedRef.current = true
-    viewRef.current?.playerLook(dx * 0.008, dy * 0.008)
+    // drag right (dx+) looks right; drag UP (dy− on screen) looks up → negate dy
+    viewRef.current?.playerLook(dx * 0.008, -dy * 0.008)
   }, [])
 
   const onLookPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -544,18 +539,11 @@ export default function App() {
           >
             {muted ? '🔇' : '🔊'}
           </button>
-          {/* view-mode toggle: observer ↔ player */}
-          <button
-            type="button"
-            className="view-toggle"
-            data-view-mode={viewMode}
-            aria-pressed={viewMode === 'first-person'}
-            aria-label={viewMode === 'observer' ? 'Enter first-person mode' : 'Return to observer mode'}
-            onClick={toggleViewMode}
-          >
-            <span className="dock-emoji">{viewMode === 'observer' ? '🧍' : '👁️'}</span>
-            <span className="dock-label">{viewMode === 'observer' ? 'be' : 'watch'}</span>
-          </button>
+          {/* first-person is the ONLY mode — you are the visitor, always */}
+          <span className="view-toggle" data-view-mode="first-person" aria-hidden="true">
+            <span className="dock-emoji">🧍</span>
+            <span className="dock-label">you</span>
+          </span>
         </div>
       </header>
 

@@ -575,13 +575,12 @@ button { font: inherit; cursor: pointer; }
 }
 .fp-btn:active { transform: scale(0.96); }
 
-/* Drag-look zone: in player mode it covers the WHOLE screen (minus the
-   topbar), so stray canvas drags never fight the camera; a still tap still
-   raycasts through tapAt(). The joystick/dock/HUD sit above it. */
+/* Drag-look zone: RIGHT side of the screen only (left side belongs to the
+   joystick). A still tap still raycasts through tapAt(). */
 .fp-look {
   position: fixed;
   top: calc(env(safe-area-inset-top) + 44px);
-  left: 0;
+  left: 45%;
   right: 0;
   bottom: 0;
   z-index: 11;
@@ -590,7 +589,7 @@ button { font: inherit; cursor: pointer; }
   -webkit-user-select: none;
 }
 
-/* Thumb joystick: bottom-left in portrait, bottom-right in landscape. */
+/* Thumb joystick: ALWAYS bottom-left — movement on the left, look on the right. */
 .fp-joystick {
   position: fixed;
   left: max(16px, env(safe-area-inset-left));
@@ -774,12 +773,7 @@ button { font: inherit; cursor: pointer; }
     bottom: calc(env(safe-area-inset-bottom) + 72px);
   }
 
-  /* joystick: bottom-right, clear of the dock and the inv bar */
-  .fp-joystick {
-    left: auto;
-    right: max(16px, env(safe-area-inset-right));
-    bottom: calc(env(safe-area-inset-bottom) + 10px);
-  }
+  /* joystick stays LEFT in landscape too — movement always on the left hand */
 
   .player-hud {
     top: calc(env(safe-area-inset-top) + 44px);

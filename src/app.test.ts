@@ -80,8 +80,8 @@ describe('App test-lab UI', () => {
     expect(app).not.toContain('localStorage')
   })
 
-  it('has first-person mode: view toggle, joystick, look zone, pointer lock, social dock', () => {
-    expect(app).toContain("data-view-mode={viewMode}")
+  it('has first-person mode: always-on player, joystick, look zone, pointer lock, social dock', () => {
+    expect(app).toContain('data-view-mode="first-person"')
     expect(app).toContain('data-joystick')
     expect(app).toContain('data-look')
     expect(app).toContain('data-pointerlock')
