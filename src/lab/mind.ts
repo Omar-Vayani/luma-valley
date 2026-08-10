@@ -16,6 +16,7 @@ import type { Creature } from './creature'
 import type { Genome } from './genetics'
 import { marketPrice } from './economy'
 import { findTower, towerAt } from './world'
+import { trustTowards, reputationOf } from './reputation'
 import { dist } from './util'
 
 export type ActionName =
@@ -82,6 +83,20 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
   const near = nearestOther(sim, c, 3)
   const moneyDrop = nearestMoneyDrop(sim, c, 40)
 
+  // ── social awareness: what do I believe about the creature next to me? ──
+  // trust: -1..1 (negative = distrust). Reputation is hearsay-tolerant: a
+  // creature can distrust a known thief it has never met (gossip network).
+  const trustNear = near ? trustTowards(c, near.id) : 0
+  const repNear = near ? reputationOf(c, near.id) : null
+  const knownThief = (repNear?.thief ?? 0) > 0.4
+  const knownAggressor = (repNear?.aggressor ?? 0) > 0.4
+  const knownProtector = (repNear?.protector ?? 0) > 0.4
+  // bonded? the bond does NOT make betrayal impossible — just less likely
+  const bondedNear = near ? (c.bonds[near.id] ?? 0) > 0.35 || c.partnerId === near.id : false
+  const BOND_PENALTY = 0.35 // betrayal is possible, but the bond weighs on the mind
+  // paranoia raises baseline fear; a known aggressor nearby sharpens it
+  const fearEff = Math.min(1, fear + c.emotions.paranoia * 0.4 + (knownAggressor && near ? 0.25 : 0))
+
   const breadPrice = marketPrice(sim.economy, 'bread')
   const breadInStock = (sim.economy.goods.bread?.stock ?? 0) > 0
   const medPrice = marketPrice(sim.economy, 'medicine')
@@ -100,7 +115,7 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     bored: Math.max(0, (1 - p - 0.45) / 0.55),
     lonely: Math.max(0, (1 - soc - 0.3) / 0.7),
     weak: Math.max(0, (1 - str - 0.15) / 0.85),
-    afraid: Math.max(0, (fear - 0.4) / 0.6),
+    afraid: Math.max(0, (fearEff - 0.4) / 0.6),
   }
 
   // desperation: urgent needs dominate rational choice (free will only flips coin-flips)
@@ -139,24 +154,42 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     withdraw: ((c.wallet < breadPrice ? 1 : 0) * (c.banked > 3 ? 1.5 : c.banked > 0 ? 0.8 : 0) + press.hungry * (c.banked > 0 ? 0.5 : 0)) * (c.knowsTower('bank') ? 1 : 0.15),
     // play: bored or weak, and at/near the gym — a leisure want, not a need
     play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.6 : 0.7),
-    // social: lonely + sociable + opportunity
-    social: press.lonely * (0.3 + g.sociability * 1.4) * (near ? 1.3 : 0.2),
-    // steal: desperate + thief genes + greed drive + target with money
-    steal: (press.hungry * 0.9 + (canAffordFood ? 0 : 0.5) + c.drives.greed * 0.5) * (0.2 + g.theft * 1.6) * (near && near.wallet > 0 ? 1.4 : 0.05),
-    // share: grateful + social conscience + reciprocity drive + wealth
-    share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6) * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
-    // fight: angry + vendetta + aggression + tribal defense of gangmates
-    fight: (c.memory.vendettas[near?.id ?? 0] ?? 0) * 1.8
-      + g.aggression * (press.bored * 0.5) * (near ? 1.4 : 0.1)
-      + tribalDefense(sim, c, near),
-    // collect: poor/greedy + hoarding drive and a pile nearby (hoarders grab
-    // free money even when they already have some)
-    collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8) * (moneyDrop ? 1.4 : 0.05),
+    // social: lonely + sociable + opportunity — but reputation gates who we
+    // approach: known thieves/aggressors are shunned, protectors are sought.
+    social: press.lonely * (0.3 + g.sociability * 1.4 + c.emotions.joy * 0.3) * (near ? 1.3 : 0.2)
+      * (near
+        ? (knownThief || knownAggressor ? 0.25 : knownProtector || trustNear > 0.3 ? 1.6 : 0.7 + Math.max(0, trustNear) * 0.8)
+        : 1),
+    // steal: desperate + thief genes + greed drive + envy — but a bond makes
+    // betrayal less likely (penalty, not a hard block) and we don't rob allies
+    steal: (press.hungry * 0.9 + (canAffordFood ? 0 : 0.5) + c.drives.greed * 0.5 + c.emotions.envy * 0.8)
+      * (0.2 + g.theft * 1.6)
+      * (near && near.wallet > 0 ? 1.4 : 0.05)
+      * (bondedNear ? BOND_PENALTY : 1)
+      * (near && (knownProtector || trustNear > 0.3) ? 0.3 : 1),
+    // share: grateful + social conscience + reciprocity + affection
+    share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6 + c.emotions.affection * 0.5 + c.emotions.joy * 0.3)
+      * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
+    // fight: vendetta + aggression + spite/resentment + tribal + protect friends
+    // + shun known aggressors. A bond to the target dampens it, never blocks.
+    fight: ((c.memory.vendettas[near?.id ?? 0] ?? 0) * 1.8
+      + (g.aggression * (press.bored * 0.5) + c.emotions.spite * 1.0 + c.emotions.resentment * 0.5) * (near ? 1.4 : 0.1)
+      + tribalDefense(sim, c, near)
+      + protectFriend(sim, c)
+      + (knownAggressor && near ? 0.6 : 0))
+      * (bondedNear ? BOND_PENALTY + 0.25 : 1),
+    // collect: poor/greedy + hoarding drive + envy (hoard-hoarding) and a pile
+    // nearby (hoarders grab free money even when they already have some)
+    collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8 + c.emotions.envy * 0.7) * (moneyDrop ? 1.4 : 0.05),
     // idle: content creatures rest in place (low curiosity → idle wins over wander)
     idle: (1 - g.curiosity * 0.9) * (1 - c.drives.curiosity * 0.5) * 0.7,
     // wander: curious creatures explore the unknown (curiosity drive) — but
-    // a creature with a specific craving wanders less (it knows what it wants)
-    wander: (0.25 + g.curiosity * 0.6 + c.drives.curiosity * 0.5) * (1 - cravingBias) * (grief > 0.4 ? 1.3 : 1),
+    // a creature with a specific craving wanders less (it knows what it wants).
+    // Paranoia keeps creatures moving/avoiding; a known aggressor nearby makes
+    // the area feel unsafe so they drift off.
+    wander: (0.25 + g.curiosity * 0.6 + c.drives.curiosity * 0.5) * (1 - cravingBias) * (grief > 0.4 ? 1.3 : 1)
+      + c.emotions.paranoia * 0.4
+      + (knownAggressor && near ? 0.35 : 0),
   }
 
   // grief dominates: a mourning creature cannot socialize or love
@@ -164,6 +197,12 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     scores.social = 0
     scores.share = 0
     scores.play *= 0.4
+  }
+
+  // joy: a happy creature wants to play and share its good mood
+  if (c.emotions.joy > 0.4) {
+    scores.play += 0.2
+    scores.share += 0.1
   }
 
   return scores
@@ -188,6 +227,42 @@ function tribalDefense(sim: Sim, c: Creature, near: Creature | null): number {
   if (c.genome.aggression > 0.7 && c.genome.loyalty > 0.6) {
     const d = dist(c.pos.x, c.pos.z, near.pos.x, near.pos.z)
     if (d < 3) return 0.9
+  }
+  return 0
+}
+
+/**
+ * Selfless protection: a creature with a strong bond (or deep affection /
+ * loyalty emotion) defends a wounded friend. The trigger is a *friend* in
+ * danger, not a vendetta — anyone can protect someone they love. Returns a
+ * fight-score boost when a bonded friend nearby is wounded and there is a
+ * threat (known aggressor / distrusted / vendetta) in the area.
+ */
+function protectFriend(sim: Sim, c: Creature): number {
+  // is any bonded friend nearby and wounded?
+  let friendWounded = false
+  for (const o of sim.creatures) {
+    if (o.id === c.id || !o.alive) continue
+    const isFriend = o.id === c.partnerId || (c.bonds[o.id] ?? 0) > 0.5
+    if (!isFriend) continue
+    if (o.chem.health < 0.85 && dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 6) {
+      friendWounded = true
+      break
+    }
+  }
+  if (!friendWounded) return 0
+  // is there a threat nearby to defend against?
+  for (const o of sim.creatures) {
+    if (o.id === c.id || !o.alive) continue
+    const d = dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z)
+    if (d > 4) continue
+    const isThreat = (c.memory.vendettas[o.id] ?? 0) > 0.3
+      || trustTowards(c, o.id) < -0.2
+      || (c.reputation[o.id]?.aggressor ?? 0) > 0.4
+    if (isThreat) {
+      // loyalty & deep affection make protection more urgent (selfless heroism)
+      return 1.2 + c.emotions.loyalty * 0.8 + c.emotions.affection * 0.8
+    }
   }
   return 0
 }

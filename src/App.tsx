@@ -5,7 +5,8 @@
  * Tools: spawn + bread/money placement + a Benevolence group (comfort, heal,
  * gift) and a Malice group (poke, hit, scare, rob).
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { LabView } from './render/labview'
 import { createSim, type Sim } from './lab/sim'
 import { deriveEmotion, type EmotionType } from './lab/emotion'
@@ -111,6 +112,21 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [muted, setMuted] = useState(false)
 
+  // first-person mode state
+  const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('observer')
+  const [playerId, setPlayerId] = useState<number | null>(null)
+  const playerIdRef = useRef<number | null>(null)
+  const [pointerLocked, setPointerLocked] = useState(false)
+  const [joyVec, setJoyVec] = useState({ x: 0, y: 0 })
+  const joyPointerRef = useRef<number | null>(null)
+  const joyCenterRef = useRef({ x: 0, y: 0 })
+  const lookPointerRef = useRef<number | null>(null)
+  const lookLastRef = useRef({ x: 0, y: 0 })
+  const lookDownRef = useRef({ x: 0, y: 0, t: 0 })
+  const lookMovedRef = useRef(false)
+  // coarse pointer = touch screen (joystick + look zone), fine = mouse (WASD)
+  const isTouch = useMemo(() => window.matchMedia?.('(pointer: coarse)').matches ?? false, [])
+
   // Boot the sim + renderer exactly once. StrictMode double-mounts in dev:
   // the cleanup disposes the previous view before the effect re-runs, and the
   // ref guard keeps two LabViews from ever existing at the same time.
@@ -174,6 +190,15 @@ export default function App() {
     setShowMore(false)
   }, [selectedId])
 
+  // Mirror pointer-lock state (label on the capture button).
+  useEffect(() => {
+    const onChange = (): void => {
+      setPointerLocked(viewRef.current?.pointerLocked ?? false)
+    }
+    document.addEventListener('pointerlockchange', onChange)
+    return () => document.removeEventListener('pointerlockchange', onChange)
+  }, [])
+
   const setToolMode = useCallback((mode: ToolMode): void => {
     toolRef.current = mode
     setTool(mode)
@@ -220,8 +245,104 @@ export default function App() {
     viewRef.current?.setSpeed(s)
   }, [])
 
+  // ── first-person mode ──
+  const toggleViewMode = useCallback((): void => {
+    const sim = simRef.current
+    const view = viewRef.current
+    if (!sim || !view) return
+    if (viewMode === 'observer') {
+      let pid = playerIdRef.current
+      const current = pid !== null ? sim.creatureById(pid) : undefined
+      if (pid === null || !current?.alive) {
+        // promote the selected creature, or spawn a dedicated player
+        const sel = selectedId !== null ? sim.creatureById(selectedId) : undefined
+        const chosen = sel?.alive ? sel : sim.spawnCreature()
+        pid = chosen.id
+        playerIdRef.current = pid
+        setPlayerId(pid)
+      }
+      view.setFirstPerson(pid)
+      setViewMode('first-person')
+    } else {
+      view.setFirstPerson(null)
+      setViewMode('observer')
+    }
+  }, [viewMode, selectedId])
+
+  const applyJoystick = useCallback((x: number, y: number): void => {
+    setJoyVec({ x, y })
+    if (viewRef.current) viewRef.current.joystick = { x, y }
+  }, [])
+
+  const updateJoyFromPointer = useCallback((clientX: number, clientY: number): void => {
+    const c = joyCenterRef.current
+    const dx = clientX - c.x
+    const dy = clientY - c.y
+    const R = 40 // thumb travel radius (px)
+    const len = Math.hypot(dx, dy)
+    const cl = len > R ? R / len : 1
+    applyJoystick((dx * cl) / R, (-dy * cl) / R) // up on the stick = forward
+  }, [applyJoystick])
+
+  const onJoyPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (joyPointerRef.current !== null) return
+    joyPointerRef.current = e.pointerId
+    joyCenterRef.current = { x: e.clientX, y: e.clientY }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    updateJoyFromPointer(e.clientX, e.clientY)
+  }, [updateJoyFromPointer])
+
+  const onJoyPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (joyPointerRef.current !== e.pointerId) return
+    updateJoyFromPointer(e.clientX, e.clientY)
+  }, [updateJoyFromPointer])
+
+  const onJoyPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (joyPointerRef.current !== e.pointerId) return
+    joyPointerRef.current = null
+    applyJoystick(0, 0)
+  }, [applyJoystick])
+
+  const onLookPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (lookPointerRef.current !== null) return
+    lookPointerRef.current = e.pointerId
+    lookLastRef.current = { x: e.clientX, y: e.clientY }
+    lookDownRef.current = { x: e.clientX, y: e.clientY, t: performance.now() }
+    lookMovedRef.current = false
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [])
+
+  const onLookPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (lookPointerRef.current !== e.pointerId) return
+    const last = lookLastRef.current
+    const dx = e.clientX - last.x
+    const dy = e.clientY - last.y
+    lookLastRef.current = { x: e.clientX, y: e.clientY }
+    if (Math.hypot(dx, dy) > 3) lookMovedRef.current = true
+    viewRef.current?.playerLook(dx * 0.008, dy * 0.008)
+  }, [])
+
+  const onLookPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (lookPointerRef.current !== e.pointerId) return
+    lookPointerRef.current = null
+    // a still tap on the look zone raycasts like any other tap
+    if (!lookMovedRef.current && performance.now() - lookDownRef.current.t < 350) {
+      viewRef.current?.tapAt(e.clientX, e.clientY)
+    }
+  }, [])
+
+  const socializePlayer = useCallback((): void => {
+    const sim = simRef.current
+    const pid = playerIdRef.current
+    if (!sim || pid === null) return
+    sim.playerSocialize(pid)
+    setTick((t) => t + 1)
+  }, [])
+
   const sim = simRef.current
   const alive = sim ? sim.creatures.filter((c) => c.alive).length : 0
+  const playerC = playerId !== null ? (sim?.creatureById(playerId) ?? null) : null
+  const fpOn = viewMode === 'first-person' && playerC?.alive === true
   const selected = selectedId !== null ? sim?.creatureById(selectedId) ?? null : null
   const emotion = selected ? deriveEmotion(selected.chem, selected.genome) : null
   const partner =
@@ -231,6 +352,66 @@ export default function App() {
   return (
     <div className="app" data-lab>
       <div className="mount" ref={mountRef} />
+
+      {/* view-mode toggle: observer ↔ first-person */}
+      <button
+        type="button"
+        className="view-toggle"
+        data-view-mode={viewMode}
+        aria-pressed={viewMode === 'first-person'}
+        aria-label={viewMode === 'observer' ? 'Enter first-person mode' : 'Return to observer mode'}
+        onClick={toggleViewMode}
+      >
+        <span className="dock-emoji">{viewMode === 'observer' ? '🧍' : '👁️'}</span>
+        <span className="dock-label">{viewMode === 'observer' ? 'be' : 'watch'}</span>
+      </button>
+
+      {/* desktop pointer lock (first-person only) */}
+      {viewMode === 'first-person' && !isTouch && (
+        <button
+          type="button"
+          className="fp-btn"
+          data-pointerlock
+          aria-pressed={pointerLocked}
+          aria-label={pointerLocked ? 'Release mouse control' : 'Capture mouse control (WASD)'}
+          onClick={() => {
+            const view = viewRef.current
+            if (!view) return
+            if (pointerLocked) view.exitPointerLock()
+            else view.requestPointerLock()
+          }}
+        >
+          {pointerLocked ? '🔓' : '🔒'}
+        </button>
+      )}
+
+      {/* touch controls: right-side look zone + left-thumb joystick */}
+      {fpOn && isTouch && (
+        <>
+          <div
+            className="fp-look"
+            data-look
+            onPointerDown={onLookPointerDown}
+            onPointerMove={onLookPointerMove}
+            onPointerUp={onLookPointerUp}
+            onPointerCancel={onLookPointerUp}
+          />
+          <div
+            className="fp-joystick"
+            data-joystick
+            onPointerDown={onJoyPointerDown}
+            onPointerMove={onJoyPointerMove}
+            onPointerUp={onJoyPointerUp}
+            onPointerCancel={onJoyPointerUp}
+          >
+            <div
+              className="fp-joystick-thumb"
+              data-joystick-thumb
+              style={{ transform: `translate(${joyVec.x * 40}px, ${-joyVec.y * 40}px)` }}
+            />
+          </div>
+        </>
+      )}
 
       <header className="topbar" data-topbar>
         <h1 className="logo">Luma Lab</h1>
@@ -465,6 +646,18 @@ export default function App() {
           <span className="dock-emoji">🐣</span>
           <span className="dock-label">spawn</span>
         </button>
+        {viewMode === 'first-person' && (
+          <button
+            type="button"
+            className="dock-btn"
+            data-lab-tool="social"
+            aria-label="bond with a nearby creature"
+            onClick={socializePlayer}
+          >
+            <span className="dock-emoji">💞</span>
+            <span className="dock-label">bond</span>
+          </button>
+        )}
         <button
           type="button"
           className={`dock-btn ${tool === 'bread' ? 'dock-btn-active' : ''}`}

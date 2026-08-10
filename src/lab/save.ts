@@ -9,6 +9,8 @@ import { createChem, type ChemState } from './chem'
 import { createMemory, type MemoryState } from './memory'
 import { createEconomy, type Economy } from './economy'
 import { createDrives, type Drives } from './drives'
+import { createEmotions, type EmotionState } from './emotions'
+import type { ReputationMap } from './reputation'
 import { createBrain } from './brain'
 import type { ActionName } from './mind'
 import type { Genome } from './genetics'
@@ -56,6 +58,8 @@ interface SavedCreature {
   jealousy: number
   drives: Drives
   knowledge: Record<string, number>
+  emotions: EmotionState
+  reputation: ReputationMap
   brain: { w1: number[]; b1: number[]; w2: number[]; b2: number[] }
   vocab: { concept: string; word: string; strength: number }[]
 }
@@ -90,6 +94,8 @@ export function saveSim(sim: Sim): LabSave {
     jealousy: c.jealousy,
     drives: { ...c.drives },
     knowledge: { ...c.knowledge },
+    emotions: { ...c.emotions },
+    reputation: JSON.parse(JSON.stringify(c.reputation)),
     brain: c.brain.serialize(),
     vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })),
   }))
@@ -138,6 +144,8 @@ export function loadSim(data: LabSave): Sim {
     c.jealousy = sc.jealousy ?? 0
     c.drives = { ...(sc.drives ?? createDrives()) }
     c.knowledge = { ...sc.knowledge }
+    c.emotions = { ...createEmotions(), ...sc.emotions }
+    c.reputation = sc.reputation ? JSON.parse(JSON.stringify(sc.reputation)) : {}
     if (sc.brain) {
       c.brain = createBrain(c.brain.inputSize, c.brain.outputSize, sc.brain)
     }

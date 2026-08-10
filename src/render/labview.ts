@@ -11,7 +11,7 @@ import type { Creature } from '../lab/creature'
 import { deriveEmotion } from '../lab/emotion'
 import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
-import { refreshBrain } from '../lab/sim'
+import { refreshBrain, clampCoord } from '../lab/sim'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -225,6 +225,37 @@ export class LabView {
   paused = false
   speed = 1
 
+  // ── first-person mode: the player IS a creature ──
+  // The camera follows the player creature from just behind/above its head,
+  // so the rig stays visible while the view looks along creature.facing.
+  /** The player creature id, or null = observer camera. */
+  playerId: number | null = null
+  /** Up/down look angle (radians). */
+  fpPitch = 0
+  /** Camera distance behind the player creature (pinch / wheel adjustable). */
+  fpDist = 2.4
+  /** Normalized -1..1 joystick vector; App writes it, the loop consumes it. */
+  joystick = { x: 0, y: 0 }
+  pointerLocked = false
+  private keys = new Set<string>()
+  private onKeyDown = (e: KeyboardEvent): void => {
+    const k = e.key.toLowerCase()
+    if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
+      if (!e.repeat) this.keys.add(k)
+      e.preventDefault()
+    }
+  }
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys.delete(e.key.toLowerCase())
+  }
+  private onPointerLockChange = (): void => {
+    this.pointerLocked = document.pointerLockElement === this.renderer.domElement
+  }
+  private onLockedMouseMove = (e: MouseEvent): void => {
+    if (!this.pointerLocked || this.playerId === null) return
+    this.playerLook(e.movementX * 0.0022, e.movementY * 0.0022)
+  }
+
   // camera control
   private camTarget = new THREE.Vector3(0, 0, 0)
   private camTilt = 1.0 // radians
@@ -297,6 +328,10 @@ export class LabView {
 
     // events
     this.setupPointerEvents()
+    document.addEventListener('keydown', this.onKeyDown)
+    document.addEventListener('keyup', this.onKeyUp)
+    document.addEventListener('pointerlockchange', this.onPointerLockChange)
+    document.addEventListener('mousemove', this.onLockedMouseMove)
     this.updateCamera(0)
     this.last = performance.now()
     this.loop = this.loop.bind(this)
@@ -306,6 +341,11 @@ export class LabView {
 
   dispose(): void {
     cancelAnimationFrame(this.raf)
+    document.removeEventListener('keydown', this.onKeyDown)
+    document.removeEventListener('keyup', this.onKeyUp)
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange)
+    document.removeEventListener('mousemove', this.onLockedMouseMove)
+    if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
@@ -1167,9 +1207,6 @@ export class LabView {
     if (c.alive) void refreshBrain(this.sim, c)
   }
 
-  /** First-person controls: the player creature id, or null = observer. */
-  playerId: number | null = null
-
   // ── main loop ──
   private loop(now: number): void {
     this.raf = requestAnimationFrame(this.loop)
@@ -1186,6 +1223,8 @@ export class LabView {
       if (guard >= 6) this.simAccum = 0
     }
 
+    // player input (joystick / WASD) applies every frame, paused or not
+    this.applyPlayerInput(dt)
     this.refreshBrains(now)
     this.consumeEvents()
     this.syncNewCreatures()
@@ -1386,6 +1425,27 @@ export class LabView {
 
   // ── camera ──
   private updateCamera(dt: number): void {
+    // first-person: follow the player creature from just behind its head,
+    // looking along facing with fpPitch — the rig stays visible below center
+    if (this.playerId !== null) {
+      const rig = this.rigs.find((r) => r.creature.id === this.playerId)
+      if (rig && rig.creature.alive) {
+        const f = rig.creature.facing
+        const sin = Math.sin(f)
+        const cos = Math.cos(f)
+        const target = new THREE.Vector3(
+          rig.group.position.x - sin * this.fpDist,
+          2.2,
+          rig.group.position.z - cos * this.fpDist
+        )
+        this.camera.position.lerp(target, 1 - Math.pow(0.001, dt))
+        const look = target
+          .clone()
+          .add(new THREE.Vector3(sin * Math.cos(this.fpPitch), Math.sin(this.fpPitch), cos * Math.cos(this.fpPitch)))
+        this.camera.lookAt(look)
+        return
+      }
+    }
     const look = new THREE.Vector3(this.camTarget.x, 0, this.camTarget.z)
     const offset = new THREE.Vector3(0, Math.sin(this.camTilt), Math.cos(this.camTilt)).multiplyScalar(this.camDist)
     const pos = look.clone().add(offset)
@@ -1422,11 +1482,17 @@ export class LabView {
         const d = Math.hypot(a.x - b.x, a.y - b.y)
         if (this.pinchStart > 0) {
           const ratio = d / this.pinchStart
-          this.camDist = Math.min(220, Math.max(24, this.camDist / ratio))
+          if (this.playerId !== null) {
+            // in first-person, pinch pulls the camera closer / further
+            this.fpDist = Math.min(8, Math.max(1.2, this.fpDist / ratio))
+          } else {
+            this.camDist = Math.min(220, Math.max(24, this.camDist / ratio))
+          }
           this.pinchStart = d
         }
       } else if (this.panLast) {
-        this.panBy(dx, dy)
+        if (this.playerId !== null) this.fpLook(dx, dy)
+        else this.panBy(dx, dy)
       }
       this.panLast = { x: e.clientX, y: e.clientY }
     })
@@ -1445,10 +1511,14 @@ export class LabView {
     el.addEventListener('pointerup', endPointer)
     el.addEventListener('pointercancel', endPointer)
 
-    // wheel zoom for desktop
+    // wheel zoom for desktop (first-person: camera distance)
     el.addEventListener('wheel', (e) => {
       e.preventDefault()
-      this.camDist = Math.min(220, Math.max(24, this.camDist + e.deltaY * 0.03))
+      if (this.playerId !== null) {
+        this.fpDist = Math.min(8, Math.max(1.2, this.fpDist + e.deltaY * 0.01))
+      } else {
+        this.camDist = Math.min(220, Math.max(24, this.camDist + e.deltaY * 0.03))
+      }
     }, { passive: false })
 
     // process taps after each frame
@@ -1483,10 +1553,10 @@ export class LabView {
     const ny = -((clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera)
 
-    // creature hit?
+    // creature hit? (never the player creature itself — tools act on others)
     let best: { id: number; dist: number; x: number; z: number } | null = null
     for (const rig of this.rigs) {
-      if (!rig.creature.alive) continue
+      if (!rig.creature.alive || rig.creature.id === this.playerId) continue
       const p = new THREE.Vector3(rig.group.position.x, 1.2, rig.group.position.z)
       const ray = this.raycaster.ray
       const t0 = ray.distanceToPoint(p)
@@ -1519,5 +1589,114 @@ export class LabView {
   resetCamera(): void {
     this.camTarget.set(0, 0, 0)
     this.camDist = 90
+  }
+
+  // ── first-person mode ──
+
+  /** Enter/exit first-person mode. null = back to the observer camera. */
+  setFirstPerson(playerCreatureId: number | null): void {
+    this.playerId = playerCreatureId
+    this.fpPitch = 0
+    this.joystick = { x: 0, y: 0 }
+    this.keys.clear()
+    if (this.pointerLocked) this.exitPointerLock()
+    if (playerCreatureId === null) return
+    const c = this.sim.creatureById(playerCreatureId)
+    if (c) this.camTarget.set(c.pos.x, 0, c.pos.z)
+    // snap the camera behind the player head for an instant handover
+    const f = c?.facing ?? 0
+    const sin = Math.sin(f)
+    const cos = Math.cos(f)
+    const px = (c?.pos.x ?? 0) - sin * this.fpDist
+    const pz = (c?.pos.z ?? 0) - cos * this.fpDist
+    this.camera.position.set(px, 2.2, pz)
+    this.camera.lookAt(px + sin, 2.2, pz + cos)
+  }
+
+  /**
+   * Move the player creature by (dx, dz) world units directly, clamped to the
+   * world walls; its facing turns toward the movement direction. This bypasses
+   * the creature's own mind — the player is in control.
+   */
+  playerMove(dx: number, dz: number): void {
+    const c = this.playerCreature()
+    if (!c || !c.alive) return
+    const nx = clampCoord(c.pos.x + dx)
+    const nz = clampCoord(c.pos.z + dz)
+    if (Math.hypot(dx, dz) > 0.0001) c.facing = Math.atan2(nx - c.pos.x, nz - c.pos.z)
+    c.pos.x = nx
+    c.pos.z = nz
+  }
+
+  /** Turn the first-person view: yaw changes creature.facing, pitch is fpPitch. */
+  playerLook(yaw: number, pitch: number): void {
+    const c = this.playerCreature()
+    if (c) c.facing -= yaw
+    this.fpPitch = Math.min(1.2, Math.max(-1.2, this.fpPitch - pitch))
+  }
+
+  /** Raycast a tap at screen coordinates (used by the touch look zone). */
+  tapAt(clientX: number, clientY: number): void {
+    this.handleTap(clientX, clientY)
+  }
+
+  /** Request pointer lock on the canvas; drag-look stays as the fallback. */
+  requestPointerLock(): void {
+    const el = this.renderer.domElement
+    if (typeof el.requestPointerLock !== 'function') return
+    try {
+      const p = el.requestPointerLock() as unknown as Promise<void> | void
+      if (p && typeof (p as Promise<void>).catch === 'function') {
+        void (p as Promise<void>).catch(() => undefined)
+      }
+    } catch {
+      // unsupported — the drag-look fallback already covers desktop mice
+    }
+  }
+
+  exitPointerLock(): void {
+    if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
+  }
+
+  private playerCreature(): Creature | null {
+    if (this.playerId === null) return null
+    return this.sim.creatureById(this.playerId) ?? null
+  }
+
+  /** Drag-look (touch / mouse fallback): dx yaws, dy pitches. */
+  private fpLook(dx: number, dy: number): void {
+    this.playerLook(dx * 0.008, dy * 0.008)
+  }
+
+  /** Consume the joystick vector + WASD keys into player movement each frame. */
+  private applyPlayerInput(dt: number): void {
+    const c = this.playerCreature()
+    if (!c || !c.alive) return
+    const jx = this.joystick.x
+    const jy = this.joystick.y
+    let mx = 0
+    let mz = 0
+    const mag = Math.hypot(jx, jy)
+    if (mag > 0.08) {
+      // joystick is facing-relative: up = forward, right = strafe right
+      const sin = Math.sin(c.facing)
+      const cos = Math.cos(c.facing)
+      mx = sin * jy + -cos * jx
+      mz = cos * jy + sin * jx
+    }
+    if (this.pointerLocked) {
+      const sin = Math.sin(c.facing)
+      const cos = Math.cos(c.facing)
+      if (this.keys.has('w')) { mx += sin; mz += cos }
+      if (this.keys.has('s')) { mx -= sin; mz -= cos }
+      if (this.keys.has('d')) { mx -= cos; mz += sin }
+      if (this.keys.has('a')) { mx += cos; mz -= sin }
+    }
+    const len = Math.hypot(mx, mz)
+    if (len > 0.001) {
+      // speed scales with joystick deflection, capped at full speed
+      const step = 6.5 * dt * Math.min(1, len)
+      this.playerMove((mx / len) * step, (mz / len) * step)
+    }
   }
 }

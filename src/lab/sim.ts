@@ -18,6 +18,8 @@ import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
+import { tickEmotions, applyEmotionFeedback } from './emotions'
+import { observeEvent, gossipSpread, trustTowards, getReputation } from './reputation'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 
@@ -70,6 +72,7 @@ export interface Sim {
   scare(id: number): void
   rob(id: number): void
   creatureById(id: number): Creature | undefined
+  playerSocialize(playerId: number): void
 }
 
 const SPEED = 0.45
@@ -77,9 +80,12 @@ const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
 const BIRTH_COOLDOWN = 120
+const OBSERVE_RANGE = 12 // how close a creature must be to WITNESS an action
+const GOSSIP_RANGE = 10 // how close a creature must be to HEAR gossip
+const GOSSIP_CHANCE = 0.02 // per-tick chance to pass gossip along
 
 /** Keep a coordinate inside the world walls (a creature can never leave). */
-function clampCoord(v: number): number {
+export function clampCoord(v: number): number {
   const bound = WORLD_HALF - 1.5
   return Math.min(bound, Math.max(-bound, v))
 }
@@ -107,6 +113,17 @@ export function createSim(seed = 1): Sim {
     },
     creatureById(id: number): Creature | undefined {
       return sim.creatures.find((c) => c.id === id)
+    },
+    playerSocialize(playerId: number): void {
+      // First-person mode: the player bonds with the nearest creature in
+      // range — the exact same bonding logic as the 'social' action case.
+      const c = sim.creatureById(playerId)
+      if (!c || !c.alive) return
+      const near = nearestOther(sim, c, SOCIAL_RANGE)
+      if (!near) return
+      c.socialize(near)
+      emit(sim, 'love', c, near, c.pos.x, c.pos.z)
+      c.action = 'social'
     },
     poke(id: number): void {
       const c = sim.creatureById(id)
@@ -223,11 +240,12 @@ export function createSim(seed = 1): Sim {
           }
         }
       }
-      // chemistry decay + memory decay + events trim
+      // chemistry decay + memory decay + emotions decay + events trim
       for (const c of sim.creatures) {
         tickChem(c.chem, sim.time)
         decayMemory(c.memory)
         tickDrives(c.drives, c.chem, c.genome)
+        tickEmotions(c.emotions)
         c.age++
         if (c.fightCooldown > 0) c.fightCooldown--
         if (c.chem.health <= 0 && c.action !== 'dead') {
@@ -239,6 +257,7 @@ export function createSim(seed = 1): Sim {
       }
       tickEconomy(sim.economy)
       tickRelationships(sim)
+      gossipNearby(sim)
       wakeNearbySleepers(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
@@ -290,6 +309,16 @@ function decide(sim: Sim, c: Creature): void {
   if (c.chem.fear > 0.75 && c.genome.fearfulness > 0.5 && c.genome.courage < 0.5) {
     flee(sim, c)
     return
+  }
+
+  // Reputation-aware fear: a known aggressor nearby is scary even when the
+  // chemistry hasn't spiked yet — fearful creatures avoid them pre-emptively.
+  if (c.genome.fearfulness > 0.6 && c.genome.courage < 0.6) {
+    const scary = nearestOther(sim, c, 6)
+    if (scary && trustTowards(c, scary.id) < -0.4) {
+      flee(sim, c)
+      return
+    }
   }
 
   // HARD SURVIVAL: starving creatures go to food — nothing may override this.
@@ -618,6 +647,15 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         c.wallet -= gift
         near.wallet += gift
         near.gratitude[c.id] = clamp01((near.gratitude[c.id] ?? 0) + 0.3)
+        // ── social awareness ──
+        // giving feels good (joy) and builds a protector reputation; a
+        // forgiving receiver lets the gift wash away old grudges.
+        applyEmotionFeedback(c.emotions, 'joy', 0.15)
+        applyEmotionFeedback(near.emotions, 'joy', 0.1)
+        applyEmotionFeedback(near.emotions, 'affection', 0.1)
+        forgiveGift(near, c.id)
+        observeEvent(near, 'share', c.id)
+        witness(sim, c, 'share', c.id)
         emit(sim, 'gift', c, near, c.pos.x, c.pos.z)
         c.action = 'share'
         return
@@ -762,6 +800,88 @@ function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
   return best
 }
 
+/**
+ * Social awareness: every alive creature within OBSERVE_RANGE of the event
+ * sees it happen and updates its reputation of the actor. Third-party
+ * observation — a creature does not need to be the victim to judge.
+ */
+function witness(sim: Sim, actor: Creature, kind: Parameters<typeof observeEvent>[1], actorId: number): void {
+  for (const o of sim.creatures) {
+    if (o.id === actorId || !o.alive) continue
+    if (dist(o.pos.x, o.pos.z, actor.pos.x, actor.pos.z) <= OBSERVE_RANGE) {
+      observeEvent(o, kind, actorId)
+    }
+  }
+}
+
+/**
+ * Gossip network: creatures pass what they believe to nearby peers (vocal /
+ * gestural, via the language module). Hearsay lets a reputation travel far
+ * beyond the creatures who actually saw the event — so a creature can distrust
+ * a known thief it has never met.
+ */
+function gossipNearby(sim: Sim): void {
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping) continue
+    if (sim.rng() >= GOSSIP_CHANCE) continue
+    // pick the strongest belief this creature holds (most notable opinion)
+    let aboutId: number | null = null
+    let strongest = 0.3 // ignore weak/neutral opinions
+    for (const key of Object.keys(c.reputation)) {
+      const id = Number(key)
+      const rep = c.reputation[id]
+      const salience = Math.max(Math.abs(rep.trust), rep.thief, rep.protector, rep.aggressor)
+      if (salience > strongest) {
+        strongest = salience
+        aboutId = id
+      }
+    }
+    if (aboutId === null) continue
+    // tell the nearest peer within earshot
+    let best: Creature | null = null
+    let bestD = GOSSIP_RANGE
+    for (const o of sim.creatures) {
+      if (o.id === c.id || !o.alive) continue
+      const d = dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z)
+      if (d < bestD) {
+        bestD = d
+        best = o
+      }
+    }
+    if (best) {
+      gossipSpread(c, best, aboutId)
+      emit(sim, 'say', c, best, c.pos.x, c.pos.z)
+    }
+  }
+}
+
+/** Did `c` just defend a bonded friend? (fight was protective, not bullying) */
+function protectFriendNear(sim: Sim, c: Creature): boolean {
+  for (const o of sim.creatures) {
+    if (o.id === c.id || !o.alive) continue
+    const isFriend = o.id === c.partnerId || (c.bonds[o.id] ?? 0) > 0.5
+    if (!isFriend) continue
+    if (o.chem.health < 0.85 && dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 6) {
+      return true
+    }
+  }
+  return false
+}
+
+/** A forgiving creature lets a gift wash away old grudges (vendetta → trust). */
+function forgiveGift(receiver: Creature, giverId: number): void {
+  if (receiver.emotions.forgiveness < 0.4) return
+  const rep = getReputation(receiver, giverId)
+  rep.trust = clamp01(rep.trust + 0.3)
+  rep.aggressor = Math.max(0, rep.aggressor - 0.2)
+  rep.thief = Math.max(0, rep.thief - 0.2)
+  // the grudge cools; the bond can regrow
+  if (receiver.memory.vendettas[giverId]) {
+    receiver.memory.vendettas[giverId] = Math.max(0, (receiver.memory.vendettas[giverId] ?? 0) - 0.6)
+  }
+  receiver.bonds[giverId] = clamp01((receiver.bonds[giverId] ?? 0) + 0.15)
+}
+
 /** Is there an unburied body this creature loved? (partner or strong bond) */
 function hasUnburiedLovedOne(sim: Sim, c: Creature): boolean {
   if (c.partnerId !== null) {
@@ -862,6 +982,16 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   learnFact(victim.memory, 'bankIsSafe', 0.6 + amount * 0.05)
   addVendetta(victim.memory, thief.id, 0.8)
   preferPlace(victim.memory, 'bank')
+  // ── social awareness ──
+  // the thief's greed feeds envy in onlookers and resentment in the victim;
+  // the victim (and anyone watching) records a thief reputation for the actor.
+  applyEmotionFeedback(thief.emotions, 'envy', 0.1)
+  applyEmotionFeedback(victim.emotions, 'resentment', 0.35)
+  applyEmotionFeedback(victim.emotions, 'paranoia', 0.15)
+  victim.chem.fear = clamp01(victim.chem.fear + 0.05)
+  const bonded = thief.partnerId === victim.id || (thief.bonds[victim.id] ?? 0) > 0.35
+  observeEvent(victim, bonded ? 'betray' : 'steal', thief.id)
+  witness(sim, victim, 'steal', thief.id)
   emit(sim, 'steal', thief, victim, victim.pos.x, victim.pos.z)
   thief.action = 'steal'
 }
@@ -882,6 +1012,16 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   }
   addVendetta(b.memory, a.id, 0.5)
   addVendetta(a.memory, b.id, 0.3)
+  // ── social awareness ──
+  // fights breed spite and fear; watchers judge the aggressor. If `a` was
+  // DEFENDING a friend, witnesses see a protector instead of a bully.
+  applyEmotionFeedback(a.emotions, 'spite', 0.15)
+  applyEmotionFeedback(b.emotions, 'spite', 0.1)
+  applyEmotionFeedback(b.emotions, 'resentment', 0.2)
+  b.chem.fear = clamp01(b.chem.fear + 0.1)
+  const defending = protectFriendNear(sim, a) // a stepped in to defend a friend
+  observeEvent(b, 'aggress', a.id) // b saw who hit it
+  witness(sim, a, defending ? 'protect' : 'aggress', a.id)
   emit(sim, 'fight', a, b, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2)
   a.action = 'fight'
   b.action = 'fight'

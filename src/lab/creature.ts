@@ -6,6 +6,8 @@
 import { createChem, applyFood, applySleep, applySocial, type ChemState } from './chem'
 import { createMemory, type MemoryState } from './memory'
 import { createDrives, type Drives } from './drives'
+import { createEmotions, type EmotionState } from './emotions'
+import type { ReputationMap } from './reputation'
 import { createBrain, type Brain } from './brain'
 import { createLanguage, type LanguageState } from './language'
 import { ageLimitFor } from './lifecycle'
@@ -42,6 +44,8 @@ export interface Creature {
   jealousy: number // 0..1 — how much the partner's outside bonds sting
   drives: Drives
   knowledge: Record<string, number> // towerId -> 0..1 (learned by seeing/visiting)
+  emotions: EmotionState // social emotional spectrum (joy, envy, spite, ...)
+  reputation: ReputationMap // targetId -> what THIS creature believes about them
   brain: Brain // tiny tfjs neural net — learns action preferences from experience
   language: LanguageState // vocabulary learned by association
   brainPrefs: number[] | null // cached brain inference (refreshed async, throttled)
@@ -93,6 +97,8 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     jealousy: 0,
     drives: createDrives(),
     knowledge: {},
+    emotions: createEmotions(),
+    reputation: {},
     brain: createBrain(16, 20),
     language: createLanguage(id),
     brainPrefs: null,
