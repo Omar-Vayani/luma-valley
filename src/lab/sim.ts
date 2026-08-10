@@ -379,6 +379,10 @@ export function createSim(seed = 1): Sim {
         c.pos.x = clampCoord(c.pos.x)
         c.pos.z = clampCoord(c.pos.z)
       }
+      // COLLISION: alive creatures push apart (no two balls in the same spot)
+      // and the player is a solid body too. Dead bodies stay where they fell —
+      // a path blocked by a corpse is a REAL obstacle.
+      resolveCreatureCollisions(sim)
       // drops: creatures eat food piles / collect money piles they reach
       for (const c of sim.creatures) {
         if (!c.alive) continue
@@ -933,8 +937,26 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
   // desperate creatures hurry — hunger/health urgency speeds the walk
   const hurry = c.chem.hunger < 0.2 || c.chem.health < 0.3 || c.chem.energy < 0.12 ? 1.7 : 1
   const step = Math.min(SPEED * hurry, d)
-  const dx = ((t.x - c.pos.x) / d) * step
-  const dz = ((t.z - c.pos.z) / d) * step
+  let dx = ((t.x - c.pos.x) / d) * step
+  let dz = ((t.z - c.pos.z) / d) * step
+  // BUILDING COLLISION: never walk through a tower that isn't our destination.
+  // If the step would enter a foreign tower's radius, deflect sideways along
+  // its wall (a cheap, stable "slide").
+  for (const o of TOWERS) {
+    if (o.id === towerId) continue
+    const od = dist(c.pos.x + dx, c.pos.z + dz, o.x, o.z)
+    if (od < o.radius) {
+      const nx = (c.pos.x + dx - o.x) / (od || 1)
+      const nz = (c.pos.z + dz - o.z) / (od || 1)
+      // slide: move along the wall tangent instead of through it
+      const slideX = -nz
+      const slideZ = nx
+      const along = dx * slideX + dz * slideZ
+      dx = slideX * along * 0.9
+      dz = slideZ * along * 0.9
+      break
+    }
+  }
   c.pos.x += dx
   c.pos.z += dz
   c.facing = Math.atan2(dx, dz)
@@ -1227,6 +1249,39 @@ function wakeNearbySleepers(sim: Sim): void {
         break
       }
     }
+  }
+}
+
+/** Bodies are real: alive creatures + the player push apart so no two occupy
+ *  the same spot (simple 2-body separation). Dead bodies are left untouched —
+ *  they block paths until someone carries them to the graveyard. */
+function resolveCreatureCollisions(sim: Sim): void {
+  const bodies = sim.creatures.filter((c) => c.alive)
+  bodies.push({ pos: sim.player.pos } as Creature) // the player is solid too
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const a = bodies[i]
+      const b = bodies[j]
+      if (a === b) continue
+      const dx = b.pos.x - a.pos.x
+      const dz = b.pos.z - a.pos.z
+      const d = Math.hypot(dx, dz)
+      const min = 1.5 // ball radius * 2 + a little breathing room
+      if (d > 0.0001 && d < min) {
+        const push = (min - d) / 2
+        const nx = dx / d
+        const nz = dz / d
+        a.pos.x -= nx * push
+        a.pos.z -= nz * push
+        b.pos.x += nx * push
+        b.pos.z += nz * push
+      }
+    }
+  }
+  // keep everyone inside the world after the push
+  for (const b of bodies) {
+    b.pos.x = clampCoord(b.pos.x)
+    b.pos.z = clampCoord(b.pos.z)
   }
 }
 

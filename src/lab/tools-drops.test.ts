@@ -18,8 +18,9 @@ describe('sim — world drops (bread and money actually work)', () => {
     const s = createSim(2)
     const c = s.spawnCreature(GEN(), -6, -6)
     c.chem.hunger = 0.1
-    s.dropFood(6, 6)
-    for (let i = 0; i < 120; i++) s.tick()
+    c.wallet = 0 // broke — the free drop is the only way to eat
+    s.dropFood(4, 0)
+    for (let i = 0; i < 300; i++) s.tick()
     // ate: hunger rose well above what decay would allow from 0.1
     expect(c.chem.hunger).toBeGreaterThan(0.2)
     expect(s.drops.filter((d) => d.kind === 'food').length).toBe(0) // eaten
@@ -30,7 +31,7 @@ describe('sim — world drops (bread and money actually work)', () => {
     const c = s.spawnCreature(GEN({ greed: 0.95 }), -6, -6)
     c.wallet = 3 // modest — a hoarder wants the free pile
     s.dropMoney(6, 6, 5)
-    for (let i = 0; i < 150; i++) s.tick()
+    for (let i = 0; i < 250; i++) s.tick()
     // the pile is gone (collected) and the creature is alive
     expect(s.drops.filter((d) => d.kind === 'money').length).toBe(0)
     expect(c.alive).toBe(true)
