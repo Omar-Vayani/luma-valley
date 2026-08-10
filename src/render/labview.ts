@@ -1086,6 +1086,11 @@ export class LabView {
     const rig = this.playerRig
     const p = this.sim.player
     if (!rig || !p) return
+    // In first-person you ARE the character — never render your own body in
+    // front of the camera. The rig only exists for the (removed) observer
+    // view; keep it hidden while the player is in control.
+    rig.group.visible = this.playerId === null
+    if (!rig.group.visible) return
     const t = performance.now() / 1000
 
     rig.group.position.x += (p.pos.x - rig.group.position.x) * 0.35

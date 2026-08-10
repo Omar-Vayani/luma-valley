@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createSim } from './sim'
 import { randomGenome, type Genome } from './genetics'
+import { towerAt } from './world'
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -11,8 +12,10 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     c.chem.hunger = 0.9 // not hungry — free to roam
     c.chem.pleasure = 0.9 // not bored — free to roam
     const visited = new Set<string>()
-    for (let i = 0; i < 400; i++) {
+    for (let i = 0; i < 500; i++) {
       s.tick()
+      const at = towerAt(c.pos.x, c.pos.z)
+      if (at) visited.add(at.id)
       if (c.goalTowerId) visited.add(c.goalTowerId)
     }
     // should wander to at least 4 distinct towers, not just one or two
@@ -24,7 +27,7 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     const c = s.spawnCreature(GEN({ curiosity: 0.95 }), 0, 0)
     s.tick()
     // after wandering a bit, the seen set grows
-    for (let i = 0; i < 120; i++) s.tick()
+    for (let i = 0; i < 300; i++) s.tick()
     expect(Object.keys(c.memory.seenPlaces).length).toBeGreaterThanOrEqual(2)
   })
 

@@ -40,6 +40,7 @@ export type ActionName =
   | 'fight'    // attack a nearby rival
   | 'collect'  // pick up dropped coins
   | 'idle'     // rest in place when content and uncurious
+  | 'explore'  // walk toward an unseen tower (committed, no flip-flopping)
   | 'wander'   // explore something unseen
 
 export type ActionScores = Record<ActionName, number>
@@ -196,6 +197,10 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     wander: (0.25 + g.curiosity * 0.6 + c.drives.curiosity * 0.5) * (1 - cravingBias) * (grief > 0.4 ? 1.3 : 1)
       + c.emotions.paranoia * 0.4
       + (knownAggressor && near ? 0.35 : 0),
+    // explore: explicitly seek a tower the creature has NOT learned yet — a
+    // committed curiosity-driven walk (the mind only picks it when unknown
+    // towers remain; once committed, travel-commit holds until arrival).
+    explore: (0.2 + g.curiosity * 0.8 + c.drives.curiosity * 0.7) * (1 - cravingBias) + c.emotions.paranoia * 0.3,
   }
 
   // grief dominates: a mourning creature cannot socialize or love

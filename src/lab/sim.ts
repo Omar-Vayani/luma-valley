@@ -476,7 +476,6 @@ function decide(sim: Sim, c: Creature): void {
     if (c.wallet >= breadPrice && !knows(sim, c, 'food')) {
       // doesn't know where food is — must explore to find it
       explore(sim, c)
-      c.intention = null
       return
     }
     // broke and starving: steal if a wallet is near, otherwise work
@@ -503,7 +502,6 @@ function decide(sim: Sim, c: Creature): void {
       c.intention = 'work'
     } else {
       explore(sim, c)
-      c.intention = null
     }
     return
   }
@@ -548,16 +546,20 @@ function decide(sim: Sim, c: Creature): void {
 
   // A tower-bound action the creature is still walking toward: stay committed
   // UNTIL ARRIVAL — no flip-flopping mid-journey (the user's "they want to go
-  // everywhere at once" bug). Re-scoring only happens once the creature is
-  // actually at the destination, where the mind can buy/drink/play properly.
-  if (c.intention && c.goalTowerId !== null && c.goalTowerId !== 'none' && actionValid(sim, c, c.intention)) {
+  // everywhere at once" / shaking-in-the-middle bug). As long as a goal tower
+  // is set and the creature isn't standing in it, it walks there. Re-scoring
+  // only happens once the creature is actually AT the destination, where the
+  // mind can buy/drink/play/explore properly.
+  if (c.intention && c.goalTowerId !== null && c.goalTowerId !== 'none') {
     const goal = towerAt(c.pos.x, c.pos.z)
     if (goal?.id !== c.goalTowerId) {
-      execute(sim, c, c.intention) // keep walking toward the goal
+      // still en route — keep walking, whatever the action was (even explore)
+      execute(sim, c, c.intention)
       return
     }
     // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
     c.goalTowerId = 'none'
+    c.intention = null
   }
 
   // Re-score and pick a fresh action (mind + free will).
@@ -831,6 +833,18 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       c.chem.pleasure = clamp01(c.chem.pleasure + 0.01)
       c.action = 'idle'
       c.intention = null // re-score soon; content creatures rest a few ticks
+      return
+    }
+    case 'explore': {
+      // keep walking toward the committed exploration goal (travel-commit path)
+      if (c.goalTowerId && c.goalTowerId !== 'none') {
+        const at = towerAt(c.pos.x, c.pos.z)
+        if (at?.id !== c.goalTowerId) {
+          goTo(sim, c, c.goalTowerId as TowerId)
+          return
+        }
+      }
+      wander(sim, c)
       return
     }
     default: {
@@ -1269,6 +1283,9 @@ function explore(sim: Sim, c: Creature): void {
   }
   if (best) {
     goTo(sim, c, best)
+    // COMMIT: set intention + goal so the travel-commit holds the creature on
+    // this single destination until arrival — no mid-journey flip-flopping.
+    c.intention = 'explore'
     c.action = `explore ${best}`
   } else {
     wander(sim, c)
