@@ -27,6 +27,7 @@ export interface LabSave {
   drops: { kind: 'food' | 'money'; x: number; z: number; amount: number }[]
   graves: { creatureId: number; name: string; x: number; z: number; tick: number }[]
   economy: Economy
+  player: SavedPlayer
 }
 
 interface SavedCreature {
@@ -64,6 +65,18 @@ interface SavedCreature {
   vocab: { concept: string; word: string; strength: number }[]
   inventory: { items: Record<string, number> }
   vengeance: { grudges: Record<string, { targetId: number; intensity: number; since: number }> }
+}
+
+export interface SavedPlayer {
+  pos: { x: number; z: number }
+  facing: number
+  health: number
+  alive: boolean
+  wallet: number
+  inventory: { items: Record<string, number> }
+  weapon: string | null
+  bondWith: number[]
+  name: string
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -112,6 +125,17 @@ export function saveSim(sim: Sim): LabSave {
     drops: sim.drops.map((d) => ({ ...d })),
     graves: sim.graves.map((g) => ({ ...g })),
     economy: JSON.parse(JSON.stringify(sim.economy)),
+    player: {
+      pos: { ...sim.player.pos },
+      facing: sim.player.facing,
+      health: sim.player.health,
+      alive: sim.player.alive,
+      wallet: sim.player.wallet,
+      inventory: { items: { ...sim.player.inventory.items } },
+      weapon: sim.player.weapon,
+      bondWith: [...sim.player.bondWith],
+      name: sim.player.name,
+    },
   }
 }
 
@@ -173,5 +197,17 @@ export function loadSim(data: LabSave): Sim {
   sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
   sim.graves = (data.graves ?? []).map((g) => ({ ...g }))
   sim.economy = data.economy ? JSON.parse(JSON.stringify(data.economy)) : createEconomy()
+  if (data.player) {
+    const sp = data.player
+    sim.player.pos = { ...sp.pos }
+    sim.player.facing = sp.facing
+    sim.player.health = sp.health
+    sim.player.alive = sp.alive
+    sim.player.wallet = sp.wallet
+    sim.player.inventory.items = { ...sp.inventory.items }
+    sim.player.weapon = sp.weapon as import('./inventory').ItemId | null
+    sim.player.bondWith = [...sp.bondWith]
+    sim.player.name = sp.name
+  }
   return sim
 }

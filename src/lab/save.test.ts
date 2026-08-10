@@ -18,6 +18,14 @@ const populated = () => {
   a.gangId = 1
   a.chem.addiction.brew = 0.6
   a.memory.vendettas[2] = 0.9
+  a.inventory.items.bread = 4
+  a.vengeance.grudges[2] = { targetId: 2, intensity: 0.7, since: 3 }
+  // player state
+  s.player.pos = { x: 8, z: -5 }
+  s.player.wallet = 25
+  s.player.weapon = 'stick'
+  s.player.inventory.items.bread = 2
+  s.player.inventory.items.medicine = 1
   a.memory.facts.bankIsSafe = 1
   for (let i = 0; i < 20; i++) s.tick()
   return s
@@ -47,7 +55,21 @@ describe('save — deep state round-trip', () => {
     expect(a2.chem.addiction.brew).toBeCloseTo(0.6)
     expect(a2.memory.vendettas[2]).toBeCloseTo(0.9)
     expect(a2.memory.facts.bankIsSafe).toBe(1)
+    expect(a2.inventory.items.bread).toBeGreaterThan(0)
+    expect(Object.keys(a2.vengeance.grudges).length).toBeGreaterThan(0)
     expect(s2.time).toBe(s.time)
+  })
+
+  it('round-trips the player character', () => {
+    const s = populated()
+    const data = saveSim(s)
+    const s2 = loadSim(data)
+    expect(s2.player.pos.x).toBeCloseTo(8)
+    expect(s2.player.wallet).toBe(25)
+    expect(s2.player.weapon).toBe('stick')
+    expect(s2.player.inventory.items.bread).toBeGreaterThan(0)
+    expect(s2.player.inventory.items.medicine).toBe(1)
+    expect(s2.player.alive).toBe(true)
   })
 
   it('keeps the save comfortably under 400KB even with a full world', () => {

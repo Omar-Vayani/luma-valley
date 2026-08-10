@@ -17,6 +17,7 @@ import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { addItem, useItem } from './inventory'
+import { createPlayer, hurtPlayer, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
@@ -25,7 +26,7 @@ import { observeEvent, gossipSpread, trustTowards, getReputation } from './reput
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 
-export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
+export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
 export interface SimEvent {
   type: SimEventType
@@ -75,6 +76,9 @@ export interface Sim {
   rob(id: number): void
   creatureById(id: number): Creature | undefined
   playerSocialize(playerId: number): void
+  player: Player
+  playerFight(targetId: number): void
+  playerPickUp(): void
 }
 
 const SPEED = 0.45
@@ -104,6 +108,7 @@ export function createSim(seed = 1): Sim {
     drops: [],
     graves: [],
     economy: createEconomy(),
+    player: createPlayer(0, 0, 'Visitor'),
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
@@ -189,6 +194,36 @@ export function createSim(seed = 1): Sim {
       const fz = clampCoord(z)
       sim.drops.push({ kind: 'money', x: fx, z: fz, amount })
       emit(sim, 'drop', undefined, undefined, fx, fz)
+    },
+    // ── player actions (distinct character) ──
+    playerFight(targetId: number): void {
+      const c = sim.creatureById(targetId)
+      if (!c || !c.alive) return
+      const p = sim.player
+      // the player deals weapon-boosted damage; the creature may retaliate
+      const playerDmg = 0.12 + (p.weapon === 'stick' ? 0.15 : 0)
+      c.hurt(playerDmg)
+      c.chem.fear = clamp01(c.chem.fear + 0.25)
+      addVendetta(c.memory, 0, 0.5)
+      recordWrong(c.vengeance, 0, 0.5, sim.time) // the creature remembers who hit it
+      emit(sim, 'fight', c, undefined, c.pos.x, c.pos.z)
+      // creatures fight back when hurt (and not too afraid)
+      if (c.alive && c.chem.fear < 0.7 && dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) < FIGHT_RANGE) {
+        hurtPlayer(p, 0.08 + c.genome.aggression * 0.05)
+        emit(sim, 'hit', undefined, undefined, p.pos.x, p.pos.z)
+      }
+    },
+    playerPickUp(): void {
+      const p = sim.player
+      const drop = sim.drops.find((d) => dist(d.x, d.z, p.pos.x, p.pos.z) < 1.5)
+      if (!drop) return
+      if (drop.kind === 'money') {
+        p.wallet += drop.amount
+      } else {
+        addItem(p.inventory, 'bread', drop.amount)
+      }
+      sim.drops.splice(sim.drops.indexOf(drop), 1)
+      emit(sim, 'collect', undefined, undefined, p.pos.x, p.pos.z)
     },
     tick(): void {
       sim.time++
