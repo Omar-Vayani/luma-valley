@@ -81,7 +81,7 @@ describe('App test-lab UI', () => {
   })
 
   it('has first-person mode: always-on player, joystick, look zone, pointer lock, social dock', () => {
-    expect(app).toContain('data-view-mode="first-person"')
+    expect(app).toContain('data-view-mode={viewMode}')
     expect(app).toContain('data-move')
     expect(app).toContain('data-look')
     expect(app).toContain('data-pointerlock')

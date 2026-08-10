@@ -10,7 +10,7 @@ import { tickChem, applyPlay, applySocial } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
-import { createEconomy, tickEconomy, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
 import { think, reward } from './brain'
@@ -417,6 +417,10 @@ export function createSim(seed = 1): Sim {
         }
       }
       tickEconomy(sim.economy)
+      // market day rollover: adjust prices by yesterday's demand (visible ▲▼)
+      if (sim.time % sim.economy.DAY_TICKS === 0) {
+        tickMarketDay(sim.economy, Math.floor(sim.time / sim.economy.DAY_TICKS))
+      }
       tickRelationships(sim)
       gossipNearby(sim)
       wakeNearbySleepers(sim)

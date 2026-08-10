@@ -131,7 +131,7 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [muted, setMuted] = useState(false)
 
-  // first-person (player) mode — ALWAYS on: you are the visitor. No observer.
+  // view mode: first-person (you ARE the visitor) or top view (watch the world)
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
   const [pointerLocked, setPointerLocked] = useState(false)
   const joyPointerRef = useRef<number | null>(null)
@@ -297,6 +297,24 @@ export default function App() {
   }, [])
 
   // ── player mode (a distinct character — never a creature) ──
+  const toggleViewMode = useCallback((): void => {
+    const view = viewRef.current
+    const sim = simRef.current
+    if (!view || !sim) return
+    if (viewMode === 'observer') {
+      // back into the visitor's eyes — revive if needed
+      if (!sim.player.alive) {
+        sim.player.health = 1
+        sim.player.alive = true
+        sim.player.pos = { x: 0, z: 0 }
+      }
+      view.setFirstPerson(1)
+      setViewMode('first-person')
+    } else {
+      view.setFirstPerson(null) // observer / top view camera
+      setViewMode('observer')
+    }
+  }, [viewMode])
 
   const socializePlayer = useCallback((): void => {
     simRef.current?.playerSocialize()
@@ -539,11 +557,18 @@ export default function App() {
           >
             {muted ? '🔇' : '🔊'}
           </button>
-          {/* first-person is the ONLY mode — you are the visitor, always */}
-          <span className="view-toggle" data-view-mode="first-person" aria-hidden="true">
-            <span className="dock-emoji">🧍</span>
-            <span className="dock-label">you</span>
-          </span>
+          {/* view toggle: first-person ↔ top view */}
+          <button
+            type="button"
+            className="view-toggle"
+            data-view-mode={viewMode}
+            aria-pressed={viewMode === 'first-person'}
+            aria-label={viewMode === 'observer' ? 'Enter first-person view' : 'Switch to top view'}
+            onClick={toggleViewMode}
+          >
+            <span className="dock-emoji">{viewMode === 'observer' ? '🧍' : '🗺️'}</span>
+            <span className="dock-label">{viewMode === 'observer' ? 'be' : 'top'}</span>
+          </button>
         </div>
       </header>
 
