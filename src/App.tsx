@@ -1,9 +1,12 @@
 /**
  * Luma Lab — Test Lab V2 observer UI.
- * Mobile-first: the live world (Three.js via LabView) is the feedback.
- * No text logs — the dock acts on the world, taps inspect.
- * Tools: spawn + bread/money placement + a Benevolence group (comfort, heal,
- * gift) and a Malice group (poke, hit, scare, rob).
+ * Mobile-first, landscape-friendly: the live world (Three.js via LabView)
+ * is the feedback. No text logs — the dock acts on the world, taps inspect.
+ * The player is a DISTINCT human-like character (sim.player), never a
+ * creature: it moves with the joystick/WASD, fights, equips, and holds its
+ * own inventory (data-player-inv). Tools: spawn + bread/money placement + a
+ * Benevolence group (comfort, heal, gift) and a Malice group (poke, hit,
+ * scare, rob).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
@@ -13,6 +16,9 @@ import { deriveEmotion, type EmotionType } from './lab/emotion'
 import { DRIVE_KEYS, driveTitles, type DriveKey } from './lab/drives'
 import { TOWERS } from './lab/world'
 import { SUBSTANCES } from './lab/substances'
+import { healPlayer } from './lab/player'
+import { dist } from './lab/util'
+import type { ItemId } from './lab/inventory'
 
 import './lab.css'
 
@@ -69,6 +75,17 @@ const SUBSTANCE_EMOJI: Record<string, string> = {
   tonic: '💊',
 }
 
+// Tiny icons for every item the player or a creature can hold.
+const ITEM_EMOJI: Record<ItemId, string> = {
+  bread: '🍞',
+  medicine: '💊',
+  brew: '🍺',
+  herb: '🌿',
+  spark: '✨',
+  tonic: '🧪',
+  stick: '🪓',
+}
+
 // Compact drive labels for the drives row (full titles live in the tooltip).
 const DRIVE_SHORT: Record<DriveKey, string> = {
   importance: 'Im',
@@ -82,6 +99,9 @@ const DRIVE_SHORT: Record<DriveKey, string> = {
   curiosity: 'Cu',
   legacy: 'Le',
 }
+
+/** How close the player must be to a creature to fight it. */
+const FIGHT_RANGE = 3
 
 function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100)
@@ -112,10 +132,8 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [muted, setMuted] = useState(false)
 
-  // first-person mode state
+  // first-person (player) mode state
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('observer')
-  const [playerId, setPlayerId] = useState<number | null>(null)
-  const playerIdRef = useRef<number | null>(null)
   const [pointerLocked, setPointerLocked] = useState(false)
   const [joyVec, setJoyVec] = useState({ x: 0, y: 0 })
   const joyPointerRef = useRef<number | null>(null)
@@ -124,8 +142,31 @@ export default function App() {
   const lookLastRef = useRef({ x: 0, y: 0 })
   const lookDownRef = useRef({ x: 0, y: 0, t: 0 })
   const lookMovedRef = useRef(false)
+
   // coarse pointer = touch screen (joystick + look zone), fine = mouse (WASD)
-  const isTouch = useMemo(() => window.matchMedia?.('(pointer: coarse)').matches ?? false, [])
+  const isTouch = useMemo(
+    () => window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window,
+    [],
+  )
+
+  // orientation: the game plays landscape; portrait still works with a hint
+  const [landscape, setLandscape] = useState(() => window.matchMedia?.('(orientation: landscape)').matches ?? true)
+  const [rotateHint, setRotateHint] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(orientation: landscape)')
+    if (!mq) return
+    const onChange = (): void => setLandscape(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  useEffect(() => {
+    const mq = window.matchMedia?.('(orientation: portrait) and (max-width: 599px)')
+    if (!mq) return
+    const onChange = (): void => setRotateHint(mq.matches)
+    setRotateHint(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
 
   // Boot the sim + renderer exactly once. StrictMode double-mounts in dev:
   // the cleanup disposes the previous view before the effect re-runs, and the
@@ -245,29 +286,34 @@ export default function App() {
     viewRef.current?.setSpeed(s)
   }, [])
 
-  // ── first-person mode ──
+  // ── player mode (a distinct character — never a creature) ──
   const toggleViewMode = useCallback((): void => {
     const sim = simRef.current
     const view = viewRef.current
     if (!sim || !view) return
     if (viewMode === 'observer') {
-      let pid = playerIdRef.current
-      const current = pid !== null ? sim.creatureById(pid) : undefined
-      if (pid === null || !current?.alive) {
-        // promote the selected creature, or spawn a dedicated player
-        const sel = selectedId !== null ? sim.creatureById(selectedId) : undefined
-        const chosen = sel?.alive ? sel : sim.spawnCreature()
-        pid = chosen.id
-        playerIdRef.current = pid
-        setPlayerId(pid)
+      // a fallen visitor gets back up at the lab entrance
+      if (!sim.player.alive) {
+        healPlayer(sim.player, 1)
+        sim.player.pos = { x: 0, z: 0 }
       }
-      view.setFirstPerson(pid)
+      view.setFirstPerson(1)
       setViewMode('first-person')
     } else {
       view.setFirstPerson(null)
       setViewMode('observer')
     }
-  }, [viewMode, selectedId])
+  }, [viewMode])
+
+  const socializePlayer = useCallback((): void => {
+    simRef.current?.playerSocialize()
+    setTick((t) => t + 1)
+  }, [])
+
+  const usePlayerItem = useCallback((id: ItemId): void => {
+    simRef.current?.playerUseItem(id)
+    setTick((t) => t + 1)
+  }, [])
 
   const applyJoystick = useCallback((x: number, y: number): void => {
     setJoyVec({ x, y })
@@ -278,16 +324,19 @@ export default function App() {
     const c = joyCenterRef.current
     const dx = clientX - c.x
     const dy = clientY - c.y
-    const R = 40 // thumb travel radius (px)
+    const R = 48 // thumb travel radius (px)
     const len = Math.hypot(dx, dy)
     const cl = len > R ? R / len : 1
     applyJoystick((dx * cl) / R, (-dy * cl) / R) // up on the stick = forward
   }, [applyJoystick])
 
+  // The joystick base stays fixed where it was first touched (its own center),
+  // so the thumb never jumps and the deflection reads predictably.
   const onJoyPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>): void => {
     if (joyPointerRef.current !== null) return
     joyPointerRef.current = e.pointerId
-    joyCenterRef.current = { x: e.clientX, y: e.clientY }
+    const rect = e.currentTarget.getBoundingClientRect()
+    joyCenterRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
     e.currentTarget.setPointerCapture(e.pointerId)
     updateJoyFromPointer(e.clientX, e.clientY)
   }, [updateJoyFromPointer])
@@ -331,17 +380,9 @@ export default function App() {
     }
   }, [])
 
-  const socializePlayer = useCallback((): void => {
-    const sim = simRef.current
-    const pid = playerIdRef.current
-    if (!sim || pid === null) return
-    sim.playerSocialize(pid)
-    setTick((t) => t + 1)
-  }, [])
-
   const sim = simRef.current
   const alive = sim ? sim.creatures.filter((c) => c.alive).length : 0
-  const playerC = playerId !== null ? (sim?.creatureById(playerId) ?? null) : null
+  const playerC = sim?.player ?? null
   const fpOn = viewMode === 'first-person' && playerC?.alive === true
   const selected = selectedId !== null ? sim?.creatureById(selectedId) ?? null : null
   const emotion = selected ? deriveEmotion(selected.chem, selected.genome) : null
@@ -349,24 +390,82 @@ export default function App() {
     selected && selected.partnerId !== null ? (sim?.creatureById(selected.partnerId) ?? null) : null
   const knownCount = selected ? TOWERS.filter((t) => selected.knowsTower(t.id)).length : 0
 
+  // nearest creature the player can fight right now (selected one preferred)
+  let fightTarget: number | null = null
+  if (sim && playerC?.alive) {
+    if (selectedId !== null) {
+      const c = sim.creatureById(selectedId)
+      if (c?.alive && dist(playerC.pos.x, playerC.pos.z, c.pos.x, c.pos.z) <= FIGHT_RANGE) {
+        fightTarget = c.id
+      }
+    }
+    if (fightTarget === null) {
+      let bestD = FIGHT_RANGE
+      for (const c of sim.creatures) {
+        if (!c.alive) continue
+        const d = dist(playerC.pos.x, playerC.pos.z, c.pos.x, c.pos.z)
+        if (d < bestD) {
+          bestD = d
+          fightTarget = c.id
+        }
+      }
+    }
+  }
+
+  const fightPlayer = useCallback((): void => {
+    const s = simRef.current
+    if (!s || fightTarget === null) return
+    s.playerFight(fightTarget)
+    setTick((t) => t + 1)
+  }, [fightTarget])
+
   return (
-    <div className="app" data-lab>
+    <div className="app" data-lab data-landscape={landscape}>
       <div className="mount" ref={mountRef} />
 
-      {/* view-mode toggle: observer ↔ first-person */}
-      <button
-        type="button"
-        className="view-toggle"
-        data-view-mode={viewMode}
-        aria-pressed={viewMode === 'first-person'}
-        aria-label={viewMode === 'observer' ? 'Enter first-person mode' : 'Return to observer mode'}
-        onClick={toggleViewMode}
-      >
-        <span className="dock-emoji">{viewMode === 'observer' ? '🧍' : '👁️'}</span>
-        <span className="dock-label">{viewMode === 'observer' ? 'be' : 'watch'}</span>
-      </button>
+      {/* polite rotate hint — portrait phones; never blocks the game */}
+      {rotateHint && (
+        <div className="rotate-hint" data-rotate-hint aria-hidden="true">
+          <span className="rotate-icon">📱</span> rotate for best view
+        </div>
+      )}
 
-      {/* desktop pointer lock (first-person only) */}
+      {/* touch controls: full-screen look zone + thumb joystick (player mode) */}
+      {fpOn && isTouch && (
+        <>
+          <div
+            className="fp-look"
+            data-look
+            onPointerDown={onLookPointerDown}
+            onPointerMove={onLookPointerMove}
+            onPointerUp={onLookPointerUp}
+            onPointerCancel={onLookPointerUp}
+            onLostPointerCapture={() => {
+              lookPointerRef.current = null
+            }}
+          />
+          <div
+            className="fp-joystick"
+            data-joystick
+            onPointerDown={onJoyPointerDown}
+            onPointerMove={onJoyPointerMove}
+            onPointerUp={onJoyPointerUp}
+            onPointerCancel={onJoyPointerUp}
+            onLostPointerCapture={() => {
+              joyPointerRef.current = null
+              applyJoystick(0, 0)
+            }}
+          >
+            <div
+              className="fp-joystick-thumb"
+              data-joystick-thumb
+              style={{ transform: `translate(${joyVec.x * 48}px, ${-joyVec.y * 48}px)` }}
+            />
+          </div>
+        </>
+      )}
+
+      {/* desktop pointer lock (player mode only) */}
       {viewMode === 'first-person' && !isTouch && (
         <button
           type="button"
@@ -383,34 +482,6 @@ export default function App() {
         >
           {pointerLocked ? '🔓' : '🔒'}
         </button>
-      )}
-
-      {/* touch controls: right-side look zone + left-thumb joystick */}
-      {fpOn && isTouch && (
-        <>
-          <div
-            className="fp-look"
-            data-look
-            onPointerDown={onLookPointerDown}
-            onPointerMove={onLookPointerMove}
-            onPointerUp={onLookPointerUp}
-            onPointerCancel={onLookPointerUp}
-          />
-          <div
-            className="fp-joystick"
-            data-joystick
-            onPointerDown={onJoyPointerDown}
-            onPointerMove={onJoyPointerMove}
-            onPointerUp={onJoyPointerUp}
-            onPointerCancel={onJoyPointerUp}
-          >
-            <div
-              className="fp-joystick-thumb"
-              data-joystick-thumb
-              style={{ transform: `translate(${joyVec.x * 40}px, ${-joyVec.y * 40}px)` }}
-            />
-          </div>
-        </>
       )}
 
       <header className="topbar" data-topbar>
@@ -473,8 +544,80 @@ export default function App() {
           >
             {muted ? '🔇' : '🔊'}
           </button>
+          {/* view-mode toggle: observer ↔ player */}
+          <button
+            type="button"
+            className="view-toggle"
+            data-view-mode={viewMode}
+            aria-pressed={viewMode === 'first-person'}
+            aria-label={viewMode === 'observer' ? 'Enter first-person mode' : 'Return to observer mode'}
+            onClick={toggleViewMode}
+          >
+            <span className="dock-emoji">{viewMode === 'observer' ? '🧍' : '👁️'}</span>
+            <span className="dock-label">{viewMode === 'observer' ? 'be' : 'watch'}</span>
+          </button>
         </div>
       </header>
+
+      {/* player HUD — compact, only while the player is out in the world */}
+      {fpOn && playerC && (
+        <section className="player-hud" data-player-hud aria-label="player status">
+          <div className="player-status">
+            <span className="mini-bar" title="health">
+              <span className="mini-bar-icon">❤️</span>
+              <span className="mini-bar-track">
+                <span
+                  className="mini-bar-fill"
+                  style={{ width: `${Math.round(playerC.health * 100)}%`, background: '#e8876a' }}
+                />
+              </span>
+            </span>
+            <span className="mini-bar" title="hunger">
+              <span className="mini-bar-icon">🍞</span>
+              <span className="mini-bar-track">
+                <span
+                  className="mini-bar-fill"
+                  style={{ width: `${Math.round(playerC.hunger * 100)}%`, background: '#e0b46a' }}
+                />
+              </span>
+            </span>
+            <span className="player-weapon" title={playerC.weapon ? 'equipped' : 'no weapon'}>
+              {playerC.weapon === 'stick' ? '🪓' : '✊'}
+            </span>
+          </div>
+          <div className="player-inv" data-player-inv role="group" aria-label="player inventory">
+            <span className="player-wallet" data-player-wallet title="wallet">
+              🪙 {Math.round(playerC.wallet)}
+            </span>
+            {Object.entries(playerC.inventory.items).map(([id, n]) => (
+              <button
+                key={id}
+                type="button"
+                className={`player-inv-item ${playerC.weapon === id ? 'player-inv-equipped' : ''}`}
+                data-player-item={id}
+                aria-label={`use ${id}`}
+                title={playerC.weapon === id ? `${id} (equipped)` : `use ${id}`}
+                onClick={() => usePlayerItem(id as ItemId)}
+              >
+                <span className="player-inv-emoji">{ITEM_EMOJI[id as ItemId] ?? '📦'}</span>
+                <span className="player-inv-count">×{n}</span>
+              </button>
+            ))}
+            {fightTarget !== null && (
+              <button
+                type="button"
+                className="player-fight"
+                data-player-fight
+                aria-label="fight the creature ahead"
+                title="fight"
+                onClick={fightPlayer}
+              >
+                ⚔️
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       {selected && selected.alive && emotion && (
         <section
@@ -511,6 +654,15 @@ export default function App() {
             </span>
             <span className="chip-action">{selected.action}</span>
           </div>
+          {Object.keys(selected.inventory.items).length > 0 && (
+            <div className="chip-inv" data-chip-inv>
+              {Object.entries(selected.inventory.items).map(([id, n]) => (
+                <span key={id} className="chip-inv-item" title={id}>
+                  {ITEM_EMOJI[id as ItemId] ?? '📦'}×{n}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="chip-knowledge-track" aria-hidden="true">
             <div
               className="chip-knowledge-fill"

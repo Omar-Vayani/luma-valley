@@ -6,7 +6,7 @@
  * All state is plain JSON-safe data so save/load is trivial.
  */
 import { createCreature, type Creature } from './creature'
-import { tickChem, applyPlay } from './chem'
+import { tickChem, applyPlay, applySocial } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
@@ -16,8 +16,8 @@ import { learnWord, shareWithNeighbors, sayWord } from './language'
 import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
-import { addItem, useItem } from './inventory'
-import { createPlayer, hurtPlayer, type Player } from './player'
+import { addItem, useItem, hasItem, tradeItem, countItem, type ItemId } from './inventory'
+import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
@@ -75,10 +75,13 @@ export interface Sim {
   scare(id: number): void
   rob(id: number): void
   creatureById(id: number): Creature | undefined
-  playerSocialize(playerId: number): void
+  playerSocialize(): void
   player: Player
   playerFight(targetId: number): void
   playerPickUp(): void
+  playerUseItem(id: ItemId): void
+  playerEquip(id: ItemId): boolean
+  creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean
 }
 
 const SPEED = 0.45
@@ -121,16 +124,20 @@ export function createSim(seed = 1): Sim {
     creatureById(id: number): Creature | undefined {
       return sim.creatures.find((c) => c.id === id)
     },
-    playerSocialize(playerId: number): void {
-      // First-person mode: the player bonds with the nearest creature in
-      // range — the exact same bonding logic as the 'social' action case.
-      const c = sim.creatureById(playerId)
-      if (!c || !c.alive) return
-      const near = nearestOther(sim, c, SOCIAL_RANGE)
+    playerSocialize(): void {
+      // First-person mode: the PLAYER (a distinct character, not a creature)
+      // bonds with the nearest creature in range. The creature remembers the
+      // player as id 0 (the same id the observer tools use for gratitude).
+      const p = sim.player
+      if (!isPlayerAlive(p)) return
+      const near = nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE)
       if (!near) return
-      c.socialize(near)
-      emit(sim, 'love', c, near, c.pos.x, c.pos.z)
-      c.action = 'social'
+      near.bonds[0] = clamp01((near.bonds[0] ?? 0) + 0.12)
+      near.chem.fear = clamp01(near.chem.fear - 0.05)
+      applySocial(near.chem)
+      if (!p.bondWith.includes(near.id)) p.bondWith.push(near.id)
+      near.action = 'social'
+      emit(sim, 'love', near, undefined, near.pos.x, near.pos.z)
     },
     poke(id: number): void {
       const c = sim.creatureById(id)
@@ -225,6 +232,51 @@ export function createSim(seed = 1): Sim {
       sim.drops.splice(sim.drops.indexOf(drop), 1)
       emit(sim, 'collect', undefined, undefined, p.pos.x, p.pos.z)
     },
+    /** Use an item from the player's own inventory (tap in the inv bar). */
+    playerUseItem(id: ItemId): void {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return
+      if (id === 'stick') {
+        equipItem(p, 'stick') // equipping is the use
+        return
+      }
+      if (!useItem(p.inventory, id)) return
+      if (id === 'bread') {
+        eatPlayer(p, 0.55)
+        emit(sim, 'eat', undefined, undefined, p.pos.x, p.pos.z)
+      } else if (id === 'medicine') {
+        healPlayer(p, 0.45)
+        emit(sim, 'medicine', undefined, undefined, p.pos.x, p.pos.z)
+      } else {
+        healPlayer(p, 0.05) // herbs/brews/tonics — a little comfort
+      }
+    },
+    /** Equip an item from the player's inventory (e.g. the stick). */
+    playerEquip(id: ItemId): boolean {
+      return equipItem(sim.player, id)
+    },
+    /**
+     * Barter: a stocked creature sells one loaf to a hungry peer for coins.
+     * Exported so tests can drive the trade directly; the tick calls it via
+     * tradeNearby() when a stocked seller meets a hungry, able buyer.
+     */
+    creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean {
+      if (!seller.alive || !buyer.alive) return false
+      if (!hasItem(seller.inventory, 'bread')) return false
+      const p = price ?? marketPrice(sim.economy, 'bread')
+      if (buyer.wallet < p) return false
+      buyer.wallet -= p
+      seller.wallet += p
+      tradeItem(seller.inventory, buyer.inventory, 'bread', 1)
+      buyer.eat() // the hungry buyer eats the loaf on the spot
+      buyer.gratitude[seller.id] = clamp01((buyer.gratitude[seller.id] ?? 0) + 0.25)
+      applyEmotionFeedback(buyer.emotions, 'joy', 0.1)
+      applyEmotionFeedback(seller.emotions, 'joy', 0.1)
+      seller.action = 'trade'
+      buyer.action = 'eat'
+      emit(sim, 'gift', seller, buyer, (seller.pos.x + buyer.pos.x) / 2, (seller.pos.z + buyer.pos.z) / 2)
+      return true
+    },
     tick(): void {
       sim.time++
       learnFromSight(sim) // learn BEFORE deciding so knowledge gates actions
@@ -297,6 +349,15 @@ export function createSim(seed = 1): Sim {
       tickRelationships(sim)
       gossipNearby(sim)
       wakeNearbySleepers(sim)
+      // ── the player (a distinct character): hunger, regen, pickup, barter ──
+      const p = sim.player
+      if (p.alive) {
+        p.hunger = clamp01(p.hunger - 0.00035)
+        if (p.hunger < 0.1) hurtPlayer(p, 0.004) // starving hurts
+        else if (p.hunger > 0.55 && p.health < 1) healPlayer(p, 0.0015) // fed, resting
+        sim.playerPickUp()
+      }
+      tradeNearby(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
     },
@@ -879,6 +940,40 @@ function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
     }
   }
   return best
+}
+
+/** Nearest alive creature to an arbitrary point (used for the player). */
+function nearestCreatureTo(sim: Sim, x: number, z: number, range: number): Creature | null {
+  let best: Creature | null = null
+  let bestD = range
+  for (const o of sim.creatures) {
+    if (!o.alive || o.sleeping) continue
+    const d = dist(x, z, o.pos.x, o.pos.z)
+    if (d < bestD) {
+      bestD = d
+      best = o
+    }
+  }
+  return best
+}
+
+/**
+ * Barter in the tick: a well-stocked seller (≥2 loaves) occasionally sells
+ * one to the nearest hungry peer who can afford it. Rare and local — never
+ * the main economy, just the visible warmth of creature-to-creature trade.
+ * Uses a deterministic cadence (time + id) instead of the rng stream so the
+ * seeded decision sequence of every creature is left untouched.
+ */
+function tradeNearby(sim: Sim): void {
+  for (const seller of sim.creatures) {
+    if (!seller.alive || seller.sleeping) continue
+    if (countItem(seller.inventory, 'bread') < 2) continue
+    if ((sim.time + seller.id) % 3 !== 0) continue
+    const buyer = nearestOther(sim, seller, SOCIAL_RANGE)
+    if (!buyer || !buyer.alive || buyer.sleeping || buyer.chem.hunger > 0.5) continue
+    if (buyer.wallet < marketPrice(sim.economy, 'bread')) continue
+    sim.creatureTrade(seller, buyer)
+  }
 }
 
 /**

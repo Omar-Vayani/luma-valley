@@ -77,6 +77,7 @@ export interface SavedPlayer {
   weapon: string | null
   bondWith: number[]
   name: string
+  hunger: number
 }
 
 export function saveSim(sim: Sim): LabSave {
@@ -135,6 +136,7 @@ export function saveSim(sim: Sim): LabSave {
       weapon: sim.player.weapon,
       bondWith: [...sim.player.bondWith],
       name: sim.player.name,
+      hunger: sim.player.hunger,
     },
   }
 }
@@ -208,6 +210,7 @@ export function loadSim(data: LabSave): Sim {
     sim.player.weapon = sp.weapon as import('./inventory').ItemId | null
     sim.player.bondWith = [...sp.bondWith]
     sim.player.name = sp.name
+    sim.player.hunger = sp.hunger ?? 0.75
   }
   return sim
 }

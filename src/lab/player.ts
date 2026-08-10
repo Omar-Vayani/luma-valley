@@ -16,6 +16,8 @@ export interface Player {
   weapon: ItemId | null
   bondWith: number[] // creature ids the player has bonded with
   name: string
+  /** 0..1 — how full the player is; bread restores it, time drains it. */
+  hunger: number
 }
 
 export function createPlayer(x: number, z: number, name = 'Visitor'): Player {
@@ -29,6 +31,7 @@ export function createPlayer(x: number, z: number, name = 'Visitor'): Player {
     weapon: null,
     bondWith: [],
     name,
+    hunger: 0.75,
   }
 }
 
@@ -45,6 +48,13 @@ export function hurtPlayer(p: Player, amount: number): void {
 
 export function healPlayer(p: Player, amount: number): void {
   p.health = Math.min(1, p.health + amount)
+  p.alive = true
+}
+
+/** Eat food: restores hunger (and a sliver of health — a meal sustains you). */
+export function eatPlayer(p: Player, amount: number): void {
+  p.hunger = Math.min(1, p.hunger + amount)
+  p.health = Math.min(1, p.health + amount * 0.06)
   p.alive = true
 }
 

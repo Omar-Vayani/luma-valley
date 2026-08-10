@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { TOWERS, WORLD_HALF, type Tower } from '../lab/world'
 import type { Sim, SimEvent } from '../lab/sim'
 import type { Creature } from '../lab/creature'
+import type { Player } from '../lab/player'
 import { deriveEmotion } from '../lab/emotion'
 import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
@@ -39,6 +40,22 @@ interface CreatureRig {
   targetX: number
   targetZ: number
   swing: number
+}
+
+/** The player's human-like rig — taller than a creature, NOT a ball. */
+interface PlayerRig {
+  group: THREE.Group
+  legL: THREE.Mesh
+  legR: THREE.Mesh
+  armL: THREE.Mesh
+  armR: THREE.Mesh
+  body: THREE.Mesh
+  head: THREE.Mesh
+  stick: THREE.Mesh
+  nameLabel: THREE.Sprite
+  phase: number
+  lastX: number
+  lastZ: number
 }
 
 const TICK_RATE = 6
@@ -274,6 +291,7 @@ export class LabView {
   private tapBuffer: { x: number; y: number; t: number }[] = []
 
   private rigs: CreatureRig[] = []
+  private playerRig: PlayerRig | null = null
   private knownIds = new Set<number>()
   private towerMeshes: THREE.Object3D[] = []
   private dropMarkers: { drop: { kind: string; x: number; z: number }; mesh: THREE.Object3D }[] = []
@@ -325,6 +343,8 @@ export class LabView {
       this.knownIds.add(c.id)
       this.addCreature(c)
     }
+    // the player — a distinct human-like visitor, not a creature
+    this.playerRig = this.buildPlayerRig(sim.player)
 
     // events
     this.setupPointerEvents()
@@ -988,6 +1008,115 @@ export class LabView {
     return g
   }
 
+  /**
+   * The player's body: a small human-like figure built from primitives —
+   * dark pants + warm jacket + skin-tone head with a hat and a backpack.
+   * Forward is local +z, so rotation.y = facing points it where it walks.
+   */
+  private buildPlayerRig(p: Player): PlayerRig {
+    const group = new THREE.Group()
+
+    const pantsMat = mkMat(0x3a352c, { roughness: 0.9 })
+    const jacketMat = mkMat(0xb06a3a, { roughness: 0.85 })
+    const skinMat = mkMat(0xe8b088, { roughness: 0.7 })
+    const hairMat = mkMat(0x4a3524, { roughness: 0.9 })
+    const packMat = mkMat(0x5a6a4a, { roughness: 0.9 })
+    const eyeMat = mkMat(0x241c12, { roughness: 0.3 })
+
+    // legs — swing while walking
+    const legL = mkBox(0.26, 0.85, 0.26, pantsMat)
+    legL.position.set(-0.17, 0.42, 0)
+    const legR = mkBox(0.26, 0.85, 0.26, pantsMat)
+    legR.position.set(0.17, 0.42, 0)
+    group.add(legL, legR)
+
+    // torso — taller than any creature
+    const body = mkBox(0.72, 0.9, 0.42, jacketMat)
+    body.position.set(0, 1.32, 0)
+    group.add(body)
+
+    // arms
+    const armL = mkBox(0.18, 0.72, 0.18, jacketMat)
+    armL.position.set(-0.47, 1.34, 0)
+    const armR = mkBox(0.18, 0.72, 0.18, jacketMat)
+    armR.position.set(0.47, 1.34, 0)
+    group.add(armL, armR)
+
+    // head — warm skin tone, eyes, and a little hat
+    const head = mkSphere(0.34, skinMat)
+    head.position.set(0, 2.02, 0)
+    group.add(head)
+    const eyeL = mkSphere(0.045, eyeMat)
+    eyeL.position.set(-0.13, 2.06, 0.3)
+    const eyeR = mkSphere(0.045, eyeMat)
+    eyeR.position.set(0.13, 2.06, 0.3)
+    group.add(eyeL, eyeR)
+    const hat = mkBox(0.56, 0.16, 0.56, hairMat)
+    hat.position.set(0, 2.34, 0)
+    const brim = mkBox(0.62, 0.07, 0.2, hairMat)
+    brim.position.set(0, 2.28, 0.22)
+    group.add(hat, brim)
+
+    // backpack (visible from behind)
+    const pack = mkBox(0.5, 0.62, 0.26, packMat)
+    pack.position.set(0, 1.38, -0.36)
+    group.add(pack)
+
+    // carried stick — appears when a weapon is equipped
+    const stick = mkBox(0.14, 0.14, 1.5, mkMat(0x76502f, { roughness: 0.9 }))
+    stick.position.set(0.5, 1.0, 0.24)
+    stick.rotation.z = 0.5
+    stick.visible = false
+    group.add(stick)
+
+    // floating name tag
+    const nameLabel = makeTextSprite(`🧍 ${p.name}`, { size: 22, color: '#fff', bg: 'rgba(20,20,16,0.7)', radius: 10 })
+    nameLabel.position.set(0, 2.9, 0)
+    group.add(nameLabel)
+
+    group.rotation.y = p.facing
+    group.position.set(p.pos.x, 0, p.pos.z)
+    this.scene.add(group)
+    return { group, legL, legR, armL, armR, body, head, stick, nameLabel, phase: Math.random() * Math.PI * 2, lastX: p.pos.x, lastZ: p.pos.z }
+  }
+
+  /** Keep the player figure in sync with sim.player — legs swing while walking. */
+  private syncPlayer(dt: number): void {
+    const rig = this.playerRig
+    const p = this.sim.player
+    if (!rig || !p) return
+    const t = performance.now() / 1000
+
+    rig.group.position.x += (p.pos.x - rig.group.position.x) * 0.35
+    rig.group.position.z += (p.pos.z - rig.group.position.z) * 0.35
+    const dx = rig.group.position.x - rig.lastX
+    const dz = rig.group.position.z - rig.lastZ
+    rig.lastX = rig.group.position.x
+    rig.lastZ = rig.group.position.z
+    const speed = Math.hypot(dx, dz) / Math.max(dt, 0.001)
+    const moving = p.alive && speed > 0.4
+
+    rig.group.rotation.y = p.facing
+    if (!p.alive) {
+      // the visitor collapsed — lay the figure down
+      rig.group.rotation.x = Math.PI / 2
+      rig.group.position.y = 0.14
+      rig.stick.visible = false
+      rig.legL.rotation.x = 0
+      rig.legR.rotation.x = 0
+    } else {
+      rig.group.rotation.x = 0
+      const swing = moving ? Math.sin(t * 11 + rig.phase) * 0.62 : 0
+      rig.legL.rotation.x = swing
+      rig.legR.rotation.x = -swing
+      rig.armL.rotation.x = -swing * 0.55
+      rig.armR.rotation.x = swing * 0.55
+      rig.group.position.y = moving ? Math.abs(Math.sin(t * 11 + rig.phase)) * 0.08 : 0
+      rig.stick.visible = p.weapon === 'stick'
+    }
+    rig.nameLabel.material.opacity = 0.85
+  }
+
   // ── events → particles ──
   private syncNewCreatures(): void {
     for (const c of this.sim.creatures) {
@@ -1231,6 +1360,7 @@ export class LabView {
     this.syncDrops()
     this.syncGraves()
     this.syncRigs(dt)
+    this.syncPlayer(dt)
     this.updateParticles(dt)
     this.updateCamera(dt)
 
@@ -1425,18 +1555,19 @@ export class LabView {
 
   // ── camera ──
   private updateCamera(dt: number): void {
-    // first-person: follow the player creature from just behind its head,
-    // looking along facing with fpPitch — the rig stays visible below center
+    // first-person: follow the PLAYER (a distinct human character) from just
+    // behind their head, looking along facing with fpPitch — the figure stays
+    // visible below the frame center.
     if (this.playerId !== null) {
-      const rig = this.rigs.find((r) => r.creature.id === this.playerId)
-      if (rig && rig.creature.alive) {
-        const f = rig.creature.facing
+      const p = this.sim.player
+      if (p && p.alive) {
+        const f = p.facing
         const sin = Math.sin(f)
         const cos = Math.cos(f)
         const target = new THREE.Vector3(
-          rig.group.position.x - sin * this.fpDist,
-          2.2,
-          rig.group.position.z - cos * this.fpDist
+          p.pos.x - sin * this.fpDist,
+          1.7,
+          p.pos.z - cos * this.fpDist
         )
         this.camera.position.lerp(target, 1 - Math.pow(0.001, dt))
         const look = target
@@ -1445,6 +1576,8 @@ export class LabView {
         this.camera.lookAt(look)
         return
       }
+      // player dead → drop back to the observer camera
+      this.playerId = null
     }
     const look = new THREE.Vector3(this.camTarget.x, 0, this.camTarget.z)
     const offset = new THREE.Vector3(0, Math.sin(this.camTilt), Math.cos(this.camTilt)).multiplyScalar(this.camDist)
@@ -1593,7 +1726,7 @@ export class LabView {
 
   // ── first-person mode ──
 
-  /** Enter/exit first-person mode. null = back to the observer camera. */
+  /** Enter/exit first-person mode. Any non-null id enters; null = observer. */
   setFirstPerson(playerCreatureId: number | null): void {
     this.playerId = playerCreatureId
     this.fpPitch = 0
@@ -1601,37 +1734,34 @@ export class LabView {
     this.keys.clear()
     if (this.pointerLocked) this.exitPointerLock()
     if (playerCreatureId === null) return
-    const c = this.sim.creatureById(playerCreatureId)
-    if (c) this.camTarget.set(c.pos.x, 0, c.pos.z)
-    // snap the camera behind the player head for an instant handover
-    const f = c?.facing ?? 0
+    const p = this.sim.player
+    if (p) this.camTarget.set(p.pos.x, 0, p.pos.z)
+    // snap the camera behind the player's head for an instant handover
+    const f = p?.facing ?? 0
     const sin = Math.sin(f)
     const cos = Math.cos(f)
-    const px = (c?.pos.x ?? 0) - sin * this.fpDist
-    const pz = (c?.pos.z ?? 0) - cos * this.fpDist
-    this.camera.position.set(px, 2.2, pz)
-    this.camera.lookAt(px + sin, 2.2, pz + cos)
+    const px = (p?.pos.x ?? 0) - sin * this.fpDist
+    const pz = (p?.pos.z ?? 0) - cos * this.fpDist
+    this.camera.position.set(px, 1.7, pz)
+    this.camera.lookAt(px + sin, 1.7, pz + cos)
   }
 
   /**
-   * Move the player creature by (dx, dz) world units directly, clamped to the
-   * world walls; its facing turns toward the movement direction. This bypasses
-   * the creature's own mind — the player is in control.
+   * Move the player (a distinct character, not a creature) by (dx, dz) world
+   * units directly, clamped to the world walls. Facing is untouched — the
+   * look controls own it, so strafing never fights the camera.
    */
   playerMove(dx: number, dz: number): void {
-    const c = this.playerCreature()
-    if (!c || !c.alive) return
-    const nx = clampCoord(c.pos.x + dx)
-    const nz = clampCoord(c.pos.z + dz)
-    if (Math.hypot(dx, dz) > 0.0001) c.facing = Math.atan2(nx - c.pos.x, nz - c.pos.z)
-    c.pos.x = nx
-    c.pos.z = nz
+    const p = this.sim.player
+    if (!p || !p.alive) return
+    p.pos.x = clampCoord(p.pos.x + dx)
+    p.pos.z = clampCoord(p.pos.z + dz)
   }
 
-  /** Turn the first-person view: yaw changes creature.facing, pitch is fpPitch. */
+  /** Turn the first-person view: yaw changes player.facing, pitch is fpPitch. */
   playerLook(yaw: number, pitch: number): void {
-    const c = this.playerCreature()
-    if (c) c.facing -= yaw
+    const p = this.sim.player
+    if (p) p.facing -= yaw
     this.fpPitch = Math.min(1.2, Math.max(-1.2, this.fpPitch - pitch))
   }
 
@@ -1658,11 +1788,6 @@ export class LabView {
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
   }
 
-  private playerCreature(): Creature | null {
-    if (this.playerId === null) return null
-    return this.sim.creatureById(this.playerId) ?? null
-  }
-
   /** Drag-look (touch / mouse fallback): dx yaws, dy pitches. */
   private fpLook(dx: number, dy: number): void {
     this.playerLook(dx * 0.008, dy * 0.008)
@@ -1670,8 +1795,8 @@ export class LabView {
 
   /** Consume the joystick vector + WASD keys into player movement each frame. */
   private applyPlayerInput(dt: number): void {
-    const c = this.playerCreature()
-    if (!c || !c.alive) return
+    const p = this.sim.player
+    if (!p || !p.alive) return
     const jx = this.joystick.x
     const jy = this.joystick.y
     let mx = 0
@@ -1679,18 +1804,18 @@ export class LabView {
     const mag = Math.hypot(jx, jy)
     if (mag > 0.08) {
       // joystick is facing-relative: up = forward, right = strafe right
-      const sin = Math.sin(c.facing)
-      const cos = Math.cos(c.facing)
-      mx = sin * jy + -cos * jx
-      mz = cos * jy + sin * jx
+      const sin = Math.sin(p.facing)
+      const cos = Math.cos(p.facing)
+      mx = sin * jy + cos * jx
+      mz = cos * jy - sin * jx
     }
     if (this.pointerLocked) {
-      const sin = Math.sin(c.facing)
-      const cos = Math.cos(c.facing)
+      const sin = Math.sin(p.facing)
+      const cos = Math.cos(p.facing)
       if (this.keys.has('w')) { mx += sin; mz += cos }
       if (this.keys.has('s')) { mx -= sin; mz -= cos }
-      if (this.keys.has('d')) { mx -= cos; mz += sin }
-      if (this.keys.has('a')) { mx += cos; mz -= sin }
+      if (this.keys.has('d')) { mx += cos; mz -= sin }
+      if (this.keys.has('a')) { mx -= cos; mz += sin }
     }
     const len = Math.hypot(mx, mz)
     if (len > 0.001) {
