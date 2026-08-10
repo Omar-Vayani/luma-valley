@@ -59,6 +59,7 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-speed="1"')
     expect(app).toContain('data-speed="2"')
     expect(app).toContain('data-speed="10"')
+    expect(app).toContain('data-sound=')
   })
 
   it('has zero action-message text or toasts — the world is the feedback', () => {

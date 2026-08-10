@@ -109,6 +109,7 @@ export default function App() {
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState<1 | 2 | 10>(1)
   const [showMore, setShowMore] = useState(false)
+  const [muted, setMuted] = useState(false)
 
   // Boot the sim + renderer exactly once. StrictMode double-mounts in dev:
   // the cleanup disposes the previous view before the effect re-runs, and the
@@ -276,6 +277,21 @@ export default function App() {
               10×
             </button>
           </div>
+          <button
+            type="button"
+            className="speed-btn sound-btn"
+            data-sound={muted ? 'off' : 'on'}
+            aria-pressed={!muted}
+            aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
+            onClick={() => {
+              const next = !muted
+              setMuted(next)
+              viewRef.current?.sound.setEnabled(!next)
+              viewRef.current?.sound.unlock()
+            }}
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
         </div>
       </header>
 

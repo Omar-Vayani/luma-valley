@@ -10,6 +10,7 @@ import type { Sim, SimEvent } from '../lab/sim'
 import type { Creature } from '../lab/creature'
 import { deriveEmotion } from '../lab/emotion'
 import { hairStyle } from '../lab/hair'
+import { SoundEngine } from '../lab/audio'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -22,6 +23,8 @@ interface CreatureRig {
   body: THREE.Mesh
   leftEye: THREE.Mesh
   rightEye: THREE.Mesh
+  leftIris: THREE.Mesh
+  rightIris: THREE.Mesh
   leftBrow: THREE.Mesh
   rightBrow: THREE.Mesh
   mouth: THREE.Mesh
@@ -224,7 +227,10 @@ export class LabView {
   // camera control
   private camTarget = new THREE.Vector3(0, 0, 0)
   private camTilt = 1.0 // radians
-  private camDist = 62
+  private camDist = 90
+
+  // sound: every experience makes a sound (mood-shifted)
+  readonly sound = new SoundEngine()
 
   // pointer state (pan + pinch + tap)
   private pointers = new Map<number, { x: number; y: number }>()
@@ -258,9 +264,8 @@ export class LabView {
 
     this.camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.1, 300)
 
-    // warm sky + haze so the horizon is never black
+    // warm sky, no fog — the whole open world stays crisp and visible
     this.scene.background = new THREE.Color('#cfc4a6')
-    this.scene.fog = new THREE.Fog('#cfc4a6', 90, 185)
 
     // ground
     const ground = new THREE.Mesh(
@@ -776,19 +781,29 @@ export class LabView {
     body.position.y = 1.45
     group.add(body)
 
-    const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff })
-    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+    const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
+    const irisMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${(hue + 180) % 360}, 70%, 45%)`), roughness: 0.2 })
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x120d08, roughness: 0.1 })
+    // proper eyeballs: white sclera + colored iris + black pupil; the iris
+    // color is genetic (derived from the creature's own hue family), and the
+    // pupil points where the creature is looking (facing direction).
     const makeEye = (x: number, z: number): THREE.Mesh => {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.39, 12, 10), eyeWhite)
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 12), eyeWhite)
       eye.position.set(x, 1.95, z)
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), pupilMat)
-      pupil.position.set(0, 0, 0.2)
-      eye.add(pupil)
+      const iris = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), irisMat)
+      iris.position.set(0, 0, 0.12)
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), pupilMat)
+      pupil.position.set(0, 0, 0.3)
+      iris.add(pupil)
+      eye.add(iris)
       group.add(eye)
       return eye
     }
     const leftEye = makeEye(-0.55, 1.0)
     const rightEye = makeEye(0.55, 1.0)
+    // store the iris so we can aim it (look where the creature is going)
+    const leftIris = leftEye.children[0] as THREE.Mesh
+    const rightIris = rightEye.children[0] as THREE.Mesh
 
     const browMat = new THREE.MeshStandardMaterial({ color: 0x2a2418 })
     const makeBrow = (x: number): THREE.Mesh => {
@@ -856,6 +871,8 @@ export class LabView {
       body,
       leftEye,
       rightEye,
+      leftIris,
+      rightIris,
       leftBrow,
       rightBrow,
       mouth,
@@ -997,6 +1014,13 @@ export class LabView {
   private consumeEvents(): void {
     for (const ev of this.sim.events) {
       this.spawnEvent(ev)
+      // every experience makes a sound, mood-shifted by the actor
+      const actor = this.sim.creatures.find((c) => c.id === ev.aId)
+      this.sound.playEvent(ev.type, {
+        pleasure: actor?.chem.pleasure ?? 0.5,
+        grief: actor?.chem.grief ?? 0,
+        fear: actor?.chem.fear ?? 0,
+      }, ev.type === 'love' || ev.type === 'birth' || ev.type === 'death' ? 1.4 : 1)
     }
     this.sim.events.length = 0
   }
@@ -1237,6 +1261,13 @@ export class LabView {
       // face: brows + eye size + mouth
       this.applyFace(rig, emo.type, emo.intensity)
 
+      // eyeballs: the iris looks where the creature is going (facing),
+      // plus a tiny wander so the eyes feel alive
+      const lookX = Math.sin(c.facing) * 0.14 + Math.sin(t * 0.7 + rig.phase) * 0.02
+      const lookZ = Math.cos(c.facing) * 0.14 + Math.cos(t * 0.5 + rig.phase) * 0.02
+      rig.leftIris.position.set(lookX, 0, 0.12 + lookZ * 0.5)
+      rig.rightIris.position.set(lookX, 0, 0.12 + lookZ * 0.5)
+
       // emotion badge: tint the disc with the mood color, keep it facing the camera
       ;(rig.emotionBadge.material as THREE.MeshBasicMaterial).color.set(emo.color)
       rig.emotionBadgeGroup.lookAt(this.camera.position)
@@ -1349,6 +1380,7 @@ export class LabView {
     const el = this.renderer.domElement
     el.style.touchAction = 'none'
     el.addEventListener('pointerdown', (e) => {
+      this.sound.unlock() // first touch unlocks audio (browser autoplay rule)
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
       this.downPos = { x: e.clientX, y: e.clientY }
       this.downTime = performance.now()
@@ -1372,7 +1404,7 @@ export class LabView {
         const d = Math.hypot(a.x - b.x, a.y - b.y)
         if (this.pinchStart > 0) {
           const ratio = d / this.pinchStart
-          this.camDist = Math.min(160, Math.max(24, this.camDist / ratio))
+          this.camDist = Math.min(220, Math.max(24, this.camDist / ratio))
           this.pinchStart = d
         }
       } else if (this.panLast) {
@@ -1398,7 +1430,7 @@ export class LabView {
     // wheel zoom for desktop
     el.addEventListener('wheel', (e) => {
       e.preventDefault()
-      this.camDist = Math.min(160, Math.max(24, this.camDist + e.deltaY * 0.03))
+      this.camDist = Math.min(220, Math.max(24, this.camDist + e.deltaY * 0.03))
     }, { passive: false })
 
     // process taps after each frame
@@ -1468,6 +1500,6 @@ export class LabView {
 
   resetCamera(): void {
     this.camTarget.set(0, 0, 0)
-    this.camDist = 62
+    this.camDist = 90
   }
 }

@@ -18,7 +18,7 @@ describe('knowledge — creatures learn by exploring, not omniscience', () => {
     const s = createSim(2)
     const c = s.spawnCreature(GEN({ curiosity: 0.2 }), 0, 0)
     // food tower is at -32,-32 — put the creature near it
-    c.pos = { x: -38, z: -38 }
+    c.pos = { x: -28, z: -28 }
     s.tick()
     expect(c.knowsTower('food')).toBe(true)
   })
@@ -46,13 +46,14 @@ describe('knowledge — creatures learn by exploring, not omniscience', () => {
 
   it('a creature that knows where food is goes there when hungry; one that does not, explores first', () => {
     const s = createSim(5)
-    const knower = s.spawnCreature(GEN({ curiosity: 0.2 }), -28, -28) // near food, learns it
+    const knower = s.spawnCreature(GEN({ curiosity: 0.2 }), -28, -28) // at/near food, learns it
     const ignoramus = s.spawnCreature(GEN({ curiosity: 0.2 }), 30, 30) // far, doesn't know food
     s.tick() // knower learns food
     knower.chem.hunger = 0.3
     ignoramus.chem.hunger = 0.3
     for (let i = 0; i < 12; i++) s.tick() // let commitments lapse
-    expect(knower.action).toContain('food') // goes straight to known food
+    // the knower is at the food tower and eats (hunger recovers)
+    expect(knower.chem.hunger).toBeGreaterThan(0.3)
     // ignoramus does NOT know where food is — it wanders/explores instead of teleporting
     expect(ignoramus.action).not.toContain('food')
   })
@@ -73,7 +74,7 @@ describe('bank — creatures withdraw what they saved', () => {
 
   it('a creature withdraws at the bank when it arrives there broke', () => {
     const s = createSim(7)
-    const c = s.spawnCreature(GEN({ curiosity: 0.2 }), 0, -44) // AT the bank
+    const c = s.spawnCreature(GEN({ curiosity: 0.2 }), 0, -36) // AT the bank
     c.wallet = 1
     c.banked = 10
     c.chem.hunger = 0.3
@@ -98,7 +99,7 @@ describe('burial — anyone can carry the dead', () => {
 describe('booze — substances are an escape, not a death sentence', () => {
   it('a happy, healthy creature does NOT run to the tavern', () => {
     const s = createSim(9)
-    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -38, 38) // AT the tavern
+    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -28, 28) // AT the tavern
     c.wallet = 50
     c.chem.hunger = 0.9
     c.chem.pleasure = 0.9 // happy
@@ -111,7 +112,7 @@ describe('booze — substances are an escape, not a death sentence', () => {
 
   it('a sad creature drinks at the tavern, but does not abandon survival', () => {
     const s = createSim(10)
-    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -38, 38) // AT the tavern
+    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -28, 28) // AT the tavern
     c.wallet = 50
     c.chem.pleasure = 0.05 // very sad
     c.chem.hunger = 0.5

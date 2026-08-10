@@ -26,6 +26,15 @@ describe('world — simple labeled towers', () => {
     }
   })
 
+  it('buildings are inset from the edges — no prison feel, nothing crammed in a corner', () => {
+    const half = WORLD_SIZE / 2
+    for (const t of TOWERS) {
+      // at least 20% of the half-world remains open beyond every building
+      expect(Math.abs(t.x)).toBeLessThan(half * 0.7)
+      expect(Math.abs(t.z)).toBeLessThan(half * 0.7)
+    }
+  })
+
   it('findTower returns the right tower by id', () => {
     expect(findTower('bank')?.label).toBe('bank')
     expect(findTower('food')?.icon).toBe('🍞')

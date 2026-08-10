@@ -48,7 +48,7 @@ describe('behavior — action suitability emerges from needs + genes', () => {
 
   it('a weak creature trains at the gym/play to gain strength', () => {
     const s = createSim(5)
-    const c = s.spawnCreature(GEN(), 0, 44) // at gym tower
+    const c = s.spawnCreature(GEN(), 0, 36) // at gym tower
     c.chem.strength = 0.1
     c.chem.hunger = 0.9
     c.chem.pleasure = 0.9
@@ -59,7 +59,7 @@ describe('behavior — action suitability emerges from needs + genes', () => {
 
   it('an addiction-prone sad creature buys a drink (combined behavior)', () => {
     const s = createSim(6)
-    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -38, 38) // at tavern
+    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -28, 28) // at tavern
     c.wallet = 20
     c.chem.pleasure = 0.1 // sad/bored
     for (let i = 0; i < 5; i++) s.tick()

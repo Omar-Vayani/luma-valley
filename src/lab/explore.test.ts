@@ -30,7 +30,7 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
 
   it('children inherit the parents genome (gene crossover on birth)', () => {
     const s = createSim(2028)
-    const a = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), -44, 0) // at homes
+    const a = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), -36, 0) // at homes
     const b = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), -43, 0)
     a.partnerId = b.id
     b.partnerId = a.id

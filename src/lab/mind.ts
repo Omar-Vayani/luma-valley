@@ -138,7 +138,7 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // Only withdraw what's needed — savings stay for real emergencies.
     withdraw: ((c.wallet < breadPrice ? 1 : 0) * (c.banked > 3 ? 1.5 : c.banked > 0 ? 0.8 : 0) + press.hungry * (c.banked > 0 ? 0.5 : 0)) * (c.knowsTower('bank') ? 1 : 0.15),
     // play: bored or weak, and at/near the gym — a leisure want, not a need
-    play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.2 : 0.7),
+    play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.6 : 0.7),
     // social: lonely + sociable + opportunity
     social: press.lonely * (0.3 + g.sociability * 1.4) * (near ? 1.3 : 0.2),
     // steal: desperate + thief genes + greed drive + target with money
