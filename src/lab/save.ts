@@ -65,6 +65,7 @@ interface SavedCreature {
   vocab: { concept: string; word: string; strength: number }[]
   inventory: { items: Record<string, number> }
   vengeance: { grudges: Record<string, { targetId: number; intensity: number; since: number }> }
+  want: { type: string; progress: number; age: number; fulfilled: boolean }
 }
 
 export interface SavedPlayer {
@@ -117,6 +118,7 @@ export function saveSim(sim: Sim): LabSave {
     vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })),
     inventory: { items: { ...c.inventory.items } },
     vengeance: { grudges: Object.fromEntries(Object.entries(c.vengeance.grudges).map(([k, g]) => [k, { ...g }])) },
+    want: { type: c.want.type, progress: c.want.progress, age: c.want.age, fulfilled: c.want.fulfilled },
   }))
   return {
     version: 4,
@@ -194,6 +196,9 @@ export function loadSim(data: LabSave): Sim {
       for (const [k, g] of Object.entries(sc.vengeance.grudges)) {
         c.vengeance.grudges[Number(k)] = { ...g }
       }
+    }
+    if (sc.want) {
+      c.want = { type: sc.want.type as never, progress: sc.want.progress, age: sc.want.age, fulfilled: sc.want.fulfilled }
     }
     return c
   })

@@ -13,6 +13,7 @@ import { deriveEmotion } from '../lab/emotion'
 import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
 import { refreshBrain, clampCoord } from '../lab/sim'
+import { ITEM_IDS, type ItemId } from '../lab/inventory'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -33,6 +34,10 @@ interface CreatureRig {
   sleepZ: THREE.Sprite
   nameLabel: THREE.Sprite
   stick: THREE.Mesh
+  heldItem: THREE.Group
+  heldItemId: ItemId | null
+  countBadge: THREE.Sprite
+  countShown: number
   hair: THREE.Group
   emotionBadge: THREE.Mesh
   emotionBadgeGroup: THREE.Group
@@ -108,6 +113,99 @@ function mkCyl(rt: number, rb: number, h: number, seg: number, m: THREE.Material
 
 function mkSphere(r: number, m: THREE.Material | THREE.ColorRepresentation): THREE.Mesh {
   return new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), m instanceof THREE.Material ? m : mkMat(m))
+}
+
+// ── carried items: tiny primitives every creature can visibly hold ──
+// Each good is one small model built ONCE; rigs clone() it so every ball
+// shares the same geometry + material (cheap, few draw calls). The count
+// badge is a small ×N sprite above the head, shown only while carrying.
+function buildItemMesh(id: ItemId): THREE.Object3D {
+  switch (id) {
+    case 'bread': {
+      const loaf = mkBox(0.62, 0.4, 0.44, 0xd9a35f)
+      const score = mkBox(0.52, 0.05, 0.05, 0xb8834a)
+      score.position.set(0, 0.16, 0.23)
+      const g = new THREE.Group()
+      g.add(loaf, score)
+      return g
+    }
+    case 'brew': {
+      const bottle = mkCyl(0.15, 0.22, 0.6, 10, 0xd9a13d)
+      const cap = mkBox(0.16, 0.1, 0.16, 0x6e4a2e)
+      cap.position.y = 0.35
+      const g = new THREE.Group()
+      g.add(bottle, cap)
+      return g
+    }
+    case 'medicine': {
+      const box = mkBox(0.5, 0.36, 0.3, 0xf4f4f4)
+      const v = mkBox(0.1, 0.24, 0.06, 0xd94a4a)
+      v.position.set(0, 0, 0.16)
+      const h = mkBox(0.24, 0.1, 0.06, 0xd94a4a)
+      h.position.set(0, 0, 0.16)
+      const g = new THREE.Group()
+      g.add(box, v, h)
+      return g
+    }
+    case 'herb': {
+      const stem = mkBox(0.05, 0.5, 0.05, 0x4a7a2e)
+      stem.position.y = 0.05
+      const leaf1 = mkSphere(0.2, 0x4fae5a)
+      leaf1.position.set(-0.12, 0.22, 0)
+      leaf1.scale.set(1, 0.6, 1)
+      const leaf2 = mkSphere(0.2, 0x3d8f4a)
+      leaf2.position.set(0.12, 0.24, 0)
+      leaf2.scale.set(1, 0.6, 1)
+      const g = new THREE.Group()
+      g.add(stem, leaf1, leaf2)
+      return g
+    }
+    case 'spark':
+      return new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.26, 0),
+        mkMat(0xe8d94a, { emissive: 0x8a7a1a, emissiveIntensity: 0.5, roughness: 0.3 })
+      )
+    case 'tonic': {
+      const vial = mkCyl(0.14, 0.14, 0.5, 10, 0x4faeae)
+      const neck = mkCyl(0.06, 0.08, 0.14, 8, 0x9acfcf)
+      neck.position.y = 0.32
+      const g = new THREE.Group()
+      g.add(vial, neck)
+      return g
+    }
+    case 'stick':
+      return mkBox(0.16, 0.16, 1.3, 0x76502f)
+  }
+}
+
+/** One shared model per good; rigs clone() these. */
+const ITEM_MESHES: Record<ItemId, THREE.Object3D> = {
+  bread: buildItemMesh('bread'),
+  medicine: buildItemMesh('medicine'),
+  brew: buildItemMesh('brew'),
+  herb: buildItemMesh('herb'),
+  spark: buildItemMesh('spark'),
+  tonic: buildItemMesh('tonic'),
+  stick: buildItemMesh('stick'),
+}
+
+/** Total units a creature carries in its inventory (badge number). */
+function carriedCount(c: Creature): number {
+  let n = 0
+  for (const id of ITEM_IDS) n += c.inventory.items[id] ?? 0
+  return n
+}
+
+/**
+ * The good a creature visibly holds. A weapon uses the dedicated stick rig;
+ * otherwise it's the first stocked item in canonical order (no spam).
+ */
+function heldItemFor(c: Creature): ItemId | null {
+  if (c.weapon === 'stick') return null
+  for (const id of ITEM_IDS) {
+    if ((c.inventory.items[id] ?? 0) > 0) return id
+  }
+  return null
 }
 
 interface RoofSpec {
@@ -899,6 +997,19 @@ export class LabView {
     stick.visible = false
     group.add(stick)
 
+    // held item: the opposite side of the ball, where bought goods sit. The
+    // mesh itself is swapped in syncRigs as the creature buys/eats items.
+    const heldItem = new THREE.Group()
+    heldItem.position.set(-1.9, 1.35, 0.2)
+    heldItem.rotation.y = 0.35
+    group.add(heldItem)
+
+    // carried-count badge: a tiny ×N above the head, only while carrying
+    const countBadge = makeTextSprite('×0', { size: 20, color: '#ffd98a', bg: 'rgba(28,26,20,0.8)', radius: 10 })
+    countBadge.position.set(0, 3.6, 0)
+    countBadge.visible = false
+    group.add(countBadge)
+
     // sleeping Zzz
     const sleepZ = makeTextSprite('💤', { size: 34 })
     sleepZ.position.set(1.6, 3.4, 0.2)
@@ -941,6 +1052,10 @@ export class LabView {
       sleepZ,
       nameLabel,
       stick,
+      heldItem,
+      heldItemId: null,
+      countBadge,
+      countShown: -1,
       hair,
       emotionBadge,
       emotionBadgeGroup,
@@ -1464,6 +1579,34 @@ export class LabView {
       // emotion badge: tint the disc with the mood color, keep it facing the camera
       ;(rig.emotionBadge.material as THREE.MeshBasicMaterial).color.set(emo.color)
       rig.emotionBadgeGroup.lookAt(this.camera.position)
+
+      // held item: swap the small mesh only when the carried good changes
+      // (shared geometry/material clones — cheap); hidden while dead.
+      const heldId = heldItemFor(c)
+      if (heldId !== rig.heldItemId) {
+        rig.heldItemId = heldId
+        rig.heldItem.clear()
+        if (heldId !== null) rig.heldItem.add(ITEM_MESHES[heldId].clone())
+      }
+      rig.heldItem.visible = heldId !== null && c.alive
+
+      // carried-count badge: rebuild the ×N sprite only when the total moves
+      const carried = carriedCount(c)
+      if (carried !== rig.countShown) {
+        rig.countShown = carried
+        if (carried > 0) {
+          const badge = makeTextSprite(`×${carried}`, { size: 20, color: '#ffd98a', bg: 'rgba(28,26,20,0.8)', radius: 10 })
+          badge.position.set(0, 3.6, 0)
+          rig.group.remove(rig.countBadge)
+          rig.countBadge = badge
+          rig.group.add(badge)
+        }
+      }
+      rig.countBadge.visible = carried > 0 && c.alive
+
+      // QA hooks: what this rig visibly carries (weapon or first held good)
+      rig.group.userData.heldItem = c.weapon === 'stick' ? 'stick' : heldId
+      rig.group.userData.heldCount = carried
 
       // name label subtle
       rig.nameLabel.material.opacity = 0.85

@@ -16,6 +16,7 @@ import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } f
 import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
+import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
 import { addItem, useItem, hasItem, tradeItem, countItem, type ItemId } from './inventory'
 import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
@@ -375,6 +376,8 @@ export function createSim(seed = 1): Sim {
         }
         if (!c.alive) continue
         decide(sim, c)
+        // wants: doing the thing the want points at advances it
+        wantProgress(c.want, c.action)
         // stay inside the world — nothing escapes the lab
         c.pos.x = clampCoord(c.pos.x)
         c.pos.z = clampCoord(c.pos.z)
@@ -409,6 +412,12 @@ export function createSim(seed = 1): Sim {
         decayGrudges(c.vengeance, 0.002)
         c.age++
         if (c.fightCooldown > 0) c.fightCooldown--
+        // want lifecycle: age it, progress on matching actions, refresh when done
+        tickWant(c.want)
+        if (c.want.fulfilled || wantExpired(c.want)) {
+          c.chem.pleasure = clamp01(c.chem.pleasure + 0.15) // want completed = joy
+          c.want = refreshWant(c.want, { hunger: c.chem.hunger, energy: c.chem.energy, social: c.chem.social, pleasure: c.chem.pleasure })
+        }
         if (c.chem.health <= 0 && c.action !== 'dead') {
           c.alive = false
           c.action = 'dead'

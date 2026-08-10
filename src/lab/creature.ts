@@ -13,6 +13,7 @@ import { createLanguage, type LanguageState } from './language'
 import { ageLimitFor } from './lifecycle'
 import { createInventory, type Inventory } from './inventory'
 import { createVengeance, type VengeanceState } from './vengeance'
+import { createWant, wantForState } from './wants'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -57,6 +58,7 @@ export interface Creature {
   vengeance: VengeanceState // grudges + revenge planning
   talkingTo: number | null // creature id being talked to (stops to interact)
   busyTicks: number // remaining ticks of a committed interaction (talk/fight)
+  want: import('./wants').Want // current Sims-style desire (icon above head)
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -114,6 +116,7 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     vengeance: createVengeance(),
     talkingTo: null,
     busyTicks: 0,
+    want: createWant(wantForState({ hunger: 0.8, energy: 0.8, social: 0.8, pleasure: 0.8 })),
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },
