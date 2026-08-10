@@ -1571,14 +1571,22 @@ export class LabView {
         const cos = Math.cos(f)
         const eye = new THREE.Vector3(p.pos.x, 1.65, p.pos.z)
         this.camera.position.lerp(eye, 1 - Math.pow(0.001, dt))
+        // Orient via lookAt with an INVERTED up vector. Three.js cameras look
+        // down −Z; lookAt points −Z at the target, which rotates the camera
+        // 180° around Y and MIRRORS left/right (the "controls are inverted"
+        // bug). Setting up = −Y cancels that mirror: screen-right becomes
+        // world-right while the view still points along (sin f, cos f).
+        this.camera.up.set(0, -1, 0)
+        // up=−Y also flips the pitch sign — negate so +pitch still looks up
         const look = eye
           .clone()
-          .add(new THREE.Vector3(sin * Math.cos(this.fpPitch), Math.sin(this.fpPitch), cos * Math.cos(this.fpPitch)))
+          .add(new THREE.Vector3(sin * Math.cos(-this.fpPitch), Math.sin(-this.fpPitch), cos * Math.cos(-this.fpPitch)))
         this.camera.lookAt(look)
         return
       }
       // player dead → drop back to the observer camera
       this.playerId = null
+      this.camera.up.set(0, 1, 0) // restore normal up for the observer view
     }
     const look = new THREE.Vector3(this.camTarget.x, 0, this.camTarget.z)
     const offset = new THREE.Vector3(0, Math.sin(this.camTilt), Math.cos(this.camTilt)).multiplyScalar(this.camDist)
