@@ -17,6 +17,7 @@ import type { Genome } from './genetics'
 import { marketPrice } from './economy'
 import { findTower, towerAt } from './world'
 import { trustTowards, reputationOf } from './reputation'
+import { revengeScore } from './vengeance'
 import { dist } from './util'
 
 export type ActionName =
@@ -170,9 +171,10 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // share: grateful + social conscience + reciprocity + affection
     share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6 + c.emotions.affection * 0.5 + c.emotions.joy * 0.3)
       * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
-    // fight: vendetta + aggression + spite/resentment + tribal + protect friends
+    // fight: vendetta + REVENGE + aggression + spite/resentment + tribal + protect friends
     // + shun known aggressors. A bond to the target dampens it, never blocks.
     fight: ((c.memory.vendettas[near?.id ?? 0] ?? 0) * 1.8
+      + revengeScore(c.vengeance, near?.id ?? -1) * 2.6 // the thirst for revenge
       + (g.aggression * (press.bored * 0.5) + c.emotions.spite * 1.0 + c.emotions.resentment * 0.5) * (near ? 1.4 : 0.1)
       + tribalDefense(sim, c, near)
       + protectFriend(sim, c)
@@ -181,8 +183,12 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // collect: poor/greedy + hoarding drive + envy (hoard-hoarding) and a pile
     // nearby (hoarders grab free money even when they already have some)
     collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8 + c.emotions.envy * 0.7) * (moneyDrop ? 1.4 : 0.05),
-    // idle: content creatures rest in place (low curiosity → idle wins over wander)
-    idle: (1 - g.curiosity * 0.9) * (1 - c.drives.curiosity * 0.5) * 0.7,
+    // idle: content creatures rest in place (low curiosity → idle wins over
+    // wander) — but ONLY when the creature is genuinely comfortable. Hunger,
+    // thirst-adjacent needs, and real drive beat idling, so nobody dies doing
+    // nothing in the middle of the map.
+    idle: (1 - g.curiosity * 0.9) * (1 - c.drives.curiosity * 0.5)
+      * 0.7 * (1 - press.hungry * 0.9) * (1 - press.tired * 0.6),
     // wander: curious creatures explore the unknown (curiosity drive) — but
     // a creature with a specific craving wanders less (it knows what it wants).
     // Paranoia keeps creatures moving/avoiding; a known aggressor nearby makes

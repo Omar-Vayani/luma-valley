@@ -11,6 +11,8 @@ import type { ReputationMap } from './reputation'
 import { createBrain, type Brain } from './brain'
 import { createLanguage, type LanguageState } from './language'
 import { ageLimitFor } from './lifecycle'
+import { createInventory, type Inventory } from './inventory'
+import { createVengeance, type VengeanceState } from './vengeance'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -51,6 +53,8 @@ export interface Creature {
   brainPrefs: number[] | null // cached brain inference (refreshed async, throttled)
   playerBond: number // 0..1 — how bonded to the player (shields from aging)
   ageLimit: number // ticks until natural aging begins (genetic)
+  inventory: Inventory // items the creature bought and keeps
+  vengeance: VengeanceState // grudges + revenge planning
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -104,6 +108,8 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     brainPrefs: null,
     playerBond: 0,
     ageLimit: ageLimitFor(Math.random()),
+    inventory: createInventory(),
+    vengeance: createVengeance(),
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },

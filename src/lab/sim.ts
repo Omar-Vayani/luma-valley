@@ -15,6 +15,8 @@ import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord } from './language'
 import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
+import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
+import { addItem, useItem } from './inventory'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
@@ -246,6 +248,7 @@ export function createSim(seed = 1): Sim {
         decayMemory(c.memory)
         tickDrives(c.drives, c.chem, c.genome)
         tickEmotions(c.emotions)
+        decayGrudges(c.vengeance, 0.002)
         c.age++
         if (c.fightCooldown > 0) c.fightCooldown--
         if (c.chem.health <= 0 && c.action !== 'dead') {
@@ -321,10 +324,36 @@ function decide(sim: Sim, c: Creature): void {
     }
   }
 
+  // Bank first: a hungry creature with savings withdraws before any other
+  // money-finding — savings exist to be spent on survival.
+  if (c.chem.hunger < 0.35 && c.wallet < marketPrice(sim.economy, 'bread') && c.banked > 0 && knows(sim, c, 'bank')) {
+    const atBank = towerAt(c.pos.x, c.pos.z)
+    if (atBank?.id === 'bank') {
+      const need = Math.max(marketPrice(sim.economy, 'bread'), 3) - c.wallet
+      const amount = Math.min(c.banked, Math.max(1, need))
+      c.banked -= amount
+      c.wallet += amount
+      c.action = 'withdraw'
+      c.intention = null
+      return
+    }
+    goTo(sim, c, 'bank')
+    c.intention = 'withdraw'
+    return
+  }
+
   // HARD SURVIVAL: starving creatures go to food — nothing may override this.
   // A creature with money buys at the tower; a broke one works or takes the
   // nearest free drop first. (Prevents dying of hunger while holding coins.)
-  if (c.chem.hunger < 0.15) {
+  if (c.chem.hunger < 0.35) {
+    // eat stored bread FIRST — no trip needed, never starve with food in hand
+    if (useItem(c.inventory, 'bread')) {
+      c.eat()
+      emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+      c.action = 'eat'
+      c.intention = null
+      return
+    }
     const foodDrop = nearestDrop(sim, c, 'food', 40)
     if (foodDrop) {
       goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
@@ -422,19 +451,17 @@ function decide(sim: Sim, c: Creature): void {
   }
 
   // A tower-bound action the creature is still walking toward: stay committed
-  // until arrival (no flip-flopping mid-journey). BUT urgent needs override:
-  // if hunger/health/energy are critical, the mind re-scores now.
+  // UNTIL ARRIVAL — no flip-flopping mid-journey (the user's "they want to go
+  // everywhere at once" bug). Re-scoring only happens once the creature is
+  // actually at the destination, where the mind can buy/drink/play properly.
   if (c.intention && c.goalTowerId !== null && c.goalTowerId !== 'none' && actionValid(sim, c, c.intention)) {
-    const urgent = c.chem.hunger < 0.35 || c.chem.energy < 0.15 || c.chem.health < 0.3
-    if (!urgent) {
-      const goal = towerAt(c.pos.x, c.pos.z)
-      if (goal?.id !== c.goalTowerId) {
-        execute(sim, c, c.intention)
-        return
-      }
-      // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
-      c.goalTowerId = 'none'
+    const goal = towerAt(c.pos.x, c.pos.z)
+    if (goal?.id !== c.goalTowerId) {
+      execute(sim, c, c.intention) // keep walking toward the goal
+      return
     }
+    // arrived: clear the goal so the mind re-scores HERE (buy, drink, etc.)
+    c.goalTowerId = 'none'
   }
 
   // Re-score and pick a fresh action (mind + free will).
@@ -457,12 +484,28 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'food': {
       if (at?.id === 'food') {
         if (c.chem.hunger < 0.85 && buyFromTower(sim.economy, 'food', c)) {
-          c.eat()
-          preferPlace(c.memory, 'food')
-          emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
-          c.action = 'eat'
+          // keep the bread — eat now if hungry, else store for later
+          addItem(c.inventory, 'bread', 1)
+          if (c.chem.hunger < 0.6 && useItem(c.inventory, 'bread')) {
+            c.eat()
+            preferPlace(c.memory, 'food')
+            emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+            c.action = 'eat'
+            return
+          }
+          // stored for later — the creature walks on richer
+          c.action = 'buy bread'
+          c.intention = null
           return
         }
+      }
+      // hungry with stored bread? eat from inventory without a trip
+      if (c.chem.hunger < 0.5 && useItem(c.inventory, 'bread')) {
+        c.eat()
+        emit(sim, 'eat', c, undefined, c.pos.x, c.pos.z)
+        c.action = 'eat'
+        c.intention = null
+        return
       }
       const foodDrop = nearestDrop(sim, c, 'food', 40)
       if (foodDrop) {
@@ -769,13 +812,16 @@ function flee(sim: Sim, c: Creature): void {
   c.action = 'flee'
 }
 
-/** A creature learns the location of any tower it can see (or has been to). */
+/** A creature learns a tower's location by INTERACTING with it (standing at
+ * the building). It doesn't magically know the map — knowledge comes from
+ * visiting, so a creature that has never been to a tower genuinely doesn't
+ * know where it is and must explore until it finds it. */
 function learnFromSight(sim: Sim): void {
   for (const c of sim.creatures) {
     if (!c.alive) continue
     for (const t of TOWERS) {
       const d = dist(c.pos.x, c.pos.z, t.x, t.z)
-      if (d <= 16) c.learnTower(t.id)
+      if (d <= t.radius + 0.5) c.learnTower(t.id)
     }
   }
 }
@@ -981,6 +1027,8 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   applySocialFeedback(victim.drives, 'theft')
   learnFact(victim.memory, 'bankIsSafe', 0.6 + amount * 0.05)
   addVendetta(victim.memory, thief.id, 0.8)
+  const bonded = thief.partnerId === victim.id || (thief.bonds[victim.id] ?? 0) > 0.35
+  recordWrong(victim.vengeance, thief.id, bonded ? 0.9 : 0.5, sim.time) // betrayal stings harder
   preferPlace(victim.memory, 'bank')
   // ── social awareness ──
   // the thief's greed feeds envy in onlookers and resentment in the victim;
@@ -989,7 +1037,6 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   applyEmotionFeedback(victim.emotions, 'resentment', 0.35)
   applyEmotionFeedback(victim.emotions, 'paranoia', 0.15)
   victim.chem.fear = clamp01(victim.chem.fear + 0.05)
-  const bonded = thief.partnerId === victim.id || (thief.bonds[victim.id] ?? 0) > 0.35
   observeEvent(victim, bonded ? 'betray' : 'steal', thief.id)
   witness(sim, victim, 'steal', thief.id)
   emit(sim, 'steal', thief, victim, victim.pos.x, victim.pos.z)
@@ -1012,6 +1059,8 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   }
   addVendetta(b.memory, a.id, 0.5)
   addVendetta(a.memory, b.id, 0.3)
+  recordWrong(b.vengeance, a.id, 0.5, sim.time)
+  recordWrong(a.vengeance, b.id, 0.3, sim.time)
   // ── social awareness ──
   // fights breed spite and fear; watchers judge the aggressor. If `a` was
   // DEFENDING a friend, witnesses see a protector instead of a bully.
@@ -1035,9 +1084,11 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   if (aRetreat && !bRetreat) {
     flee(sim, a)
     b.action = 'idle'
+    settleRevenge(b.vengeance, a.id) // revenge delivered — the grudge closes
   } else if (bRetreat && !aRetreat) {
     flee(sim, b)
     a.action = 'idle'
+    settleRevenge(a.vengeance, b.id) // revenge delivered — the grudge closes
   }
 }
 
@@ -1156,6 +1207,9 @@ export async function refreshBrain(sim: Sim, c: Creature): Promise<void> {
 /** Reward the brain after an action based on how it changed needs. */
 async function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): Promise<void> {
   try {
+    // skip low-value/no-op actions — reward only meaningful experiences so
+    // tfjs work is minimal on mobile (wander/idle/collect teach nothing)
+    if (action === 'wander' || action === 'idle' || action === 'collect') return
     const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
     if (idx < 0) return
     // reward = how much better the creature feels right now (needs satisfied)
