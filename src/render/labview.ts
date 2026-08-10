@@ -11,6 +11,7 @@ import type { Creature } from '../lab/creature'
 import { deriveEmotion } from '../lab/emotion'
 import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
+import { refreshBrain } from '../lab/sim'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -1153,6 +1154,22 @@ export class LabView {
     this.particles.push({ mesh: mesh as THREE.Mesh | THREE.Sprite, life, max: life, vy, vx, vz })
   }
 
+  // Throttled async brain inference: refresh one creature's preferences each
+  // frame so tfjs work is spread out (no frame spikes, mobile-friendly).
+  private lastBrainRefresh = 0
+  private brainCursor = 0
+  private refreshBrains(now: number): void {
+    const creatures = this.sim.creatures
+    if (creatures.length === 0 || now - this.lastBrainRefresh < 500) return
+    this.lastBrainRefresh = now
+    const c = creatures[this.brainCursor % creatures.length]
+    this.brainCursor++
+    if (c.alive) void refreshBrain(this.sim, c)
+  }
+
+  /** First-person controls: the player creature id, or null = observer. */
+  playerId: number | null = null
+
   // ── main loop ──
   private loop(now: number): void {
     this.raf = requestAnimationFrame(this.loop)
@@ -1162,13 +1179,14 @@ export class LabView {
     if (!this.paused) {
       this.simAccum += dt * this.speed
       let guard = 0
-      while (this.simAccum >= STEP && guard++ < 8) {
-        this.sim.tick()
+      while (this.simAccum >= STEP && guard++ < 6) {
         this.simAccum -= STEP
+        this.sim.tick() // sync tick; brain learning refreshes async below
       }
-      if (guard >= 8) this.simAccum = 0
+      if (guard >= 6) this.simAccum = 0
     }
 
+    this.refreshBrains(now)
     this.consumeEvents()
     this.syncNewCreatures()
     this.syncDrops()

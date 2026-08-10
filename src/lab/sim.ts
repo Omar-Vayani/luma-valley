@@ -5,19 +5,23 @@
  * creature walks toward it; at the destination the action happens.
  * All state is plain JSON-safe data so save/load is trivial.
  */
-import { createCreature, randomName, type Creature } from './creature'
+import { createCreature, type Creature } from './creature'
 import { tickChem, applyPlay } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
 import { createEconomy, tickEconomy, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { createNamePool, pickName, type NamePool } from './names'
+import { learnWord, shareWithNeighbors, sayWord } from './language'
+import { think, reward } from './brain'
+import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 
-export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
+export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
 export interface SimEvent {
   type: SimEventType
@@ -49,6 +53,7 @@ export interface Sim {
   creatures: Creature[]
   nextId: number
   rng: () => number
+  namePool: NamePool
   events: SimEvent[]
   drops: SimDrop[]
   graves: SimGrave[]
@@ -86,6 +91,7 @@ export function createSim(seed = 1): Sim {
     creatures: [],
     nextId: 1,
     rng: mulberry32(seed),
+    namePool: createNamePool(),
     events: [],
     drops: [],
     graves: [],
@@ -94,7 +100,7 @@ export function createSim(seed = 1): Sim {
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
-      const c = createCreature(sim.nextId++, randomName(sim.rng), g, cx, cz)
+      const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz)
       c.wallet = 6 + Math.floor(sim.rng() * 8) // enough for a few meals — room to experiment
       sim.creatures.push(c)
       return c
@@ -171,6 +177,30 @@ export function createSim(seed = 1): Sim {
       // decisions for every alive creature
       for (const c of sim.creatures) {
         if (!c.alive) continue
+        // SLEEP SUSPENSION: a sleeping creature does zero brain/decision work
+        // until energy recovers or a proximity event wakes it.
+        if (c.sleeping) {
+          c.chem.energy = clamp01(c.chem.energy + 0.35) // rest restores stamina
+          if (c.chem.energy > 0.55) {
+            c.sleeping = false
+            c.action = 'wake'
+            c.intention = null
+          } else {
+            c.action = 'sleep'
+            c.intention = null
+            c.goalTowerId = null
+            continue // suspended: no decide, no movement, no brain
+          }
+        }
+        // aging: creatures eventually die of old age unless player-bonded
+        if (c.age > c.ageLimit) {
+          const dmg = agingDamage(c.age, c.playerBond)
+          if (dmg > 0) {
+            c.chem.health = clamp01(c.chem.health - dmg)
+            if (c.chem.health <= 0) c.alive = false
+          }
+        }
+        if (!c.alive) continue
         decide(sim, c)
         // stay inside the world — nothing escapes the lab
         c.pos.x = clampCoord(c.pos.x)
@@ -209,6 +239,7 @@ export function createSim(seed = 1): Sim {
       }
       tickEconomy(sim.economy)
       tickRelationships(sim)
+      wakeNearbySleepers(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
     },
@@ -323,12 +354,20 @@ function decide(sim: Sim, c: Creature): void {
     return
   }
 
-  // Emergent bonds: a partnered creature at home with a strong bond procreates.
+  // Emergent bonds: a partnered creature at home with a strong bond procreates —
+  // only if BOTH parents have the energy reserves to pay the cost (population control).
   const at = towerAt(c.pos.x, c.pos.z)
   if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
     const partner = sim.creatureById(c.partnerId)
     const lastBirth = c.memory.facts.partnerIsHere ?? -1000
-    if (partner && partner.alive && partner.chem.bond > 0.7 && sim.time - lastBirth > BIRTH_COOLDOWN) {
+    if (
+      partner && partner.alive && partner.chem.bond > 0.7
+      && sim.time - lastBirth > BIRTH_COOLDOWN
+      && canProcreate(c.chem.energy, partner.chem.energy, c.age)
+    ) {
+      // energy cost paid by both parents — life is not free
+      c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
+      partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
       c.memory.facts.partnerIsHere = sim.time
       partner.memory.facts.partnerIsHere = sim.time
       procreate(sim, c, partner)
@@ -371,10 +410,14 @@ function decide(sim: Sim, c: Creature): void {
 
   // Re-score and pick a fresh action (mind + free will).
   const scores = scoreActions(sim, c)
+  // The creature's own brain (learned experience) biases the action choice.
+  blendBrainFromCache(c, scores)
   const chosen = chooseAction(scores, sim.rng)
   c.intention = chosen
   c.intentionTicks = COMMITMENT_TICKS
   execute(sim, c, chosen)
+  // Learning: the outcome of this action teaches the brain a little (async).
+  void learnFromOutcome(sim, c, chosen)
 }
 
 /** Run one tick of a chosen action. */
@@ -793,6 +836,23 @@ function carryCorpseDirect(sim: Sim, c: Creature): void {
   c.intention = null
 }
 
+/** A creature approaching within range wakes a sleeping creature. */
+function wakeNearbySleepers(sim: Sim): void {
+  for (const c of sim.creatures) {
+    if (!c.alive || !c.sleeping) continue
+    for (const o of sim.creatures) {
+      if (o.id === c.id || !o.alive || o.sleeping) continue
+      if (dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 3) {
+        c.sleeping = false
+        c.action = 'wake'
+        c.intention = null
+        c.chem.fear = clamp01(c.chem.fear + 0.1) // startled
+        break
+      }
+    }
+  }
+}
+
 function steal(sim: Sim, thief: Creature, victim: Creature): void {
   const amount = Math.min(victim.wallet, 2 + Math.floor(thief.genome.greed * 4))
   victim.wallet -= amount
@@ -843,7 +903,7 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
 
 function procreate(sim: Sim, a: Creature, b: Creature): void {
   const childGenome = mutate(crossover(a.genome, b.genome, sim.rng), 0.15, sim.rng)
-  const child = createCreature(sim.nextId++, randomName(sim.rng), childGenome, a.pos.x + 0.8, a.pos.z + 0.8)
+  const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8)
   child.wallet = 1
   sim.creatures.push(child)
   emit(sim, 'birth', a, b, a.pos.x, a.pos.z)
@@ -913,4 +973,84 @@ function wander(sim: Sim, c: Creature): void {
     }
   }
   goTo(sim, c, best ?? 'food')
+}
+
+/** Brain context vector: normalized needs + situation the creature is in. */
+function brainContext(sim: Sim, c: Creature): number[] {
+  const near = nearestOther(sim, c, 5)
+  const at = towerAt(c.pos.x, c.pos.z)
+  const hungry = 1 - c.chem.hunger
+  return [
+    hungry, 1 - c.chem.energy, 1 - c.chem.pleasure, 1 - c.chem.social,
+    1 - c.chem.health, c.chem.fear, c.chem.grief, c.chem.strength,
+    Math.min(1, c.wallet / 30), Math.min(1, c.banked / 30),
+    c.genome.aggression, c.genome.sociability, c.genome.curiosity,
+    near ? 1 : 0, at ? 1 : 0, c.knowledge.food ? 1 : 0,
+  ]
+}
+
+/** Action indices for the brain's preference vector (aligned with ActionName order). */
+const BRAIN_ACTIONS = ['food', 'work', 'sleep', 'heal', 'drink', 'den', 'school', 'farm', 'park', 'play', 'social', 'steal', 'share', 'fight', 'wander', 'idle', 'deposit', 'withdraw'] as const
+
+/** Blend the creature's learned brain preferences (cached async) into scores. */
+function blendBrainFromCache(c: Creature, scores: Record<string, number>): void {
+  const prefs = c.brainPrefs
+  if (!prefs) return
+  for (let i = 0; i < BRAIN_ACTIONS.length && i < prefs.length; i++) {
+    const name = BRAIN_ACTIONS[i]
+    if (name in scores) {
+      scores[name] = scores[name] * 0.7 + prefs[i] * 2.2 // learned bias, scaled
+    }
+  }
+}
+
+/** Refresh a creature's brain preference cache (async, throttled by sim). */
+export async function refreshBrain(sim: Sim, c: Creature): Promise<void> {
+  try {
+    c.brainPrefs = await think(c.brain, brainContext(sim, c))
+  } catch {
+    c.brainPrefs = null
+  }
+}
+
+/** Reward the brain after an action based on how it changed needs. */
+async function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): Promise<void> {
+  try {
+    const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
+    if (idx < 0) return
+    // reward = how much better the creature feels right now (needs satisfied)
+    const pleasureNow = c.chem.pleasure
+    const hungerNow = c.chem.hunger
+    const r = 0.3 + pleasureNow * 0.5 + hungerNow * 0.3 + (c.wallet > 0 ? 0.1 : 0)
+    await reward(c.brain, brainContext(sim, c), idx, Math.min(1, r))
+    learnLanguageFromAction(sim, c, action)
+  } catch {
+    // learning failure must never break the sim
+  }
+}
+
+/** Language: doing things teaches words; being near others spreads them. */
+function learnLanguageFromAction(sim: Sim, c: Creature, action: ActionName): void {
+  const conceptMap: Partial<Record<ActionName, string>> = {
+    food: 'food', work: 'work', farm: 'food', heal: 'medicine',
+    play: 'play', social: 'friend', steal: 'money', share: 'gift',
+    drink: 'food', den: 'danger', sleep: 'sleep', school: 'work',
+    park: 'play', fight: 'danger',
+  }
+  const concept = conceptMap[action]
+  if (!concept) return
+  // coin/strengthen the word for this experience
+  learnWord(c.language, concept, 0.35)
+  // occasionally say it out loud — nearby creatures learn the association
+  if (sim.rng() < 0.25) {
+    const word = sayWord(c.language, concept)
+    if (word) {
+      emit(sim, 'say', c, undefined, c.pos.x, c.pos.z)
+      for (const o of sim.creatures) {
+        if (o.id !== c.id && o.alive && dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 12) {
+          shareWithNeighbors(c.language, o.language, concept, 0.4)
+        }
+      }
+    }
+  }
 }

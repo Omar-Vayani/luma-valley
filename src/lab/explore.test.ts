@@ -36,6 +36,8 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     b.partnerId = a.id
     a.chem.bond = 1
     b.chem.bond = 1
+    a.age = 700 // old enough to procreate
+    b.age = 700
     const before = s.creatures.length
     for (let i = 0; i < 60; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
