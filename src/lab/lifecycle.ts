@@ -9,10 +9,51 @@
  *   learned state (brain weights, vocabulary, memories) — vast capacity.
  */
 
-export const AGE_LIMIT_BASE = 3000 // ticks until natural aging begins
-export const AGE_LIMIT_SPREAD = 1500 // genetic variation
+// A Luma lifetime is long enough to grow up, build a household, raise
+// children, and grow old — roughly 20 minutes of play at 6 ticks per second.
+export const AGE_LIMIT_BASE = 6000 // ticks until natural aging begins
+export const AGE_LIMIT_SPREAD = 2500 // genetic variation
 export const PLAYER_BOND_THRESHOLD = 0.55 // bonds above this shield from aging
 export const CREATURE_STORAGE_BYTES = 3 * 1024 * 1024 // 3MB per creature
+
+/** Life stages: childhood shapes learning, elders slow down. */
+export type LifeStage = 'child' | 'adolescent' | 'adult' | 'elder'
+
+export const CHILD_UNTIL = 400
+export const ADOLESCENT_UNTIL = 600
+export const ELDER_FROM = 5200
+
+export function lifeStageFor(age: number): LifeStage {
+  if (age < CHILD_UNTIL) return 'child'
+  if (age < ADOLESCENT_UNTIL) return 'adolescent'
+  if (age < ELDER_FROM) return 'adult'
+  return 'elder'
+}
+
+/** Children learn faster; elders learn slower but keep what they know. */
+export function learningRateFor(stage: LifeStage): number {
+  switch (stage) {
+    case 'child': return 1.6
+    case 'adolescent': return 1.25
+    case 'adult': return 1
+    case 'elder': return 0.7
+  }
+}
+
+/** Only mature creatures work, court, and reproduce. */
+export function isMature(stage: LifeStage): boolean {
+  return stage === 'adult' || stage === 'elder'
+}
+
+/** Physical capability multiplier (children weak, elders fading). */
+export function vigorFor(stage: LifeStage): number {
+  switch (stage) {
+    case 'child': return 0.5
+    case 'adolescent': return 0.8
+    case 'adult': return 1
+    case 'elder': return 0.7
+  }
+}
 
 /** How much aging damage a creature takes at a given age (0 = none yet). */
 export function agingDamage(age: number, playerBond: number): number {
@@ -41,6 +82,7 @@ export function canProcreate(energyA: number, energyB: number, age: number): boo
 }
 
 /** The genetic age limit for a creature (some live longer than others). */
-export function ageLimitFor(rand: number): number {
-  return AGE_LIMIT_BASE + Math.floor(rand * AGE_LIMIT_SPREAD)
+export function ageLimitFor(rand: number, longevity = 0.5): number {
+  const genetic = (longevity - 0.5) * AGE_LIMIT_SPREAD
+  return Math.max(1200, Math.round(AGE_LIMIT_BASE + rand * AGE_LIMIT_SPREAD + genetic))
 }

@@ -28,11 +28,12 @@ export interface Economy {
 }
 
 /** The goods the economy knows about. */
-export const GOODS = ['bread', 'medicine', 'brew', 'weapon', 'herb', 'spark', 'tonic'] as const
+export const GOODS = ['bread', 'grain', 'medicine', 'brew', 'weapon', 'herb', 'spark', 'tonic'] as const
 
 /** How much the market absorbs per day at the fair price, per good. */
 export const DEMAND_QUOTA: Record<string, number> = {
   bread: 10,
+  grain: 8,
   medicine: 6,
   brew: 8,
   weapon: 2,
@@ -43,10 +44,26 @@ export const DEMAND_QUOTA: Record<string, number> = {
 
 const DAY_TICKS = 400 // one "market day" ≈ 400 sim ticks (a few minutes of play)
 
+/**
+ * Bring a loaded economy up to date with the goods this build knows about.
+ * A world saved before a good existed simply gains it at its opening stock,
+ * rather than crashing the market the first time the day rolls over.
+ */
+export function migrateEconomy(loaded: Economy): Economy {
+  const fresh = createEconomy()
+  return {
+    ...fresh,
+    ...loaded,
+    goods: { ...fresh.goods, ...loaded.goods },
+    sales: { ...loaded.sales },
+  }
+}
+
 export function createEconomy(): Economy {
   return {
     goods: {
       bread: { id: 'bread', basePrice: 3, stock: 12, maxStock: 12, restockEvery: 6, restockTimer: 0, priceFactor: 1 },
+      grain: { id: 'grain', basePrice: 2, stock: 10, maxStock: 14, restockEvery: 10, restockTimer: 0, priceFactor: 1 },
       medicine: { id: 'medicine', basePrice: 7, stock: 8, maxStock: 8, restockEvery: 10, restockTimer: 0, priceFactor: 1 },
       brew: { id: 'brew', basePrice: 4, stock: 10, maxStock: 10, restockEvery: 8, restockTimer: 0, priceFactor: 1 },
       weapon: { id: 'weapon', basePrice: 15, stock: 4, maxStock: 4, restockEvery: 30, restockTimer: 0, priceFactor: 1 },
@@ -85,9 +102,17 @@ export function salesSinceDay(e: Economy, id: string, day: number): number {
   return 0 // specific day outside the tracked window = no sales that day
 }
 
-/** Advance the economy. Returns true when a market day rolled over. */
-export function tickEconomy(e: Economy): boolean {
+/**
+ * Advance the economy.
+ *
+ * Goods that somebody's job produces do NOT refill on their own — they arrive
+ * only when that person works a shift. Pass `isStaffed` so the shelves reflect
+ * who is actually doing the work; without it everything trickles in as before.
+ */
+export function tickEconomy(e: Economy, isStaffed?: (goodId: string) => boolean): boolean {
   for (const g of Object.values(e.goods)) {
+    // an unstaffed trade stops delivering entirely: that is the shortage
+    if (isStaffed && !isStaffed(g.id)) continue
     g.restockTimer++
     if (g.restockTimer >= g.restockEvery && g.stock < g.maxStock) {
       g.stock++
@@ -102,6 +127,7 @@ export function tickMarketDay(e: Economy, day: number): void {
   e.day = day
   for (const id of GOODS) {
     const g = e.goods[id]
+    if (!g) continue // a good this world does not trade in
     const sold = salesSinceDay(e, id, day - 1)
     const quota = DEMAND_QUOTA[id]
     // heavy demand (sales >> quota) → price rises; light demand → eases down
@@ -159,4 +185,137 @@ export function workShift(_e: Economy, c: { wallet: number; action: string; work
     return true
   }
   return false
+}
+
+// ── subjective value, negotiation, refusal, debt ──────────────────────────
+
+/**
+ * What an item is WORTH to a particular creature right now. A starving
+ * creature values bread far above list price; a wealthy one shrugs at it.
+ * This is the number creatures haggle around — prices are never truly fixed.
+ */
+export function valueTo(
+  e: Economy,
+  c: {
+    chem: { hunger: number; health: number; energy: number; pleasure: number }
+    wallet: number
+    genome: { greed: number; addictionProne: number }
+    chemAddiction?: Record<string, number>
+  },
+  goodId: string,
+): number {
+  const base = marketPrice(e, goodId)
+  let need = 1
+  if (goodId === 'bread' || goodId === 'grain') need += (1 - c.chem.hunger) * 1.4
+  if (goodId === 'water') need += (1 - c.chem.hunger) * 0.4
+  if (goodId === 'medicine' || goodId === 'tonic') need += (1 - c.chem.health) * 1.6
+  if (goodId === 'brew' || goodId === 'herb' || goodId === 'spark') {
+    const dep = c.chemAddiction?.[goodId] ?? 0
+    need += dep * 1.5 + (1 - c.chem.pleasure) * 0.4
+  }
+  // the poor feel every coin; the greedy always want a bargain
+  const wealthFactor = c.wallet < 5 ? 0.85 : c.wallet > 30 ? 1.15 : 1
+  const greedFactor = 1 - c.genome.greed * 0.15
+  return Math.max(1, Math.round(base * need * wealthFactor * greedFactor))
+}
+
+export interface Offer {
+  price: number
+  accepted: boolean
+  reason: 'fair' | 'friend-discount' | 'too-expensive' | 'refused-thief' | 'no-stock'
+}
+
+/**
+ * Negotiate a price between two parties. Trust buys a discount, suspicion
+ * adds a markup, and a known thief can simply be refused service.
+ */
+export function negotiate(
+  e: Economy,
+  goodId: string,
+  sellerView: { trust: number; thief: number },
+  buyerBudget: number,
+  buyerValue: number,
+): Offer {
+  const good = e.goods[goodId]
+  if (!good || good.stock <= 0) return { price: 0, accepted: false, reason: 'no-stock' }
+  if (sellerView.thief > 0.55 && sellerView.trust < 0) {
+    return { price: 0, accepted: false, reason: 'refused-thief' }
+  }
+  const list = marketPrice(e, goodId)
+  const trustAdj = 1 - Math.max(0, sellerView.trust) * 0.2 + Math.max(0, -sellerView.trust) * 0.25
+  const suspicionAdj = 1 + sellerView.thief * 0.3
+  const price = Math.max(1, Math.round(list * trustAdj * suspicionAdj))
+  if (price > buyerBudget) return { price, accepted: false, reason: 'too-expensive' }
+  if (price > buyerValue * 1.35) return { price, accepted: false, reason: 'too-expensive' }
+  return {
+    price,
+    accepted: true,
+    reason: sellerView.trust > 0.3 ? 'friend-discount' : 'fair',
+  }
+}
+
+export interface Debt {
+  fromId: number // owes
+  toId: number // owed
+  amount: number
+  since: number
+}
+
+export interface Ledger {
+  debts: Debt[]
+}
+
+export function createLedger(): Ledger {
+  return { debts: [] }
+}
+
+/** Record an informal obligation — a loan, an unpaid tab, a favor in coin. */
+export function addDebt(ledger: Ledger, fromId: number, toId: number, amount: number, tick: number): void {
+  const existing = ledger.debts.find((d) => d.fromId === fromId && d.toId === toId)
+  if (existing) {
+    existing.amount += amount
+    return
+  }
+  ledger.debts.push({ fromId, toId, amount, since: tick })
+}
+
+/** Pay down a debt; returns how much was actually repaid. */
+export function repayDebt(ledger: Ledger, fromId: number, toId: number, amount: number): number {
+  const debt = ledger.debts.find((d) => d.fromId === fromId && d.toId === toId)
+  if (!debt) return 0
+  const paid = Math.min(debt.amount, amount)
+  debt.amount -= paid
+  if (debt.amount <= 0.001) {
+    ledger.debts = ledger.debts.filter((d) => d !== debt)
+  }
+  return paid
+}
+
+export function totalOwedBy(ledger: Ledger, id: number): number {
+  return ledger.debts.filter((d) => d.fromId === id).reduce((s, d) => s + d.amount, 0)
+}
+
+export function totalOwedTo(ledger: Ledger, id: number): number {
+  return ledger.debts.filter((d) => d.toId === id).reduce((s, d) => s + d.amount, 0)
+}
+
+/** Drop debts owed by or to the dead so the ledger stays small. */
+export function pruneLedger(ledger: Ledger, aliveIds: Set<number>): void {
+  ledger.debts = ledger.debts.filter((d) => aliveIds.has(d.fromId) && aliveIds.has(d.toId))
+}
+
+/** Simple inequality readout for the society panel (0 = equal, 1 = extreme). */
+export function wealthInequality(wallets: number[]): number {
+  if (wallets.length < 2) return 0
+  const sorted = [...wallets].sort((a, b) => a - b)
+  const total = sorted.reduce((s, w) => s + w, 0)
+  if (total <= 0) return 0
+  let cum = 0
+  let gini = 0
+  for (let i = 0; i < sorted.length; i++) {
+    cum += sorted[i]
+    gini += cum / total
+  }
+  const n = sorted.length
+  return Math.max(0, Math.min(1, (n + 1 - 2 * gini) / n))
 }

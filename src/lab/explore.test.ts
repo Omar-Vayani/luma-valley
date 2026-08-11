@@ -8,11 +8,13 @@ const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5
 describe('sim — exploration (creatures roam, not pile on one tower)', () => {
   it('a curious creature visits many different towers over time', () => {
     const s = createSim(2026)
+    s.settings.lodNear = 200 // full AI during this exploration soak
+    s.settings.aiBatchSize = 8
     const c = s.spawnCreature(GEN({ curiosity: 0.95 }), 0, 0)
     c.chem.hunger = 0.9 // not hungry — free to roam
     c.chem.pleasure = 0.9 // not bored — free to roam
     const visited = new Set<string>()
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < 600; i++) {
       s.tick()
       const at = towerAt(c.pos.x, c.pos.z)
       if (at) visited.add(at.id)

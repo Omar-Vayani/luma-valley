@@ -17,6 +17,12 @@ export interface ChemState {
   bond: number // attachment to a partner
   grief: number // mourning after a partner/friend dies (0..1, heals slowly)
   strength: number // physical power, built by play/exercise (0..1)
+  /** physical ease — warmth, shelter, not being footsore */
+  comfort: number
+  /** time alone; crowded creatures need space, isolated ones don't */
+  privacy: number
+  /** a reason to get up: work, family, mastery, status */
+  purpose: number
   addiction: Record<string, number> // substance -> 0..1 dependence
   lastDose: Record<string, number> // tick index of last dose (withdrawal timer)
 }
@@ -34,6 +40,9 @@ export function createChem(): ChemState {
     bond: 0,
     grief: 0,
     strength: 0.3,
+    comfort: 0.7,
+    privacy: 0.7,
+    purpose: 0.5,
     addiction: {},
     lastDose: {},
   }
@@ -55,6 +64,11 @@ export function tickChem(c: ChemState, tick = 1): void {
   c.energy = clamp01(c.energy - DECAY.energy)
   c.social = clamp01(c.social - DECAY.social)
   c.pleasure = clamp01(c.pleasure - DECAY.pleasure)
+  // slower-moving quality-of-life needs
+  c.comfort = clamp01(c.comfort - 0.0002)
+  c.purpose = clamp01(c.purpose - 0.00018)
+  // privacy recovers by default; crowding (applied elsewhere) drains it
+  c.privacy = clamp01(c.privacy + 0.0002)
   c.intoxication = clamp01(c.intoxication - 0.008)
   c.bond = clamp01(c.bond - 0.0003)
   c.grief = clamp01(c.grief - 0.004) // mourning heals slowly
@@ -102,6 +116,27 @@ export function applyDrink(c: ChemState, genome: Genome, tick = 1): void {
 export function applySleep(c: ChemState): void {
   c.energy = clamp01(c.energy + 0.5)
   c.fear = clamp01(c.fear - 0.1)
+  c.comfort = clamp01(c.comfort + 0.25)
+  c.privacy = clamp01(c.privacy + 0.2)
+}
+
+/** Standing in a crowd wears on a creature that wants space. */
+export function applyCrowding(c: ChemState, neighbors: number): void {
+  if (neighbors <= 1) {
+    c.privacy = clamp01(c.privacy + 0.002)
+    return
+  }
+  c.privacy = clamp01(c.privacy - 0.002 * (neighbors - 1))
+}
+
+/** Doing meaningful work, teaching, or providing for kin restores purpose. */
+export function applyPurpose(c: ChemState, amount = 0.1): void {
+  c.purpose = clamp01(c.purpose + amount)
+}
+
+/** Shelter, warm clothing, and rest restore comfort. */
+export function applyComfort(c: ChemState, amount = 0.1): void {
+  c.comfort = clamp01(c.comfort + amount)
 }
 
 export function applySocial(c: ChemState): void {

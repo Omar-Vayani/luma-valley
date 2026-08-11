@@ -8,6 +8,7 @@
     "playwright-core": "^1.62.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
+    "vite-node": "^6.0.0",
     "vitest": "^4.1.10"
   },
   "dependencies": {
@@ -22,8 +23,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "start": "node server.mjs",
+    "serve": "npm run build && node server.mjs",
+    "play": "vite build && vite preview --host --port 4173",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
+    "bench": "vite-node scripts/bench.mjs",
+    "balance": "vite-node scripts/balance.mjs",
+    "verify:hud": "node scripts/verify-hud.mjs",
+    "demo": "node scripts/demo.mjs",
     "lint": "oxlint src"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

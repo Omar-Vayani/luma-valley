@@ -14,6 +14,10 @@ import { ageLimitFor } from './lifecycle'
 import { createInventory, type Inventory } from './inventory'
 import { createVengeance, type VengeanceState } from './vengeance'
 import { createWant, wantForState } from './wants'
+import { createSocialGraph, type SocialGraph } from './socialbond'
+import { createPsyche, type Psyche } from './psyche'
+import { createBeliefs, createHabits, type BeliefStore, type HabitStore } from './beliefs'
+import { lifeStageFor, type LifeStage } from './lifecycle'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -59,6 +63,34 @@ export interface Creature {
   talkingTo: number | null // creature id being talked to (stops to interact)
   busyTicks: number // remaining ticks of a committed interaction (talk/fight)
   want: import('./wants').Want // current Sims-style desire (icon above head)
+  /** Multidimensional directed relationships (asymmetric). */
+  social: SocialGraph
+  /** Simplified psyche connecting stress, belonging, values, mood. */
+  psyche: Psyche
+  /** Household / family id, if any. */
+  householdId: number | null
+  /** Parent ids for family tree (empty = founder). */
+  parentIds: number[]
+  /** Recent NL lines for inspector / speech bubbles (capped). */
+  recentDialogue: string[]
+  /** Illness 0..1 — treated at clinic; pharmacy sells medicine. */
+  illness: number
+  /** Injury 0..1 — physical wounds, treated differently from illness. */
+  injury: number
+  /** What this creature thinks is true, with confidence and provenance. */
+  beliefs: BeliefStore
+  /** Repeated behavior biases (learned routine). */
+  habits: HabitStore
+  /** Claimed job role, if any (shopkeep, healer, bartender, …). */
+  job: string | null
+  /** Cached life stage; recomputed as the creature ages. */
+  stage: LifeStage
+  /** Tick of the last lesson they gave, so teaching stays an occasion. */
+  lastTaught: number
+  /** Ticks spent pressed against an obstacle without progress. */
+  stuckTicks: number
+  /** Which way this creature prefers to walk around a wall (+1 / -1). */
+  detourSign: number
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -75,7 +107,19 @@ export interface Creature {
 
 const NAMES = ['Bobo', 'Nana', 'Momo', 'Gigi', 'Kiko', 'Lulu', 'Tutu', 'Fifi', 'Roro', 'Dodo', 'Zizi', 'Pepi']
 
-export function createCreature(id: number, name: string, genome: Genome, x = 0, z = 0): Creature {
+/**
+ * Build a creature. Pass the simulation's own `rng` so a world is fully
+ * reproducible from its seed — otherwise lifespan and facing come from
+ * Math.random and the same seed grows a different settlement each time.
+ */
+export function createCreature(
+  id: number,
+  name: string,
+  genome: Genome,
+  x = 0,
+  z = 0,
+  rng: () => number = Math.random,
+): Creature {
   const c: Creature = {
     id,
     name,
@@ -83,7 +127,7 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     chem: createChem(),
     memory: createMemory(),
     pos: { x, z },
-    facing: Math.random() * Math.PI * 2,
+    facing: rng() * Math.PI * 2,
     wallet: 0,
     banked: 0,
     alive: true,
@@ -111,12 +155,26 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     language: createLanguage(id),
     brainPrefs: null,
     playerBond: 0,
-    ageLimit: ageLimitFor(Math.random()),
+    ageLimit: ageLimitFor(rng(), genome.longevity ?? 0.5),
     inventory: createInventory(),
     vengeance: createVengeance(),
     talkingTo: null,
     busyTicks: 0,
     want: createWant(wantForState({ hunger: 0.8, energy: 0.8, social: 0.8, pleasure: 0.8 })),
+    social: createSocialGraph(),
+    psyche: createPsyche({ genome }),
+    householdId: null,
+    parentIds: [],
+    recentDialogue: [],
+    illness: 0,
+    injury: 0,
+    beliefs: createBeliefs(),
+    habits: createHabits(),
+    job: null,
+    stage: lifeStageFor(0),
+    lastTaught: 0,
+    stuckTicks: 0,
+    detourSign: id % 2 === 0 ? 1 : -1,
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },
@@ -158,17 +216,14 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
       applyFood(c.chem)
     },
     socialize(other: Creature): void {
+      // Time together builds familiarity and warmth. Becoming partners is a
+      // separate, mutual decision (see courtship.ts) — closeness alone is
+      // never enough, so friendship and love stay distinguishable.
       applySocial(c.chem)
       applySocial(other.chem)
       const gain = 0.06 + c.genome.sociability * 0.06 + other.genome.sociability * 0.04
       c.bonds[other.id] = clamp01((c.bonds[other.id] ?? 0) + gain)
       other.bonds[c.id] = clamp01((other.bonds[c.id] ?? 0) + gain)
-      if (c.partnerId === null && c.bonds[other.id] > 0.6 && other.partnerId === null) {
-        c.partnerId = other.id
-        other.partnerId = c.id
-        c.chem.bond = clamp01(c.chem.bond + 0.3)
-        other.chem.bond = clamp01(other.chem.bond + 0.3)
-      }
     },
     tryPair(other: Creature): void {
       if (c.partnerId === null && other.partnerId === null && c.bonds[other.id] > 0.5) {

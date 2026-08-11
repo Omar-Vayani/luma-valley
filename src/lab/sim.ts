@@ -10,22 +10,70 @@ import { tickChem, applyPlay, applySocial } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
-import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, recordSale, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
 import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
-import { addItem, useItem, hasItem, tradeItem, countItem, type ItemId } from './inventory'
+import { addItem, useItem, hasItem, tradeItem, countItem, ownerOf, type ItemId } from './inventory'
 import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
-import { tickEmotions, applyEmotionFeedback } from './emotions'
+import { tickEmotions, applyEmotionFeedback, createEmotions } from './emotions'
 import { observeEvent, gossipSpread, trustTowards, getReputation } from './reputation'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
+import { DEFAULT_SETTINGS, type GameSettings } from './settings'
+import {
+  createLodState, pickAiBatch, markDecided, bandFor, chemStride, timePhase, rollPhases,
+  type LodState,
+} from './lod'
+import {
+  createSociety, ensureCoupleHousehold, adoptChild, tickHouseholdCare, pruneHouseholds,
+  householdOf, homeTowerOf, type HavenSociety,
+} from './household'
+import {
+  applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge, romanticInterest,
+} from './socialbond'
+import { parsePlayerText, respondToPlayer, type DialogueTurn, type ParseResult } from './dialogue'
+import { tickPsyche } from './psyche'
+import { tickBeliefs, observeEvidence, reinforceHabit, tickHabits, habitBias } from './beliefs'
+import {
+  createChatter, speak, pickIntent, inEarshot, renderOverheard, tickPromises, makePromise,
+  type ChatterState,
+} from './chatter'
+import {
+  createCulture, tickCulture, witnessedAct, updateInfluence, transmitCulture,
+  updateSharedWords, chronicle, normPressure, type Culture,
+} from './norms'
+import {
+  createJobBoard, openJobsFor, claimJob, pruneJobs, workShiftAt, isProducedGoodStaffed,
+  producerOf, type JobBoard, type JobId,
+} from './jobs'
+import {
+  createLedger, pruneLedger, valueTo, negotiate, addDebt, repayDebt, totalOwedBy, type Ledger,
+} from './economy'
+import { lifeStageFor, isMature, learningRateFor, vigorFor } from './lifecycle'
+import { appraise } from './emotions'
+import { applyCrowding, applyPurpose, applyComfort } from './chem'
+import { courtStep, partnershipStep, reconcileStep } from './courtship'
+import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './genetics'
+import {
+  createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, giveItem, type Fixture,
+} from './interact'
+import { createStoryLog, recordStory, explain, type StoryLog } from './story'
+import {
+  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight,
+  type Institutions,
+} from './institutions'
+import { standingOf, priceMultiplierFor, willingToHelp } from './status'
+import {
+  mentorScore, mentor, mediateScore, mediate, flatterScore, flatter, alliedPair, formAlliance,
+  TEACH_COOLDOWN,
+} from './socialacts'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
@@ -92,13 +140,55 @@ export interface Sim {
   playerPickUp(): void
   playerUseItem(id: ItemId): void
   playerEquip(id: ItemId): boolean
+  /** Put an item down in the world in front of you. */
+  playerDrop(id: ItemId): boolean
+  /** Hand an item to a creature; returns what happened, or null if nobody is near. */
+  playerGive(id: ItemId, targetId?: number): string | null
   creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean
+  /** Typed natural-language talk with the nearest (or selected) creature. */
+  playerTalk(text: string, targetId?: number): DialogueTurn | null
+  settings: GameSettings
+  lod: LodState
+  society: HavenSociety
+  dialogueLog: DialogueTurn[]
+  /** compact creature↔creature messages + promises */
+  chatter: ChatterState
+  /** emergent settlement norms, influence, shared words, chronicle */
+  culture: Culture
+  /** who holds which institutional role */
+  jobs: JobBoard
+  /** informal debts between creatures */
+  ledger: Ledger
+  /** natural-language lines the player overheard recently */
+  overheard: string[]
+  /** the moments worth noticing, with the reason behind each one */
+  stories: StoryLog
+  /** who the player is currently in conversation with, if anyone */
+  talkingWith: number | null
+  /** beds, doors, counters, and containers the world is furnished with */
+  fixtures: Fixture[]
+  /** each building's own till and opening hours */
+  institutions: Institutions
+  /** Use the nearest fixture as the player: sleep, open, take, or store. */
+  playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
+}
+
+/** Where each institutional role is performed. */
+const JOB_TOWER: Record<JobId, TowerId> = {
+  shopkeep: 'food',
+  healer: 'clinic',
+  bartender: 'tavern',
+  farmer: 'farm',
+  porter: 'work',
+  teacher: 'school',
 }
 
 const SPEED = 0.3 // calm, visible pace — the player can keep up and interact
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
+/** How far a raised voice carries — you can hail someone across the plaza. */
+const SHOUT_RANGE = 14
 const BIRTH_COOLDOWN = 120
 const OBSERVE_RANGE = 12 // how close a creature must be to WITNESS an action
 const GOSSIP_RANGE = 10 // how close a creature must be to HEAR gossip
@@ -123,12 +213,78 @@ export function createSim(seed = 1): Sim {
     graves: [],
     economy: createEconomy(),
     player: createPlayer(0, 0, 'Visitor'),
+    settings: { ...DEFAULT_SETTINGS },
+    lod: createLodState(),
+    society: createSociety(),
+    dialogueLog: [],
+    chatter: createChatter(),
+    culture: createCulture(),
+    jobs: createJobBoard(),
+    ledger: createLedger(),
+    overheard: [],
+    stories: createStoryLog(),
+    talkingWith: null,
+    fixtures: createFixtures(),
+    institutions: createInstitutions(),
+    playerUseFixture(action, itemId): string | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      const actor = { pos: p.pos, inventory: p.inventory, id: 0 }
+      const f = fixtureAt(sim.fixtures, p.pos.x, p.pos.z)
+      if (!f) return null
+      if (action === 'rest') {
+        const res = useBed(actor, f)
+        if (!res.ok) return null
+        p.health = clamp01(p.health + 0.15)
+        p.hunger = clamp01(p.hunger - 0.02)
+        return 'you rest for a while'
+      }
+      if (action === 'toggle') {
+        const res = toggleDoor(actor, f)
+        if (!res.ok) return null
+        const shut = !isOpen(sim.institutions, f.tower, sim.time)
+        return shut ? `door ${res.effect} — the ${f.tower} is closed at this hour` : `door ${res.effect}`
+      }
+      if (action === 'store' && itemId) {
+        const res = storeItem(actor, f, itemId)
+        return res.ok ? res.effect : null
+      }
+      if (action === 'take') {
+        const target = itemId ?? (Object.keys(f.storage?.items ?? {})[0] as ItemId | undefined)
+        if (!target) return null
+        const res = takeItem(actor, f, target)
+        if (!res.ok) return null
+        if (res.stolen) {
+          // taking what someone else stored is noticed by anyone watching
+          for (const c of sim.creatures) {
+            if (!c.alive) continue
+            if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > OBSERVE_RANGE) continue
+            observeEvent(c, 'steal', 0)
+            applySocialEvent(c.social, 0, 'steal', 1)
+          }
+          witnessedAct(sim.culture, 'property', true, 1)
+        }
+        return res.effect
+      }
+      return null
+    },
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
+      const alive = sim.creatures.filter((c) => c.alive).length
+      if (alive >= sim.settings.populationCap && alive > 0) {
+        // at cap — still allow explicit spawn for lab tools by replacing nothing;
+        // return last alive so callers that ignore the return stay safe
+        const existing = sim.creatures.find((c) => c.alive)
+        if (existing && !genome) return existing
+      }
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
-      const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz)
+      const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz, sim.rng)
       c.wallet = 6 + Math.floor(sim.rng() * 8) // enough for a few meals — room to experiment
+      // Founders arrive grown, and not all the same age: a settlement where
+      // everybody is the same vintage loses everybody in the same season.
+      c.age = 650 + Math.floor(sim.rng() * 2400)
+      c.stage = lifeStageFor(c.age)
       sim.creatures.push(c)
       return c
     },
@@ -159,6 +315,7 @@ export function createSim(seed = 1): Sim {
         return
       }
       near.bonds[0] = clamp01((near.bonds[0] ?? 0) + 0.12)
+      applySocialEvent(near.social, 0, 'talk', 1)
       near.chem.fear = clamp01(near.chem.fear - 0.05)
       applySocial(near.chem)
       if (!p.bondWith.includes(near.id)) p.bondWith.push(near.id)
@@ -192,6 +349,7 @@ export function createSim(seed = 1): Sim {
         if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
         hearWord(c.language, cleaned, concept, 0.85)
         c.bonds[0] = clamp01((c.bonds[0] ?? 0) + 0.08)
+        applySocialEvent(c.social, 0, 'teach', 1)
         c.action = 'learn'
         c.talkingTo = 0
         c.busyTicks = Math.max(c.busyTicks, 15)
@@ -214,6 +372,91 @@ export function createSim(seed = 1): Sim {
         c.busyTicks = Math.max(c.busyTicks, 12)
         emit(sim, 'say', c, undefined, c.pos.x, c.pos.z, { word: word ?? '', concept })
       }
+    },
+    playerTalk(text: string, targetId?: number): DialogueTurn | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      // A conversation stays with the person you are having it with. An
+      // explicit choice wins; otherwise you keep talking to whoever you were
+      // just talking to, as long as they are still in earshot; only then do
+      // you fall back to whoever happens to be nearest.
+      const inEarshotOf = (c: Creature | undefined | null): boolean =>
+        !!c && c.alive && dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) <= SHOUT_RANGE
+      const chosen = targetId != null ? sim.creatureById(targetId) : null
+      const continuing = sim.talkingWith != null ? sim.creatureById(sim.talkingWith) : null
+      const target = inEarshotOf(chosen) ? chosen
+        : inEarshotOf(continuing) ? continuing
+          : nearestCreatureTo(sim, p.pos.x, p.pos.z, SHOUT_RANGE)
+      if (!target || !target.alive) return null
+      sim.talkingWith = target.id
+
+      const parsed = parsePlayerText(text)
+      // teaching via NL: "the word for food is wum"
+      if (parsed.intent === 'teach' && parsed.concept && parsed.word) {
+        sim.playerTeach(parsed.concept, parsed.word)
+      }
+
+      const knownPlaces = TOWERS.filter((t) => target.knowsTower(t.id)).map((t) => t.id)
+      const nearbyNames = sim.creatures
+        .filter((o) => o.alive && o.id !== target.id && dist(o.pos.x, o.pos.z, target.pos.x, target.pos.z) < 14)
+        .map((o) => o.name)
+
+      const turn = respondToPlayer(
+        {
+          creature: target,
+          playerName: p.name,
+          playerTrust: trustTowards(target, 0),
+          graph: target.social,
+          nearbyNames,
+          knownPlaces,
+          tick: sim.time,
+        },
+        parsed,
+        0,
+      )
+
+      // Some things said out loud actually change the world, not just the mood.
+      const outcome = applySpokenOutcome(sim, target, parsed, text)
+      if (outcome) turn.text = outcome
+
+      // social consequences of the conversation
+      applySocialEvent(target.social, 0, parsed.intent === 'flirt' ? 'flirt'
+        : parsed.intent === 'apologize' ? 'forgive'
+          : parsed.intent === 'comfort' ? 'comfort'
+            : parsed.intent === 'accuse' ? 'hurt'
+              : parsed.intent === 'offer_gift' ? 'gift'
+                : 'talk', 1)
+
+      if (parsed.intent === 'greet' || parsed.intent === 'ask_feeling' || parsed.intent === 'ask_name') {
+        target.bonds[0] = clamp01((target.bonds[0] ?? 0) + 0.04)
+        applySocial(target.chem)
+      }
+      if (parsed.intent === 'command' && !turn.obeyed) {
+        applyEmotionFeedback(target.emotions, 'spite', 0.05)
+      }
+      if (parsed.intent === 'flirt') {
+        const compat = geneticCompatibility(target.genome, {
+          sociability: 0.6, loyalty: 0.5, aggression: 0.2, lovePropensity: 0.5, fearfulness: 0.3,
+        })
+        bumpEdge(target.social, 0, 'attraction', 0.08 * compat)
+      }
+
+      target.talkingTo = 0
+      target.busyTicks = Math.max(target.busyTicks, 40)
+      target.action = 'chat'
+      target.facing = Math.atan2(p.pos.x - target.pos.x, p.pos.z - target.pos.z)
+      target.recentDialogue.push(`You: ${text.trim().slice(0, 80)}`)
+      target.recentDialogue.push(`${target.name}: ${turn.text}`)
+      if (target.recentDialogue.length > 12) target.recentDialogue.splice(0, target.recentDialogue.length - 12)
+
+      sim.dialogueLog.push(turn)
+      if (sim.dialogueLog.length > 40) sim.dialogueLog.splice(0, sim.dialogueLog.length - 40)
+      emit(sim, 'say', target, undefined, target.pos.x, target.pos.z, {
+        word: turn.text.slice(0, 48),
+        concept: parsed.intent,
+        fromPlayer: false,
+      })
+      return turn
     },
     poke(id: number): void {
       const c = sim.creatureById(id)
@@ -331,6 +574,70 @@ export function createSim(seed = 1): Sim {
     playerEquip(id: ItemId): boolean {
       return equipItem(sim.player, id)
     },
+    /** Put something down in the world where it can be seen and picked up. */
+    playerDrop(id: ItemId): boolean {
+      const p = sim.player
+      if (!isPlayerAlive(p) || !useItem(p.inventory, id)) return false
+      sim.drops.push({
+        kind: id === 'bread' ? 'food' : 'money',
+        x: clampCoord(p.pos.x + Math.sin(p.facing) * 1.2),
+        z: clampCoord(p.pos.z + Math.cos(p.facing) * 1.2),
+        amount: 1,
+      })
+      emit(sim, 'drop', undefined, undefined, p.pos.x, p.pos.z)
+      return true
+    },
+    /**
+     * Hand something to the creature in front of you. They read the gesture
+     * through what they already think of you — and, if the goods are marked as
+     * someone else's, so does anyone watching.
+     */
+    playerGive(id: ItemId, targetId?: number): string | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      const target = (targetId != null ? sim.creatureById(targetId) : null)
+        ?? nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE)
+      if (!target || !target.alive) return null
+      const owner = ownerOf(p.inventory, id)
+      const stolen = owner !== undefined && owner !== 0
+      const actor = { pos: p.pos, inventory: p.inventory, id: 0 }
+      const result = giveItem(actor, { pos: target.pos, inventory: target.inventory, id: target.id }, id)
+      if (!result.ok) return null
+
+      if (stolen && owner !== target.id) {
+        // handing over someone else's property is its own kind of statement
+        applySocialEvent(target.social, 0, 'gift', 0.4)
+        bumpEdge(target.social, 0, 'suspicion', 0.2)
+        const victim = sim.creatureById(owner)
+        witness(sim, target, 'steal', 0)
+        recordStory(sim.stories, {
+          kind: 'theft',
+          tick: sim.time,
+          target,
+          text: `You gave ${target.name} something that belonged to ${victim?.name ?? 'someone else'}`,
+        })
+        return `${target.name} takes it, then looks at it more closely.`
+      }
+
+      applySocialEvent(target.social, 0, 'gift', 1)
+      target.gratitude[0] = clamp01((target.gratitude[0] ?? 0) + 0.3)
+      target.emotions.gratitude = clamp01(target.emotions.gratitude + 0.2)
+      if (id === 'bread' && target.chem.hunger < 0.6) {
+        useItem(target.inventory, 'bread')
+        target.eat()
+        emit(sim, 'eat', target, undefined, target.pos.x, target.pos.z)
+        recordStory(sim.stories, {
+          kind: 'generosity',
+          tick: sim.time,
+          target,
+          text: `You fed ${target.name}`,
+          because: explain(target),
+        })
+        return `${target.name} eats it right there. "Thank you."`
+      }
+      emit(sim, 'gift', target, undefined, target.pos.x, target.pos.z)
+      return `${target.name} accepts the ${id}.`
+    },
     /**
      * Barter: a stocked creature sells one loaf to a hungry peer for coins.
      * Exported so tests can drive the trade directly; the tick calls it via
@@ -356,23 +663,28 @@ export function createSim(seed = 1): Sim {
     tick(): void {
       sim.time++
       learnFromSight(sim) // learn BEFORE deciding so knowledge gates actions
-      // decisions for every alive creature
+      const focusX = sim.player.alive ? sim.player.pos.x : 0
+      const focusZ = sim.player.alive ? sim.player.pos.z : 0
+
+      // Time-sliced AI: only a batch of due creatures get a full decide()
+      const batch = new Set(pickAiBatch(sim.creatures, focusX, focusZ, sim.settings, sim.lod, sim.time).map((c) => c.id))
+
+      timePhase(sim.lod, 'minds', () => {
       for (const c of sim.creatures) {
         if (!c.alive) continue
         // INTERACTION HOLD: a creature mid-chat stands still facing the player.
-        // It ignores its own wants for a few ticks so the player can interact.
         if (c.busyTicks > 0) {
           c.busyTicks--
           c.action = c.talkingTo === 0 ? 'chat' : c.action
           c.goalTowerId = null
           c.intention = null
           if (c.busyTicks === 0) c.talkingTo = null
-          continue // no decide, no movement, no brain work while chatting
+          continue
         }
-        // SLEEP SUSPENSION: a sleeping creature does zero brain/decision work
-        // until energy recovers or a proximity event wakes it.
+        const band = bandFor(c, focusX, focusZ, sim.settings)
+        // SLEEP SUSPENSION: light chem restore, no full AI unless woken
         if (c.sleeping) {
-          c.chem.energy = clamp01(c.chem.energy + 0.35) // rest restores stamina
+          c.chem.energy = clamp01(c.chem.energy + 0.35)
           if (c.chem.energy > 0.55) {
             c.sleeping = false
             c.action = 'wake'
@@ -381,10 +693,9 @@ export function createSim(seed = 1): Sim {
             c.action = 'sleep'
             c.intention = null
             c.goalTowerId = null
-            continue // suspended: no decide, no movement, no brain
+            continue
           }
         }
-        // aging: creatures eventually die of old age unless player-bonded
         if (c.age > c.ageLimit) {
           const dmg = agingDamage(c.age, c.playerBond)
           if (dmg > 0) {
@@ -393,16 +704,53 @@ export function createSim(seed = 1): Sim {
           }
         }
         if (!c.alive) continue
-        decide(sim, c)
-        // wants: doing the thing the want points at advances it
+
+        // illness creeps; a resilient constitution shrugs it off faster
+        const resilience = resilienceFactor(c.genome)
+        if (c.illness > 0.05) {
+          c.chem.health = clamp01(c.chem.health - c.illness * 0.002 * (2 - resilience))
+          c.illness = clamp01(c.illness - 0.001 * resilience)
+        } else if (sim.rng() < 0.0008 * (1.2 - resilience)) {
+          c.illness = clamp01(c.illness + 0.15 + sim.rng() * 0.2)
+        }
+        // wounds heal on their own, slowly, and hurt while they last
+        if (c.injury > 0.01) {
+          c.injury = clamp01(c.injury - 0.0012 * resilience)
+          c.chem.health = clamp01(c.chem.health - c.injury * 0.0008)
+          c.chem.comfort = clamp01(c.chem.comfort - c.injury * 0.002)
+        }
+        // crowding drains privacy; solitude restores it
+        applyCrowding(c.chem, countNeighbors(sim, c, 4))
+        // purpose: a role, a family, or savings give a reason to keep going
+        if (c.job || c.householdId != null) applyPurpose(c.chem, 0.0006)
+
+        // continue committed movement even when not in AI batch
+        if (!batch.has(c.id) && c.intention && c.goalTowerId && c.goalTowerId !== 'none') {
+          const goal = towerAt(c.pos.x, c.pos.z)
+          if (goal?.id !== c.goalTowerId) {
+            execute(sim, c, c.intention)
+            c.pos.x = clampCoord(c.pos.x)
+            c.pos.z = clampCoord(c.pos.z)
+            continue
+          }
+        }
+
+        if (batch.has(c.id) || band === 'near' || !c.intention) {
+          decide(sim, c)
+          markDecided(sim.lod, c.id, sim.time)
+        } else if (c.intention && actionValid(sim, c, c.intention)) {
+          execute(sim, c, c.intention)
+        }
+
         wantProgress(c.want, c.action)
-        // stay inside the world — nothing escapes the lab
         c.pos.x = clampCoord(c.pos.x)
         c.pos.z = clampCoord(c.pos.z)
       }
+      })
       // COLLISION: alive creatures push apart (no two balls in the same spot)
       // and the player is a solid body too. Dead bodies stay where they fell —
       // a path blocked by a corpse is a REAL obstacle.
+      timePhase(sim.lod, 'bodies', () => {
       resolveCreatureCollisions(sim)
       // drops: creatures eat food piles / collect money piles they reach
       for (const c of sim.creatures) {
@@ -423,12 +771,31 @@ export function createSim(seed = 1): Sim {
       }
       // chemistry decay + memory decay + emotions decay + events trim
       for (const c of sim.creatures) {
-        tickChem(c.chem, sim.time)
-        decayMemory(c.memory)
-        tickDrives(c.drives, c.chem, c.genome)
-        tickEmotions(c.emotions)
-        decayGrudges(c.vengeance, 0.002)
+        if (!c.alive && c.action === 'dead') continue
+        const band = bandFor(c, focusX, focusZ, sim.settings)
+        const stride = chemStride(band)
+        if (sim.time % stride.every === 0) {
+          tickChem(c.chem, sim.time)
+          // apply extra decay steps when striding
+          for (let i = 1; i < stride.dt; i++) tickChem(c.chem, sim.time)
+          // metabolism: a fast burner empties faster than a thrifty one
+          const burn = (metabolicRate(c.genome) - 1) * 0.0004 * stride.dt
+          if (burn !== 0) c.chem.hunger = clamp01(c.chem.hunger - burn)
+          // warm clothing keeps a creature comfortable out in the settlement
+          if (countItem(c.inventory, 'cloak') > 0) applyComfort(c.chem, 0.0008 * stride.dt)
+        }
+        if (band !== 'far' || sim.time % 4 === 0) {
+          decayMemory(c.memory)
+          tickDrives(c.drives, c.chem, c.genome)
+          tickEmotions(c.emotions)
+          tickSocialGraph(c.social)
+          tickPsyche(c)
+          tickBeliefs(c.beliefs, sim.time)
+          tickHabits(c.habits)
+          decayGrudges(c.vengeance, 0.002)
+        }
         c.age++
+        c.stage = lifeStageFor(c.age)
         if (c.fightCooldown > 0) c.fightCooldown--
         // want lifecycle: age it, progress on matching actions, refresh when done
         tickWant(c.want)
@@ -437,18 +804,65 @@ export function createSim(seed = 1): Sim {
           c.want = refreshWant(c.want, { hunger: c.chem.hunger, energy: c.chem.energy, social: c.chem.social, pleasure: c.chem.pleasure })
         }
         if (c.chem.health <= 0 && c.action !== 'dead') {
-          c.alive = false
-          c.action = 'dead'
-          emit(sim, 'death', c, undefined, c.pos.x, c.pos.z)
-          grieve(sim, c)
+          // gentle mode: suppress starvation / illness permadeath (old age still applies)
+          if (sim.settings.gentleMode && c.age <= c.ageLimit) {
+            c.chem.health = 0.05
+            c.chem.hunger = Math.max(c.chem.hunger, 0.15)
+            c.illness = 0
+          } else {
+            c.alive = false
+            c.action = 'dead'
+            emit(sim, 'death', c, undefined, c.pos.x, c.pos.z)
+            grieve(sim, c)
+          }
         }
       }
-      tickEconomy(sim.economy)
+      })
+      // shelves only refill where somebody is doing the work
+      timePhase(sim.lod, 'economy', () => {
+      tickEconomy(sim.economy, (goodId) => isProducedGoodStaffed(sim.jobs, goodId))
+      tickInstitutions(sim.institutions, sim.time)
+      if (sim.time % 20 === 0 || sim.time === 1) assignJobs(sim)
+      if (sim.time % 200 === 0) reportShortages(sim)
+      tickDebts(sim)
+      tickBurglary(sim)
+      tickNewcomers(sim)
       // market day rollover: adjust prices by yesterday's demand (visible ▲▼)
       if (sim.time % sim.economy.DAY_TICKS === 0) {
         tickMarketDay(sim.economy, Math.floor(sim.time / sim.economy.DAY_TICKS))
       }
+      })
+      timePhase(sim.lod, 'social', () => {
       tickRelationships(sim)
+      tickPartnerships(sim)
+      tickFamilyPlans(sim)
+      tickSocialActs(sim)
+      tickHouseholdCare(sim.society, sim.creatures)
+      careForChildren(sim)
+      if (sim.time % 30 === 0) {
+        pruneHouseholds(sim.society, sim.creatures)
+        pruneJobs(sim.jobs, sim.creatures)
+        pruneLedger(sim.ledger, new Set(sim.creatures.filter((c) => c.alive).map((c) => c.id)))
+      }
+      tickCulture(sim.culture)
+      if (sim.time % 60 === 0) {
+        updateInfluence(sim.culture, sim.creatures)
+        updateSharedWords(sim.culture, sim.creatures)
+      }
+      })
+      timePhase(sim.lod, 'world', () => {
+      chatterNearby(sim, focusX, focusZ)
+      for (const broken of tickPromises(sim.chatter, sim.time, (id) => sim.creatureById(id))) {
+        if (!broken.promiser || !broken.promisee) continue
+        recordStory(sim.stories, {
+          kind: 'broken-promise',
+          tick: sim.time,
+          actor: broken.promiser,
+          target: broken.promisee,
+          text: `${broken.promiser.name} never made good on ${broken.promise.about} for ${broken.promisee.name}`,
+          because: explain(broken.promiser),
+        })
+      }
       gossipNearby(sim)
       wakeNearbySleepers(sim)
       // ── the player (a distinct character): hunger, regen, pickup, barter ──
@@ -462,9 +876,129 @@ export function createSim(seed = 1): Sim {
       tradeNearby(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
+      })
+      rollPhases(sim.lod)
     },
   }
   return sim
+}
+
+/**
+ * Words with consequences: a trade the creature actually agrees to, a request
+ * it commits to, or a warning that changes what it believes about someone.
+ * Returns a replacement reply when the world changed, otherwise null.
+ */
+function applySpokenOutcome(
+  sim: Sim,
+  target: Creature,
+  parsed: ParseResult,
+  said: string,
+): string | null {
+  const p = sim.player
+
+  if (parsed.intent === 'request_trade') {
+    const itemId = (parsed.item ?? 'bread') as ItemId
+    const rep = getReputation(target, 0)
+    if (parsed.direction === 'sell') {
+      // the player is offering something
+      if (!hasItem(p.inventory, itemId)) return `You have no ${itemId} to offer.`
+      const worth = valueTo(sim.economy, {
+        chem: target.chem, wallet: target.wallet, genome: target.genome,
+        chemAddiction: target.chem.addiction,
+      }, itemId)
+      const price = Math.max(1, Math.round(worth * (rep.trust > 0.3 ? 1.1 : 0.8)))
+      if (target.wallet < price) return `"${target.name} turns out their pockets — they cannot afford it."`
+      tradeItem(p.inventory, target.inventory, itemId, 1, { newOwnerId: target.id })
+      target.wallet -= price
+      p.wallet += price
+      applySocialEvent(target.social, 0, 'share', 1)
+      recordStory(sim.stories, {
+        kind: 'generosity',
+        tick: sim.time,
+        actor: target,
+        text: `${target.name} bought ${itemId} from you for ${price} coins`,
+        because: explain(target),
+      })
+      return `"${price} coins, then." ${target.name} hands the money over and takes the ${itemId}.`
+    }
+
+    // the player wants to buy
+    if (!hasItem(target.inventory, itemId)) {
+      return `"I have no ${itemId} to spare," ${target.name} says.`
+    }
+    const worth = valueTo(sim.economy, {
+      chem: target.chem, wallet: target.wallet, genome: target.genome,
+      chemAddiction: target.chem.addiction,
+    }, itemId)
+    const offer = negotiate(sim.economy, itemId === 'bread' ? 'bread' : itemId,
+      { trust: rep.trust, thief: rep.thief }, p.wallet, worth)
+    if (offer.reason === 'refused-thief') {
+      return `"I don't deal with thieves," ${target.name} says flatly.`
+    }
+    const price = Math.max(1, offer.price || worth)
+    if (p.wallet < price) return `"${price} coins," ${target.name} says. You cannot afford it.`
+    tradeItem(target.inventory, p.inventory, itemId, 1, { newOwnerId: 0 })
+    p.wallet -= price
+    target.wallet += price
+    applySocialEvent(target.social, 0, 'share', 0.8)
+    return `${target.name} hands over the ${itemId} for ${price} coins.`
+  }
+
+  if (parsed.intent === 'request_help') {
+    const willing = trustTowards(target, 0) > 0.1 && target.chem.fear < 0.55
+    if (!willing) return null
+    makePromise(sim.chatter, target, playerAsCreature(sim), 'help', sim.time, 500)
+    recordStory(sim.stories, {
+      kind: 'promise',
+      tick: sim.time,
+      actor: target,
+      text: `${target.name} promised to help you`,
+    })
+    return `"Alright. I'll help you," ${target.name} says — and means it, for now.`
+  }
+
+  if (parsed.intent === 'warn' || parsed.intent === 'accuse') {
+    // who are we talking about? whichever creature the player named
+    const lower = said.toLowerCase()
+    const about = sim.creatures.find((c) => c.alive && c.id !== target.id && lower.includes(c.name.toLowerCase()))
+    if (!about) return null
+    const credibility = clamp01((trustTowards(target, 0) + 1) / 2)
+    if (credibility < 0.3) return `"Says who?" ${target.name} replies, unconvinced.`
+    observeEvidence(target.beliefs, `who:${about.id}:danger`, credibility, 'told', sim.time)
+    const rep = getReputation(target, about.id)
+    rep.trust = Math.max(-1, rep.trust - 0.25 * credibility)
+    return `${target.name} glances toward ${about.name}. "I'll be careful."`
+  }
+
+  return null
+}
+
+/** The player as a social entity (id 0) for systems that expect a creature. */
+function playerAsCreature(sim: Sim): Creature {
+  return {
+    id: 0,
+    name: sim.player.name,
+    social: {},
+    emotions: createEmotions(),
+  } as unknown as Creature
+}
+
+/**
+ * Buy at a counter. The price is what this seller would ask of this buyer —
+ * standing and reputation move it — and the coins stay in the building's till,
+ * where wages come from.
+ */
+function payAtTower(sim: Sim, c: Creature, tower: string, goodId: string): boolean {
+  const good = sim.economy.goods[goodId]
+  if (!good || good.stock <= 0) return false
+  const standing = standingOf(c, sim.culture, sim.creatures)
+  const price = Math.max(1, Math.round(marketPrice(sim.economy, goodId) * priceMultiplierFor(standing)))
+  if (c.wallet < price) return false
+  c.wallet -= price
+  good.stock -= 1
+  recordSale(sim.economy, goodId, 1)
+  takePayment(sim.institutions, tower, price)
+  return true
 }
 
 /** Push a renderer-visible event. */
@@ -585,7 +1119,21 @@ function decide(sim: Sim, c: Creature): void {
       return
     }
     if (c.wallet >= breadPrice && !knows(sim, c, 'food')) {
-      // doesn't know where food is — must explore to find it
+      // Money but no idea where the market is: ask. Someone who knows, and
+      // does not mistrust you, will point the way — that is how a newcomer
+      // learns the settlement instead of starving in the middle of it.
+      const helper = nearestOther(sim, c, SOCIAL_RANGE + 3)
+      if (helper && !helper.sleeping) {
+        shareDirections(helper, c, trustTowards(helper, c.id), sim.rng)
+        speak(sim.chatter, c, helper, 'ask_where', sim.time, 'food')
+        c.action = 'ask'
+        if (knows(sim, c, 'food')) {
+          goTo(sim, c, 'food')
+          c.intention = 'food'
+          return
+        }
+      }
+      // nobody to ask — go and look
       explore(sim, c)
       return
     }
@@ -617,22 +1165,28 @@ function decide(sim: Sim, c: Creature): void {
     return
   }
 
-  // Emergent bonds: a partnered creature at home with a strong bond procreates —
-  // only if BOTH parents have the energy reserves to pay the cost (population control).
+  // A settled couple at home may decide the time is right. Conditions matter:
+  // both fed and rested, a household to raise a child in, room in the
+  // settlement, and fertility that varies from creature to creature.
   const at = towerAt(c.pos.x, c.pos.z)
-  if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
+  if (at?.id === 'homes' && c.partnerId !== null && readyForChild(sim, c)) {
     const partner = sim.creatureById(c.partnerId)
     const lastBirth = c.memory.facts.partnerIsHere ?? -1000
+    const alive = sim.creatures.filter((o) => o.alive).length
     if (
-      partner && partner.alive && partner.chem.bond > 0.7
+      partner && partner.alive && readyForChild(sim, partner)
+      && dist(c.pos.x, c.pos.z, partner.pos.x, partner.pos.z) < 6
       && sim.time - lastBirth > BIRTH_COOLDOWN
+      && alive < sim.settings.populationCap
       && canProcreate(c.chem.energy, partner.chem.energy, c.age)
+      && sim.rng() < 0.35 * fertilityFactor(c.genome) * fertilityFactor(partner.genome)
     ) {
       // energy cost paid by both parents — life is not free
       c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
       partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
       c.memory.facts.partnerIsHere = sim.time
       partner.memory.facts.partnerIsHere = sim.time
+      ensureCoupleHousehold(sim.society, c, partner, sim.time)
       procreate(sim, c, partner)
       return
     }
@@ -677,12 +1231,513 @@ function decide(sim: Sim, c: Creature): void {
   const scores = scoreActions(sim, c)
   // The creature's own brain (learned experience) biases the action choice.
   blendBrainFromCache(c, scores)
+  // Habits: what this creature keeps doing gets a little easier to choose.
+  for (const name of Object.keys(scores) as ActionName[]) {
+    scores[name] += habitBias(c.habits, name)
+  }
   const chosen = chooseAction(scores, sim.rng)
   c.intention = chosen
   c.intentionTicks = COMMITMENT_TICKS
+  reinforceHabit(c.habits, chosen, 0.02 * learningRateFor(c.stage))
   execute(sim, c, chosen)
   // Learning: the outcome of this action teaches the brain a little (async).
   void learnFromOutcome(sim, c, chosen)
+}
+
+/**
+ * Creature↔creature talk. Meaning always flows (cheap); words are only
+ * rendered when the player is close enough to overhear.
+ */
+function chatterNearby(sim: Sim, focusX: number, focusZ: number): void {
+  if (sim.time % 4 !== 0) return
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping || c.busyTicks > 0) continue
+    if (sim.rng() > 0.12 * (0.4 + c.genome.sociability)) continue
+    const other = nearestOther(sim, c, SOCIAL_RANGE)
+    if (!other || other.sleeping) continue
+    const kind = pickIntent(c, other)
+    const msg = speak(sim.chatter, c, other, kind, sim.time)
+    shareDirections(c, other, trustTowards(other, c.id), sim.rng)
+    if (inEarshot(focusX, focusZ, c, other)) {
+      sim.overheard.push(renderOverheard(c, other, msg))
+      if (sim.overheard.length > 12) sim.overheard.splice(0, sim.overheard.length - 12)
+      emit(sim, 'say', c, other, c.pos.x, c.pos.z, { concept: kind })
+    }
+  }
+}
+
+/**
+ * Children cannot work or buy for themselves. Someone has to feed them:
+ * usually a parent, sometimes a kind neighbour. A greedy, disloyal adult
+ * under pressure may simply not bother — and the child pays for it.
+ */
+function careForChildren(sim: Sim): void {
+  if (sim.time % 15 !== 0) return
+  for (const kid of sim.creatures) {
+    if (!kid.alive || isMature(kid.stage)) continue
+    if (kid.chem.hunger > 0.55) continue
+
+    const house = householdOf(sim.society, kid.id)
+    const carers = sim.creatures.filter((a) =>
+      a.alive && a.id !== kid.id && isMature(a.stage) &&
+      (house?.memberIds.includes(a.id) || dist(a.pos.x, a.pos.z, kid.pos.x, kid.pos.z) < 6),
+    )
+    const kidStanding = standingOf(kid, sim.culture, sim.creatures)
+    for (const adult of carers) {
+      const kin = house?.memberIds.includes(adult.id) ?? false
+      const neglectful = adult.genome.greed > 0.7 && adult.genome.loyalty < 0.35
+      if (neglectful && !(kid.chem.hunger < 0.15)) {
+        kid.emotions.shame = clamp01(kid.emotions.shame + 0.02)
+        continue
+      }
+      // a stranger's child gets helped according to how the family is regarded
+      if (!kin && willingToHelp(adult, kid, kidStanding) < 0.3) continue
+
+      if (countItem(adult.inventory, 'bread') > 0 && useItem(adult.inventory, 'bread')) {
+        kid.eat()
+        applySocialEvent(kid.social, adult.id, 'help', 1)
+        applyPurpose(adult.chem, 0.05)
+        emit(sim, 'gift', adult, kid, kid.pos.x, kid.pos.z)
+        return
+      }
+      if (adult.wallet >= 4) {
+        adult.wallet -= 3
+        kid.wallet += 3
+        applySocialEvent(kid.social, adult.id, 'gift', 1)
+        applyPurpose(adult.chem, 0.03)
+        return
+      }
+    }
+    // nobody stepped in — hunger keeps biting, and the child remembers
+    if (kid.chem.hunger < 0.2) {
+      kid.emotions.frustration = clamp01(kid.emotions.frustration + 0.02)
+    }
+  }
+}
+
+/**
+ * Is this creature in a place — physically and emotionally — to raise a child?
+ * Attachment, health, and provision all have to line up.
+ */
+function readyForChild(sim: Sim, c: Creature): boolean {
+  if (c.partnerId === null || !isMature(c.stage) || c.stage === 'elder') return false
+  const edge = c.social[c.partnerId]
+  const attachment = Math.max(c.chem.bond, edge ? romanticInterest(edge, c.genome.lovePropensity) : 0)
+  if (attachment < 0.5) return false
+  if (c.chem.hunger < 0.35 || c.chem.energy < 0.3 || c.chem.health < 0.55) return false
+  if (c.chem.fear > 0.5 || c.chem.grief > 0.3) return false
+  // a home to bring a child back to: an established household, or standing
+  // in the homes quarter where one will be claimed
+  if (householdOf(sim.society, c.id) !== undefined) return true
+  return towerAt(c.pos.x, c.pos.z)?.id === 'homes'
+}
+
+/**
+ * Couples who are ready head home together. Without this they simply never
+ * happen to stand in the same doorway at the same moment.
+ */
+function tickFamilyPlans(sim: Sim): void {
+  if (sim.time % 40 !== 0) return
+  const alive = sim.creatures.filter((c) => c.alive).length
+  if (alive >= sim.settings.populationCap) return
+  const handled = new Set<number>()
+  for (const c of sim.creatures) {
+    if (!c.alive || handled.has(c.id) || c.partnerId === null) continue
+    const partner = sim.creatureById(c.partnerId)
+    if (!partner || !partner.alive) continue
+    if (!readyForChild(sim, c) || !readyForChild(sim, partner)) continue
+    const lastBirth = c.memory.facts.partnerIsHere ?? -1000
+    if (sim.time - lastBirth < BIRTH_COOLDOWN) continue
+    handled.add(c.id)
+    handled.add(partner.id)
+
+    // their own house if the household claimed one, otherwise the lodgings
+    const ownHome = homeTowerFor(sim, c)
+    const home = findTower(ownHome ?? 'homes') ?? findTower('homes')
+    const bothHome = home
+      && dist(c.pos.x, c.pos.z, home.x, home.z) <= home.radius + 2
+      && dist(partner.pos.x, partner.pos.z, home.x, home.z) <= home.radius + 2
+    // Quiet hours make conception likelier, but it is never guaranteed.
+    const hour = isNight(sim.time) ? 1 : 0.45
+    if (bothHome && canProcreate(c.chem.energy, partner.chem.energy, c.age)
+      && sim.rng() < 0.5 * hour * fertilityFactor(c.genome) * fertilityFactor(partner.genome)) {
+      c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
+      partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
+      c.memory.facts.partnerIsHere = sim.time
+      partner.memory.facts.partnerIsHere = sim.time
+      c.sleeping = false
+      partner.sleeping = false
+      procreate(sim, c, partner)
+      continue
+    }
+
+    // Not home together yet: a couple who have decided go there together.
+    // Without this they each drift off on their own errands and never
+    // happen to be in the same doorway.
+    for (const person of [c, partner]) {
+      if (person.busyTicks > 0) continue
+      if (person.chem.hunger < 0.45 || person.chem.health < 0.5) continue // needs come first
+      person.sleeping = false
+      person.intention = 'nest'
+      person.intentionTicks = COMMITMENT_TICKS * 3
+      person.goalTowerId = ownHome ?? 'homes'
+    }
+  }
+}
+
+/**
+ * Partnerships are re-examined periodically: resentment and jealousy can end
+ * one, and a forgiving ex may later reconcile with someone they still like.
+ */
+function tickPartnerships(sim: Sim): void {
+  if (sim.time % 24 !== 0) return
+  const seen = new Set<number>()
+  for (const c of sim.creatures) {
+    if (!c.alive || c.partnerId === null || seen.has(c.id)) continue
+    const partner = sim.creatureById(c.partnerId)
+    // Widowhood: once the dead are buried and the worst of the grief has
+    // passed, the survivor is single again. Mourning ends; the memory doesn't.
+    if (!partner || !partner.alive) {
+      const buried = !partner || partner.buried
+      if (buried && c.chem.grief < 0.25) {
+        c.partnerId = null
+        c.emotions.hope = clamp01(c.emotions.hope + 0.1)
+      }
+      continue
+    }
+    seen.add(c.id)
+    seen.add(partner.id)
+    const state = partnershipStep(c, partner)
+    if (state === 'ended') {
+      chronicle(sim.culture, sim.time, `${c.name} and ${partner.name} separated.`)
+      recordStory(sim.stories, {
+        kind: 'separation',
+        tick: sim.time,
+        actor: c,
+        target: partner,
+        text: `${c.name} and ${partner.name} separated`,
+        because: explain(c),
+      })
+      emit(sim, 'jealous', c, partner, c.pos.x, c.pos.z)
+    }
+  }
+  // exes and estranged friends occasionally make peace
+  for (const c of sim.creatures) {
+    if (!c.alive || c.emotions.forgiveness < 0.3) continue
+    const near = nearestOther(sim, c, SOCIAL_RANGE)
+    if (!near) continue
+    const edge = c.social[near.id]
+    if (!edge || edge.resentment < 0.3) continue
+    if (reconcileStep(c, near)) {
+      emit(sim, 'comfort', c, near, c.pos.x, c.pos.z)
+    }
+  }
+}
+
+/**
+ * Haven sits on a road. When the settlement thins out, a traveller eventually
+ * arrives and stays — a slow trickle that keeps the society alive without
+ * inflating birth rates. Turn it off in settings for a closed population.
+ */
+function tickNewcomers(sim: Sim): void {
+  if (!sim.settings.allowNewcomers) return
+  if (sim.time % 300 !== 0) return
+  const alive = sim.creatures.filter((c) => c.alive).length
+  const target = Math.max(4, Math.floor(sim.settings.populationCap * 0.6))
+  if (alive >= target) return
+  if (sim.rng() > 0.5) return
+  const edge = WORLD_HALF - 12
+  const side = Math.floor(sim.rng() * 4)
+  const along = (sim.rng() - 0.5) * edge
+  const pos = side === 0 ? { x: along, z: -edge }
+    : side === 1 ? { x: along, z: edge }
+      : side === 2 ? { x: -edge, z: along }
+        : { x: edge, z: along }
+  const newcomer = sim.spawnCreature(undefined, pos.x, pos.z)
+  newcomer.wallet += 4
+  chronicle(sim.culture, sim.time, `${newcomer.name} arrived in Haven.`)
+  recordStory(sim.stories, {
+    kind: 'arrival',
+    tick: sim.time,
+    actor: newcomer,
+    text: `${newcomer.name} arrived in Haven looking for a place to settle`,
+  })
+  emit(sim, 'birth', newcomer, undefined, newcomer.pos.x, newcomer.pos.z)
+}
+
+/**
+ * The deliberate social moves: teaching the young, breaking up a fight,
+ * buttering someone up, and recognising an alliance. These are chosen from
+ * character and circumstance, which is why they produce different stories in
+ * different settlements.
+ */
+function tickSocialActs(sim: Sim): void {
+  if (sim.time % 18 !== 0) return
+
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping || c.busyTicks > 0) continue
+    const near = nearestOther(sim, c, SOCIAL_RANGE + 1)
+    if (!near || near.sleeping) continue
+
+    // teaching a child what you know — an occasion, not a constant drip
+    const teach = mentorScore(c, near)
+    if (teach > 0.5 && sim.time - c.lastTaught > TEACH_COOLDOWN && sim.rng() < teach * 0.5) {
+      const taught = mentor(c, near)
+      c.lastTaught = sim.time
+      if (taught.taughtPlace || taught.taughtWord || taught.taughtSkill) {
+        c.action = 'teach'
+        near.action = 'learn'
+        emit(sim, 'school', c, near, c.pos.x, c.pos.z)
+        recordStory(sim.stories, {
+          kind: 'mentorship',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: taught.taughtSkill
+            ? `${c.name} taught ${near.name} their trade`
+            : taught.taughtPlace
+              ? `${c.name} showed ${near.name} where the ${taught.taughtPlace} is`
+              : `${c.name} taught ${near.name} the word "${taught.taughtWord}"`,
+          because: c.parentIds.includes(near.id) || near.parentIds.includes(c.id)
+            ? 'their own child'
+            : explain(c),
+        })
+        continue
+      }
+    }
+
+    // buttering someone up for what they have
+    const flattery = flatterScore(c, near)
+    if (flattery > 0.55 && sim.rng() < flattery * 0.4) {
+      const result = flatter(c, near)
+      c.action = 'flatter'
+      recordStory(sim.stories, {
+        kind: 'manipulation',
+        tick: sim.time,
+        actor: c,
+        target: near,
+        text: result.believed
+          ? `${c.name} won ${near.name} over with warm words`
+          : `${near.name} saw through ${c.name}'s flattery`,
+        because: explain(c),
+        weight: result.believed ? 1 : 1.2,
+      })
+      continue
+    }
+
+    // an alliance nobody declared, but everybody can see
+    if (alliedPair(c, near) && sim.rng() < 0.15) {
+      const already = c.beliefs[`ally:${near.id}`]
+      if (!already) {
+        formAlliance(c, near)
+        observeEvidence(c.beliefs, `ally:${near.id}`, 1, 'seen', sim.time)
+        observeEvidence(near.beliefs, `ally:${c.id}`, 1, 'seen', sim.time)
+        recordStory(sim.stories, {
+          kind: 'alliance',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: `${c.name} and ${near.name} have become firm allies`,
+        })
+      }
+    }
+  }
+
+  // stepping between two who are at each other's throats
+  for (const a of sim.creatures) {
+    if (!a.alive || a.fightCooldown < 40) continue
+    const b = nearestOther(sim, a, FIGHT_RANGE + 3)
+    if (!b || b.fightCooldown < 40) continue
+    for (const peacemaker of sim.creatures) {
+      if (!peacemaker.alive || peacemaker.sleeping) continue
+      if (dist(peacemaker.pos.x, peacemaker.pos.z, a.pos.x, a.pos.z) > SOCIAL_RANGE + 3) continue
+      const score = mediateScore(peacemaker, a, b, sim.culture.influence[peacemaker.id] ?? 0)
+      if (score < 0.5 || sim.rng() > score * 0.5) continue
+      const result = mediate(peacemaker, a, b, sim.rng)
+      peacemaker.action = 'mediate'
+      emit(sim, 'comfort', peacemaker, a, peacemaker.pos.x, peacemaker.pos.z)
+      recordStory(sim.stories, {
+        kind: 'mediation',
+        tick: sim.time,
+        actor: peacemaker,
+        target: a,
+        text: result.hurt
+          ? `${peacemaker.name} got between ${a.name} and ${b.name}, and took a blow for it`
+          : `${peacemaker.name} talked ${a.name} and ${b.name} down`,
+        because: explain(peacemaker),
+        weight: result.hurt ? 1.3 : 1,
+      })
+      break
+    }
+  }
+}
+
+/**
+ * Burglary. A shut door is an opportunity as well as an inconvenience: a
+ * creature with the nerve and the need can go through a closed institution's
+ * till at night. The money is real — it comes out of the takings that pay
+ * somebody's wages — so the theft lands on a person, not on an abstraction.
+ */
+function tickBurglary(sim: Sim): void {
+  if (sim.time % 30 !== 0 || !isNight(sim.time)) return
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping || !isMature(c.stage)) continue
+    const here = towerAt(c.pos.x, c.pos.z)
+    if (!here) continue
+    const inst = sim.institutions[here.id]
+    if (!inst || isOpen(sim.institutions, here.id, sim.time)) continue
+    if (inst.till < 3) continue
+
+    // nerve comes from character and need; the norm against it weighs back
+    const nerve =
+      c.genome.theft * 0.5 +
+      c.genome.courage * 0.2 +
+      (1 - c.chem.hunger) * 0.3 +
+      c.emotions.resentment * 0.2 -
+      normPressure(sim.culture, c, 'property') * 0.6
+    if (nerve < 0.25 || sim.rng() > nerve * 0.4) continue
+
+    const watchers = sim.creatures.filter((o) =>
+      o.alive && o.id !== c.id && !o.sleeping &&
+      dist(o.pos.x, o.pos.z, c.pos.x, c.pos.z) <= OBSERVE_RANGE)
+    const haul = Math.min(Math.floor(inst.till), 4 + Math.floor(c.genome.greed * 6))
+
+    if (watchers.length > 0 && sim.rng() < 0.55) {
+      // somebody was out late and saw the whole thing
+      c.emotions.shame = clamp01(c.emotions.shame + 0.25)
+      c.chem.fear = clamp01(c.chem.fear + 0.3)
+      for (const w of watchers) {
+        observeEvent(w, 'steal', c.id)
+        applySocialEvent(w.social, c.id, 'steal', 1)
+      }
+      witnessedAct(sim.culture, 'property', true, watchers.length)
+      recordStory(sim.stories, {
+        kind: 'theft',
+        tick: sim.time,
+        actor: c,
+        text: `${watchers[0].name} caught ${c.name} breaking into the ${here.label} after dark`,
+        because: explain(c, 'steal'),
+        weight: 1.4,
+      })
+      emit(sim, 'flinch', c, undefined, c.pos.x, c.pos.z)
+      continue
+    }
+
+    inst.till -= haul
+    c.wallet += haul
+    c.emotions.guilt = clamp01(c.emotions.guilt + 0.15)
+    observeEvidence(c.beliefs, `place:${here.id}:easyTake`, 1, 'seen', sim.time)
+    witnessedAct(sim.culture, 'property', true, 0)
+    recordStory(sim.stories, {
+      kind: 'theft',
+      tick: sim.time,
+      actor: c,
+      text: `${haul} coins went missing from the ${here.label} overnight`,
+      because: explain(c, 'steal'),
+      weight: 1.3,
+    })
+    emit(sim, 'steal', c, undefined, c.pos.x, c.pos.z)
+
+    // the worker finds out when the wages do not add up
+    const job = Object.entries(sim.jobs.holders)
+      .find(([id]) => JOB_TOWER[id as JobId] === here.id)
+    const keeperId = job?.[1]
+    const keeper = keeperId !== undefined ? sim.creatureById(keeperId) : undefined
+    if (keeper?.alive) {
+      keeper.emotions.resentment = clamp01(keeper.emotions.resentment + 0.15)
+      keeper.emotions.paranoia = clamp01(keeper.emotions.paranoia + 0.2)
+      observeEvidence(keeper.beliefs, `place:${here.id}:robbed`, 1, 'inferred', sim.time)
+    }
+  }
+}
+
+/**
+ * Debts between individuals. A creature who owes somebody pays them back when
+ * it can, feels the obligation while it cannot, and a creditor who is never
+ * repaid starts to resent it.
+ */
+function tickDebts(sim: Sim): void {
+  if (sim.time % 50 !== 0) return
+  for (const debt of sim.ledger.debts.slice()) {
+    const debtor = sim.creatureById(debt.fromId)
+    const creditor = sim.creatureById(debt.toId)
+    if (!debtor?.alive || !creditor?.alive) continue
+
+    // repay when you have enough to spare, and you are nearby to hand it over
+    const spare = debtor.wallet - 4
+    if (spare > 0 && dist(debtor.pos.x, debtor.pos.z, creditor.pos.x, creditor.pos.z) < SOCIAL_RANGE + 2) {
+      const paid = repayDebt(sim.ledger, debt.fromId, debt.toId, Math.min(spare, debt.amount))
+      if (paid > 0) {
+        debtor.wallet -= paid
+        creditor.wallet += paid
+        applySocialEvent(creditor.social, debtor.id, 'help', 0.6)
+        debtor.emotions.pride = clamp01(debtor.emotions.pride + 0.1)
+        debtor.emotions.guilt = clamp01(debtor.emotions.guilt - 0.15)
+        if (totalOwedBy(sim.ledger, debtor.id) <= 0) {
+          recordStory(sim.stories, {
+            kind: 'debt',
+            tick: sim.time,
+            actor: debtor,
+            target: creditor,
+            text: `${debtor.name} paid off what they owed ${creditor.name}`,
+          })
+        }
+      }
+      continue
+    }
+
+    // still owing: it weighs on the debtor and wears on the creditor
+    const age = sim.time - debt.since
+    debtor.emotions.guilt = clamp01(debtor.emotions.guilt + 0.01)
+    debtor.chem.purpose = clamp01(debtor.chem.purpose - 0.004)
+    if (age > 900) {
+      applySocialEvent(creditor.social, debtor.id, 'reject', 0.3)
+      creditor.emotions.resentment = clamp01(creditor.emotions.resentment + 0.02)
+    }
+  }
+}
+
+/**
+ * Notice when a shelf has run dry and say who is missing. A shortage the
+ * player cannot trace to a person is just a number going down.
+ */
+function reportShortages(sim: Sim): void {
+  for (const goodId of ['bread', 'medicine', 'grain', 'brew'] as const) {
+    const good = sim.economy.goods[goodId]
+    if (!good || good.stock > 0) continue
+    const job = producerOf(goodId)
+    if (!job) continue
+    const holderId = sim.jobs.holders[job.id]
+    const holder = holderId !== undefined ? sim.creatureById(holderId) : undefined
+    const cause = !holder
+      ? `nobody is working as ${job.title}`
+      : `the ${job.title}, ${holder.name}, cannot keep up`
+    recordStory(sim.stories, {
+      kind: 'shortage',
+      tick: sim.time,
+      actor: holder,
+      text: `Haven has run out of ${goodId}`,
+      because: cause,
+    })
+  }
+}
+
+/** Claim vacant institutional roles so shops, clinics, and bars are staffed. */
+function assignJobs(sim: Sim): void {
+  for (const c of sim.creatures) {
+    if (!c.alive || c.job || !isMature(c.stage)) continue
+    // a creature settles into a role only once it has seen enough of the
+    // settlement to know the place — and only when it actually wants coin
+    if (Object.keys(c.knowledge).length < 3) continue
+    if (c.wallet > 20 && c.chem.hunger > 0.6) continue
+    const open = openJobsFor(sim.jobs, c)
+    const pick = open.find((j) => c.knowsTower(j.tower))
+    if (!pick) continue
+    if (claimJob(sim.jobs, c, pick.id)) {
+      observeEvidence(c.beliefs, `job:${pick.id}:mine`, 1, 'seen', sim.time)
+      applyPurpose(c.chem, 0.2)
+    }
+  }
 }
 
 /** Run one tick of a chosen action. */
@@ -692,7 +1747,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
   switch (action) {
     case 'food': {
       if (at?.id === 'food') {
-        if (c.chem.hunger < 0.85 && buyFromTower(sim.economy, 'food', c)) {
+        if (c.chem.hunger < 0.85 && payAtTower(sim, c, 'food', 'bread')) {
           // keep the bread — eat now if hungry, else store for later
           addItem(c.inventory, 'bread', 1)
           if (c.chem.hunger < 0.6 && useItem(c.inventory, 'bread')) {
@@ -725,6 +1780,46 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'work': {
+      // A creature with an institutional role works THAT job at its workplace:
+      // the shop restocks because the shopkeeper stood behind the counter.
+      const role = c.job as JobId | null
+      const atRoleTower = role !== null && at?.id === JOB_TOWER[role]
+      if (role && atRoleTower) {
+        const result = workShiftAt(sim.jobs, sim.economy, c, role)
+        c.action = 'work'
+        if (result.paid > 0) {
+          // wages come out of this building's takings, not out of nowhere
+          const actual = payFromTill(sim.institutions, JOB_TOWER[role], result.paid)
+          c.wallet += actual - result.paid
+          emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
+          if (actual <= 0) {
+            c.action = 'unpaid'
+            appraise(c.emotions, -0.4, 0.4, 0.2)
+            c.chem.purpose = clamp01(c.chem.purpose - 0.06)
+            if (sim.rng() < 0.25) {
+              recordStory(sim.stories, {
+                kind: 'work',
+                tick: sim.time,
+                actor: c,
+                text: `${c.name} worked a shift the ${JOB_TOWER[role]} could not pay for`,
+                because: 'the till is empty',
+                weight: 2.5,
+              })
+            }
+          } else {
+            c.action = 'work done'
+            appraise(c.emotions, 0.5, 0.3, 0.8)
+          }
+        }
+        return
+      }
+      if (role) {
+        const workplace = JOB_TOWER[role]
+        if (knows(sim, c, workplace)) {
+          goTo(sim, c, workplace)
+          return
+        }
+      }
       if (at?.id === 'work') {
         c.workProgress += 1
         c.action = 'work'
@@ -779,21 +1874,30 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'sleep': {
-      if (at?.id === 'homes' || c.chem.energy < 0.2) {
+      // A creature with a household sleeps in its OWN house; everyone else
+      // uses the common lodgings. Sleeping in your own bed is more restful.
+      const ownHome = homeTowerFor(sim, c)
+      const atOwnHome = ownHome !== null && at?.id === ownHome
+      if (atOwnHome || at?.id === 'homes' || c.chem.energy < 0.2) {
         c.sleeping = true
         c.action = 'sleep'
-        c.chem.energy = clamp01(c.chem.energy + 0.35)
+        c.chem.energy = clamp01(c.chem.energy + (atOwnHome ? 0.4 : 0.35))
+        if (atOwnHome) {
+          applyComfort(c.chem, 0.05)
+          c.chem.privacy = clamp01(c.chem.privacy + 0.03)
+        }
         return
       }
-      goTo(sim, c, 'homes')
+      goTo(sim, c, (ownHome ?? 'homes') as TowerId)
       return
     }
     case 'heal': {
-      if (at?.id === 'pharmacy' && buyFromTower(sim.economy, 'pharmacy', c)) {
+      if (at?.id === 'pharmacy' && payAtTower(sim, c, 'pharmacy', 'medicine')) {
         const dose = 0.1 + c.genome.addictionProne * 0.25
         c.chem.health = clamp01(c.chem.health + 0.3)
         c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
         c.chem.lastDose.medicine = sim.time
+        c.illness = clamp01(c.illness - 0.15)
         emit(sim, 'medicine', c, undefined, c.pos.x, c.pos.z)
         c.action = 'medicine'
         return
@@ -801,8 +1905,83 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       goTo(sim, c, 'pharmacy')
       return
     }
+    case 'nest': {
+      // home means their own house when the household has one
+      const ownHome = homeTowerFor(sim, c)
+      if (at?.id === 'homes' || (ownHome !== null && at?.id === ownHome)) {
+        // home with someone you love: rest, warmth, and time together
+        c.action = 'home'
+        applyComfort(c.chem, 0.02)
+        c.chem.privacy = clamp01(c.chem.privacy + 0.01)
+        const partner = c.partnerId !== null ? sim.creatureById(c.partnerId) : null
+        if (partner && partner.alive) {
+          applySocialEvent(c.social, partner.id, 'talk', 0.5)
+          c.chem.bond = clamp01(c.chem.bond + 0.01)
+        }
+        return
+      }
+      goTo(sim, c, (ownHome ?? 'homes') as TowerId)
+      return
+    }
+    case 'clinic': {
+      if (at?.id === 'clinic') {
+        // A staffed clinic treats properly; an empty one only offers a cot.
+        const healerId = sim.jobs.holders.healer
+        const healer = healerId !== undefined ? sim.creatureById(healerId) : undefined
+        const staffed = !!healer && healer.alive && healer.id !== c.id
+        const fee = staffed ? 5 : 2
+        const needsCare = c.illness > 0.05 || c.injury > 0.05 || c.chem.health < 0.7
+        // Nobody is turned away bleeding: a healer who can afford to will treat
+        // on credit, and the patient owes them for it afterwards.
+        const onCredit = needsCare && c.wallet < fee && staffed && !!healer
+          && (c.chem.health < 0.5 || c.injury > 0.3)
+          && healer.genome.loyalty > 0.35
+        if (onCredit && healer) {
+          addDebt(sim.ledger, c.id, healer.id, fee, sim.time)
+          c.chem.health = clamp01(c.chem.health + 0.4)
+          c.illness = 0
+          c.injury = 0
+          applySocialEvent(c.social, healer.id, 'help', 1.2)
+          c.emotions.gratitude = clamp01(c.emotions.gratitude + 0.25)
+          applyPurpose(healer.chem, 0.06)
+          recordStory(sim.stories, {
+            kind: 'debt',
+            tick: sim.time,
+            actor: healer,
+            target: c,
+            text: `${healer.name} treated ${c.name} on credit — ${c.name} owes ${fee} coins`,
+            because: 'they could not pay',
+          })
+          emit(sim, 'heal', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'treated'
+          c.intention = null
+          return
+        }
+        if (c.wallet >= fee && needsCare) {
+          c.wallet -= fee
+          if (healer && staffed) healer.wallet += fee // the healer earns the fee
+          c.chem.health = clamp01(c.chem.health + (staffed ? 0.45 : 0.15))
+          c.illness = staffed ? 0 : clamp01(c.illness - 0.2)
+          c.injury = staffed ? 0 : clamp01(c.injury - 0.2)
+          c.chem.fear = clamp01(c.chem.fear - 0.1)
+          applyComfort(c.chem, 0.15)
+          preferPlace(c.memory, 'clinic')
+          observeEvidence(c.beliefs, 'place:clinic:heals', staffed ? 1 : 0.3, 'seen', sim.time)
+          if (healer && staffed) {
+            applySocialEvent(c.social, healer.id, 'help', 1)
+            applyPurpose(healer.chem, 0.05)
+          }
+          emit(sim, 'heal', c, undefined, c.pos.x, c.pos.z)
+          c.action = staffed ? 'treated' : 'clinic'
+          c.intention = null
+        }
+        return
+      }
+      goTo(sim, c, 'clinic')
+      return
+    }
     case 'drink': {
-      const good = at?.id === 'tavern' ? buyFromTower(sim.economy, 'tavern', c) : null
+      const good = at?.id === 'tavern' ? payAtTower(sim, c, 'tavern', 'brew') : null
       if (good) {
         c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
         c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
@@ -832,7 +2011,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'buyWeapon': {
-      if (at?.id === 'tools' && !c.weapon && buyFromTower(sim.economy, 'tools', c)) {
+      if (at?.id === 'tools' && !c.weapon && payAtTower(sim, c, 'tools', 'weapon')) {
         c.weapon = 'stick'
         c.action = 'buy'
         return
@@ -876,6 +2055,32 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       const near = nearestOther(sim, c, SOCIAL_RANGE)
       if (near) {
         c.socialize(near)
+        applySocialEvent(c.social, near.id, 'talk', 1)
+        applySocialEvent(near.social, c.id, 'talk', 1)
+        // romance spark when compatible and unpartnered
+        if (c.partnerId === null && near.partnerId === null) {
+          const compat = geneticCompatibility(c.genome, near.genome)
+          bumpEdge(c.social, near.id, 'attraction', 0.06 * compat * c.genome.lovePropensity)
+          bumpEdge(near.social, c.id, 'attraction', 0.06 * compat * near.genome.lovePropensity)
+        }
+        // courtship: mutual interest can turn a friendship into a partnership
+        if (c.partnerId === null && near.partnerId === null) {
+          const outcome = courtStep(c, near)
+          if (outcome === 'partnered') {
+            ensureCoupleHousehold(sim.society, c, near, sim.time)
+            chronicle(sim.culture, sim.time, `${c.name} and ${near.name} became partners.`)
+            recordStory(sim.stories, {
+              kind: 'partnership',
+              tick: sim.time,
+              actor: c,
+              target: near,
+              text: `${c.name} and ${near.name} became partners`,
+            })
+            emit(sim, 'love', c, near, c.pos.x, c.pos.z)
+          }
+        } else if (c.partnerId === near.id) {
+          ensureCoupleHousehold(sim.society, c, near, sim.time)
+        }
         emit(sim, 'love', c, near, c.pos.x, c.pos.z)
         c.action = 'social'
         return
@@ -905,9 +2110,20 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         applyEmotionFeedback(c.emotions, 'joy', 0.15)
         applyEmotionFeedback(near.emotions, 'joy', 0.1)
         applyEmotionFeedback(near.emotions, 'affection', 0.1)
+        applyEmotionFeedback(near.emotions, 'forgiveness', 0.1)
+        applySocialEvent(near.social, c.id, 'share', 1)
+        applySocialEvent(c.social, near.id, 'share', 0.5)
         forgiveGift(near, c.id)
         observeEvent(near, 'share', c.id)
         witness(sim, c, 'share', c.id)
+        recordStory(sim.stories, {
+          kind: 'generosity',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: `${c.name} gave ${gift} coins to ${near.name}, who had nothing`,
+          because: explain(c, 'share'),
+        })
         emit(sim, 'gift', c, near, c.pos.x, c.pos.z)
         c.action = 'share'
         return
@@ -977,6 +2193,8 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
   // desperate creatures hurry — hunger/health urgency speeds the walk
   const hurry = c.chem.hunger < 0.2 || c.chem.health < 0.3 || c.chem.energy < 0.12 ? 1.7 : 1
   const step = Math.min(SPEED * hurry, d)
+  const startX = c.pos.x
+  const startZ = c.pos.z
   let dx = ((t.x - c.pos.x) / d) * step
   let dz = ((t.z - c.pos.z) / d) * step
   // BUILDING COLLISION: never walk through a tower that isn't our destination.
@@ -992,8 +2210,15 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
       const slideX = -nz
       const slideZ = nx
       const along = dx * slideX + dz * slideZ
-      dx = slideX * along * 0.9
-      dz = slideZ * along * 0.9
+      // Head-on into a wall the tangent projection collapses to ~0, which
+      // would pin the creature forever. Commit to walking around one side.
+      if (Math.abs(along) < step * 0.4) {
+        dx = slideX * step * 0.9 * c.detourSign
+        dz = slideZ * step * 0.9 * c.detourSign
+      } else {
+        dx = slideX * along * 0.9
+        dz = slideZ * along * 0.9
+      }
       break
     }
   }
@@ -1001,6 +2226,24 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
   c.pos.z += dz
   c.facing = Math.atan2(dx, dz)
   c.action = `go ${towerId}`
+
+  // Progress check: a creature that has not moved for a while is wedged.
+  // It tries the other way around the obstacle, and eventually gives up on
+  // this destination entirely so the mind can pick something reachable.
+  const moved = Math.hypot(c.pos.x - startX, c.pos.z - startZ)
+  if (moved < step * 0.25) {
+    c.stuckTicks++
+    if (c.stuckTicks === 10) c.detourSign = -c.detourSign
+    if (c.stuckTicks > 26) {
+      c.stuckTicks = 0
+      c.goalTowerId = 'none'
+      c.intention = null
+      c.intentionTicks = 0
+      c.action = 'lost'
+    }
+  } else if (c.stuckTicks > 0) {
+    c.stuckTicks = Math.max(0, c.stuckTicks - 1)
+  }
 }
 
 function goToPoint(c: Creature, x: number, z: number, actionLabel: string): void {
@@ -1057,18 +2300,64 @@ function flee(sim: Sim, c: Creature): void {
  * know where it is and must explore until it finds it. */
 function learnFromSight(sim: Sim): void {
   for (const c of sim.creatures) {
-    if (!c.alive) continue
+    if (!c.alive || c.sleeping) continue
+    // Buildings are large and signposted: a creature notices one from a
+    // distance, and sharp-eyed creatures notice from further away.
+    const sight = senseRange(c.genome, 10)
     for (const t of TOWERS) {
       const d = dist(c.pos.x, c.pos.z, t.x, t.z)
-      if (d <= t.radius + 0.5) c.learnTower(t.id)
+      if (d <= t.radius + sight) c.learnTower(t.id)
     }
   }
+}
+
+/**
+ * Directions: creatures tell each other where things are. A hungry stranger
+ * who has never found the market can be pointed toward it — knowledge travels
+ * through the settlement instead of appearing by magic.
+ */
+export function shareDirections(
+  speaker: Creature,
+  listener: Creature,
+  trust: number,
+  rng: () => number = Math.random,
+): void {
+  if (trust < -0.2) return
+  for (const t of TOWERS) {
+    if (!speaker.knowsTower(t.id) || listener.knowsTower(t.id)) continue
+    // you mention what the other plainly needs, or simply what you know well
+    const urgent =
+      (t.id === 'food' && listener.chem.hunger < 0.5) ||
+      (t.id === 'clinic' && listener.chem.health < 0.6) ||
+      (t.id === 'homes' && listener.chem.energy < 0.4)
+    if (!urgent && rng() > 0.25) continue
+    listener.knowledge[t.id] = Math.min(1, (listener.knowledge[t.id] ?? 0) + (urgent ? 0.8 : 0.45))
+    return // one useful direction per conversation
+  }
+}
+
+/** The dwelling this creature calls home, if their household claimed one. */
+function homeTowerFor(sim: Sim, c: Creature): TowerId | null {
+  const house = householdOf(sim.society, c.id)
+  if (!house) return null
+  const tower = homeTowerOf(house)
+  return tower && c.knowsTower(tower) ? tower : null
 }
 
 /** Is this tower known to the creature? (actions require knowledge — no omniscience) */
 function knows(sim: Sim, c: Creature, towerId: string): boolean {
   void sim
   return c.knowsTower(towerId)
+}
+
+/** How many living creatures are pressed in close (privacy pressure). */
+function countNeighbors(sim: Sim, c: Creature, range: number): number {
+  let n = 0
+  for (const o of sim.creatures) {
+    if (o.id === c.id || !o.alive) continue
+    if (dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) <= range) n++
+  }
+  return n
 }
 
 function nearestOther(sim: Sim, c: Creature, range: number): Creature | null {
@@ -1111,11 +2400,46 @@ function tradeNearby(sim: Sim): void {
   for (const seller of sim.creatures) {
     if (!seller.alive || seller.sleeping) continue
     if (countItem(seller.inventory, 'bread') < 2) continue
-    if ((sim.time + seller.id) % 3 !== 0) continue
-    const buyer = nearestOther(sim, seller, SOCIAL_RANGE)
+    if ((sim.time + seller.id) % 2 !== 0) continue
+    // calling an offer across a few paces counts — you don't need to be
+    // shoulder to shoulder to hold up a loaf and name a price
+    const buyer = nearestOther(sim, seller, SOCIAL_RANGE + 2)
     if (!buyer || !buyer.alive || buyer.sleeping || buyer.chem.hunger > 0.5) continue
-    if (buyer.wallet < marketPrice(sim.economy, 'bread')) continue
-    sim.creatureTrade(seller, buyer)
+    // Haggle: the seller's view of the buyer sets the price, and the buyer's
+    // hunger sets what they think a loaf is worth. Friends get a break; a
+    // known thief gets shown the door.
+    const rep = getReputation(seller, buyer.id)
+    const buyerValue = valueTo(sim.economy, {
+      chem: buyer.chem,
+      wallet: buyer.wallet,
+      genome: buyer.genome,
+      chemAddiction: buyer.chem.addiction,
+    }, 'bread')
+    const offer = negotiate(
+      sim.economy,
+      'bread',
+      { trust: rep.trust, thief: rep.thief },
+      buyer.wallet,
+      buyerValue,
+    )
+    if (!offer.accepted) {
+      if (offer.reason === 'refused-thief') {
+        buyer.emotions.shame = clamp01(buyer.emotions.shame + 0.08)
+        buyer.action = 'refused'
+        if (sim.time % 60 === 0) {
+          recordStory(sim.stories, {
+            kind: 'refusal',
+            tick: sim.time,
+            actor: seller,
+            target: buyer,
+            text: `${seller.name} refused to sell to ${buyer.name}`,
+            because: 'believes they are a thief',
+          })
+        }
+      }
+      continue
+    }
+    sim.creatureTrade(seller, buyer, offer.price)
   }
 }
 
@@ -1125,11 +2449,24 @@ function tradeNearby(sim: Sim): void {
  * observation — a creature does not need to be the victim to judge.
  */
 function witness(sim: Sim, actor: Creature, kind: Parameters<typeof observeEvent>[1], actorId: number): void {
+  let seen = 0
   for (const o of sim.creatures) {
     if (o.id === actorId || !o.alive) continue
     if (dist(o.pos.x, o.pos.z, actor.pos.x, actor.pos.z) <= OBSERVE_RANGE) {
       observeEvent(o, kind, actorId)
+      observeEvidence(o.beliefs, `who:${actorId}:${kind}`, 1, 'seen', sim.time)
+      seen++
     }
+  }
+  // Public acts shift what the settlement considers normal. A theft nobody
+  // sees barely dents the property norm; one in the plaza does.
+  const norm = kind === 'steal' || kind === 'betray' ? 'property'
+    : kind === 'aggress' ? 'nonviolence'
+      : kind === 'share' || kind === 'protect' ? 'generosity'
+        : null
+  if (norm) {
+    const violated = kind === 'steal' || kind === 'betray' || kind === 'aggress'
+    witnessedAct(sim.culture, norm, violated, seen)
   }
 }
 
@@ -1279,8 +2616,12 @@ function carryCorpseDirect(sim: Sim, c: Creature): void {
 function wakeNearbySleepers(sim: Sim): void {
   for (const c of sim.creatures) {
     if (!c.alive || !c.sleeping) continue
+    const home = householdOf(sim.society, c.id)
     for (const o of sim.creatures) {
       if (o.id === c.id || !o.alive || o.sleeping) continue
+      // You do not jolt awake because the person you live with walked past.
+      const familiar = o.id === c.partnerId || (home?.memberIds.includes(o.id) ?? false)
+      if (familiar) continue
       if (dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 3) {
         c.sleeping = false
         c.action = 'wake'
@@ -1297,7 +2638,8 @@ function wakeNearbySleepers(sim: Sim): void {
  *  they block paths until someone carries them to the graveyard. */
 function resolveCreatureCollisions(sim: Sim): void {
   const bodies = sim.creatures.filter((c) => c.alive)
-  bodies.push({ pos: sim.player.pos } as Creature) // the player is solid too
+  const playerBody = { pos: sim.player.pos } as Creature
+  bodies.push(playerBody) // the player is solid too
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i]
@@ -1306,7 +2648,11 @@ function resolveCreatureCollisions(sim: Sim): void {
       const dx = b.pos.x - a.pos.x
       const dz = b.pos.z - a.pos.z
       const d = Math.hypot(dx, dz)
-      const min = 1.5 // ball radius * 2 + a little breathing room
+      // Creatures keep a little more distance from the player than from each
+      // other: standing eye-to-eye fills the whole first-person view with one
+      // face, which reads as a glitch rather than as company.
+      const involvesPlayer = a === playerBody || b === playerBody
+      const min = involvesPlayer ? 2.6 : 1.5 // ball radius * 2 + breathing room
       if (d > 0.0001 && d < min) {
         const push = (min - d) / 2
         const nx = dx / d
@@ -1326,6 +2672,37 @@ function resolveCreatureCollisions(sim: Sim): void {
 }
 
 function steal(sim: Sim, thief: Creature, victim: Creature): void {
+  // Getting away with it is not a given. An alert victim who already suspects
+  // you, with neighbours watching, is likely to catch you at it — which is
+  // what stops one creature quietly robbing the same person all afternoon.
+  const watchers = sim.creatures.filter((o) =>
+    o.alive && o.id !== thief.id && o.id !== victim.id && !o.sleeping &&
+    dist(o.pos.x, o.pos.z, thief.pos.x, thief.pos.z) <= OBSERVE_RANGE).length
+  const suspicion = victim.social[thief.id]?.suspicion ?? 0
+  const alertness = victim.sleeping ? 0.1 : 0.35 + victim.genome.senses * 0.3 + suspicion * 0.4
+  const stealth = 0.35 + thief.genome.theft * 0.4 - watchers * 0.08
+  if (sim.rng() > stealth - alertness * 0.5 + 0.5) {
+    // caught red-handed: no coins, and everybody saw
+    thief.action = 'caught'
+    thief.emotions.shame = clamp01(thief.emotions.shame + 0.3)
+    thief.chem.fear = clamp01(thief.chem.fear + 0.2)
+    victim.emotions.resentment = clamp01(victim.emotions.resentment + 0.25)
+    applySocialEvent(victim.social, thief.id, 'steal', 0.6)
+    observeEvent(victim, 'steal', thief.id)
+    witness(sim, victim, 'steal', thief.id)
+    recordStory(sim.stories, {
+      kind: 'theft',
+      tick: sim.time,
+      actor: thief,
+      target: victim,
+      text: `${victim.name} caught ${thief.name} going for their coins`,
+      because: explain(thief, 'steal'),
+      weight: 1.2,
+    })
+    emit(sim, 'flinch', thief, victim, thief.pos.x, thief.pos.z)
+    return
+  }
+
   const amount = Math.min(victim.wallet, 2 + Math.floor(thief.genome.greed * 4))
   victim.wallet -= amount
   thief.wallet += amount
@@ -1345,15 +2722,33 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   victim.chem.fear = clamp01(victim.chem.fear + 0.05)
   observeEvent(victim, bonded ? 'betray' : 'steal', thief.id)
   witness(sim, victim, 'steal', thief.id)
+  applySocialEvent(victim.social, thief.id, bonded ? 'betray' : 'steal', 1)
+  applySocialEvent(thief.social, victim.id, 'meet', 0.3)
+  recordStory(sim.stories, {
+    kind: bonded ? 'betrayal' : 'theft',
+    tick: sim.time,
+    actor: thief,
+    target: victim,
+    text: bonded
+      ? `${thief.name} stole ${amount} coins from ${victim.name}, who trusted them`
+      : `${thief.name} stole ${amount} coins from ${victim.name}`,
+    because: explain(thief, 'steal'),
+    weight: 1 + Math.min(0.4, amount / 12),
+  })
   emit(sim, 'steal', thief, victim, victim.pos.x, victim.pos.z)
   thief.action = 'steal'
 }
 
 function fight(sim: Sim, a: Creature, b: Creature): void {
-  const dmgA = 0.05 + (a.weapon === 'stick' ? 0.1 : 0) + a.genome.aggression * 0.04 + a.chem.strength * 0.06
-  const dmgB = 0.05 + (b.weapon === 'stick' ? 0.1 : 0) + b.genome.aggression * 0.04 + b.chem.strength * 0.06
+  const vigorA = vigorFor(a.stage)
+  const vigorB = vigorFor(b.stage)
+  const dmgA = (0.05 + (a.weapon === 'stick' ? 0.1 : 0) + a.genome.aggression * 0.04 + a.chem.strength * 0.06) * vigorA
+  const dmgB = (0.05 + (b.weapon === 'stick' ? 0.1 : 0) + b.genome.aggression * 0.04 + b.chem.strength * 0.06) * vigorB
   b.hurt(dmgA)
   a.hurt(dmgB)
+  // violence leaves wounds that outlast the fight and cost money to treat
+  b.injury = clamp01(b.injury + dmgA * 1.5)
+  a.injury = clamp01(a.injury + dmgB * 1.5)
   // ego + reciprocity respond to the exchange
   applySocialFeedback(a.drives, a.chem.health > b.chem.health ? 'victory' : 'defeat')
   applySocialFeedback(b.drives, b.chem.health > a.chem.health ? 'victory' : 'defeat')
@@ -1377,6 +2772,19 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   const defending = protectFriendNear(sim, a) // a stepped in to defend a friend
   observeEvent(b, 'aggress', a.id) // b saw who hit it
   witness(sim, a, defending ? 'protect' : 'aggress', a.id)
+  applySocialEvent(b.social, a.id, 'hurt', 1)
+  applySocialEvent(a.social, b.id, defending ? 'help' : 'hurt', 0.6)
+  recordStory(sim.stories, {
+    kind: 'violence',
+    tick: sim.time,
+    actor: a,
+    target: b,
+    text: defending
+      ? `${a.name} fought ${b.name} to protect a friend`
+      : `${a.name} attacked ${b.name}`,
+    because: explain(a, 'fight'),
+    weight: a.weapon === 'stick' ? 1.2 : 1,
+  })
   emit(sim, 'fight', a, b, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2)
   a.action = 'fight'
   b.action = 'fight'
@@ -1399,17 +2807,69 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
 }
 
 function procreate(sim: Sim, a: Creature, b: Creature): void {
+  const alive = sim.creatures.filter((c) => c.alive).length
+  if (alive >= sim.settings.populationCap) {
+    a.action = 'overcrowded'
+    return
+  }
   const childGenome = mutate(crossover(a.genome, b.genome, sim.rng), 0.15, sim.rng)
-  const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8)
+  const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8, sim.rng)
   child.wallet = 1
+  child.parentIds = [a.id, b.id]
   sim.creatures.push(child)
+  const house = ensureCoupleHousehold(sim.society, a, b, sim.time)
+  adoptChild(sim.society, a, child)
+  // culture crosses generations: the child starts with its parents' words,
+  // places, and social leanings rather than a blank slate
+  transmitCulture(a, child)
+  transmitCulture(b, child)
+  chronicle(sim.culture, sim.time, `${child.name} was born to ${a.name} and ${b.name}.`)
+  recordStory(sim.stories, {
+    kind: 'birth',
+    tick: sim.time,
+    actor: a,
+    target: child,
+    text: `${child.name} was born to ${a.name} and ${b.name}`,
+  })
+  // parents grow multidimensional attachment
+  applySocialEvent(a.social, b.id, 'flirt', 0.5)
+  applySocialEvent(b.social, a.id, 'flirt', 0.5)
+  applySocialEvent(a.social, child.id, 'help', 1)
+  applySocialEvent(b.social, child.id, 'help', 1)
+  applySocialEvent(child.social, a.id, 'meet', 1)
+  applySocialEvent(child.social, b.id, 'meet', 1)
+  void house
   emit(sim, 'birth', a, b, a.pos.x, a.pos.z)
   a.action = 'birth'
   b.action = 'birth'
 }
 
+/** What actually killed this creature, as far as its own state shows. */
+function causeOfDeath(dead: Creature): string {
+  if (dead.injury > 0.4) return 'wounds from a fight'
+  if (dead.illness > 0.3) return 'untreated illness'
+  if (dead.chem.hunger < 0.1) return 'starvation'
+  if (dead.age > dead.ageLimit) return 'old age'
+  return 'failing health'
+}
+
+function deathText(sim: Sim, dead: Creature): string {
+  const kin = sim.creatures.filter((c) => c.alive && (c.partnerId === dead.id || c.parentIds.includes(dead.id)))
+  const role = dead.job ? ` the ${dead.job}` : ''
+  const survivors = kin.length > 0 ? `, leaving ${kin.map((k) => k.name).join(' and ')}` : ''
+  return `${dead.name}${role} died${survivors}`
+}
+
 /** A creature died — partners and close bonds mourn (grief + sadness). */
 function grieve(sim: Sim, dead: Creature): void {
+  chronicle(sim.culture, sim.time, `${dead.name} died at age ${dead.age}.`)
+  recordStory(sim.stories, {
+    kind: 'death',
+    tick: sim.time,
+    actor: dead,
+    text: deathText(sim, dead),
+    because: causeOfDeath(dead),
+  })
   for (const c of sim.creatures) {
     if (c.id === dead.id || !c.alive) continue
     const isPartner = c.partnerId === dead.id

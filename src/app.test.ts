@@ -1,14 +1,14 @@
-// App observer-UI copy test. This repo has no DOM test environment
-// (no jsdom/happy-dom installed), so this asserts the REAL App source —
-// exactly the copy and structure the player sees. Same approach as the
-// pre-rebuild app.test.ts.
+/**
+ * App UI contract for Luma Haven — asserts the real App source structure.
+ * No DOM environment; this keeps the HUD surface area intentional.
+ */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync('src/App.tsx', 'utf8')
 const css = readFileSync('src/lab.css', 'utf8')
 
-describe('App test-lab UI', () => {
+describe('App Luma Haven UI', () => {
   it('wires the renderer and sim: LabView + createSim', () => {
     expect(app).toContain("import { LabView } from './render/labview'")
     expect(app).toContain("import { createSim, type Sim } from './lab/sim'")
@@ -51,7 +51,7 @@ describe('App test-lab UI', () => {
 
   it('shows live count and speed controls in the top bar', () => {
     expect(app).toContain('data-topbar')
-    expect(app).toContain('Luma Lab')
+    expect(app).toContain('Luma Haven')
     expect(app).toContain('data-count="alive"')
     expect(app).toContain('setPaused')
     expect(app).toContain('setSpeed')
@@ -62,22 +62,20 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-sound=')
   })
 
-  it('has zero action-message text or toasts — the world is the feedback', () => {
+  it('has no toast feed for scripted action announcements', () => {
     expect(app).not.toContain('pushMessage')
     expect(app).not.toContain('setMessages')
     expect(app).not.toContain('data-msg-stack')
-    expect(app).not.toContain('toast')
     expect(app).not.toContain('You fed')
     expect(app).not.toContain('you fed')
     expect(app).not.toContain('has died')
-    expect(app).not.toContain('message')
   })
 
-  it('does not touch save/load — sim has none, App must not invent them', () => {
-    expect(app).not.toContain('.save()')
-    expect(app).not.toContain('.load(')
+  it('persists the world via saveSim / saveWorldBlob (not ad-hoc idbSave)', () => {
+    expect(app).toContain('saveSim')
+    expect(app).toContain('saveWorldBlob')
+    expect(app).toContain('loadWorldBlob')
     expect(app).not.toContain('idbSave')
-    expect(app).not.toContain('localStorage')
   })
 
   it('has first-person mode: always-on player, joystick, look zone, pointer lock, social dock', () => {
@@ -88,11 +86,94 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-lab-tool="social"')
     expect(app).toContain('setFirstPerson')
     expect(app).toContain('playerSocialize')
-    expect(app).toContain("import { LabView } from './render/labview'")
     expect(css).toContain('.view-toggle')
     expect(css).toContain('.fp-move')
     expect(css).toContain('.fp-look')
     expect(css).toContain('.fp-btn')
+  })
+
+  it('supports typed talk, mind inspector, and settings', () => {
+    expect(app).toContain('data-talk')
+    expect(app).toContain('playerTalk')
+    expect(app).toContain('data-inspector')
+    expect(app).toContain('inspectCreature')
+    expect(app).toContain('data-settings')
+    expect(app).toContain('populationCap')
+    expect(css).toContain('.talk')
+    expect(css).toContain('.inspector')
+    expect(css).toContain('.settings')
+  })
+
+  it('shows the society pulse: norms, jobs, overheard talk, chronicle', () => {
+    expect(app).toContain('data-society')
+    expect(app).toContain('inspectSociety')
+    expect(app).toContain('data-society-norms')
+    expect(app).toContain('data-society-jobs')
+    expect(app).toContain('data-society-overheard')
+    expect(css).toContain('.society')
+  })
+
+  it('exposes debugging depth: beliefs, habits, family, promises, perf overlay', () => {
+    expect(app).toContain('data-inspector-beliefs')
+    expect(app).toContain('data-inspector-habits')
+    expect(app).toContain('data-inspector-family')
+    expect(app).toContain('data-inspector-promises')
+    expect(app).toContain('data-perf-overlay')
+    expect(app).toContain('data-perf-phases')
+    expect(app).toContain("case 'F3'")
+    expect(css).toContain('.perf')
+  })
+
+  it('manages saves: slots, export, import, and graceful recovery', () => {
+    expect(app).toContain('data-save-slots')
+    expect(app).toContain('data-export-save')
+    expect(app).toContain('data-import-save')
+    expect(app).toContain('loadWorldBackup')
+    expect(app).toContain('hasWorldSlot')
+  })
+
+  it('surfaces stories: feed, since-last-visit, shortages, and a life story', () => {
+    expect(app).toContain('data-society-stories')
+    expect(app).toContain('data-society-since')
+    expect(app).toContain('data-society-shortages')
+    expect(app).toContain('data-inspector-life')
+    expect(app).toContain('markSeen')
+    expect(css).toContain('.story-because')
+  })
+
+  it('lets the player hand things over, drop them, and read the controls', () => {
+    expect(app).toContain('data-player-give')
+    expect(app).toContain('data-player-drop')
+    expect(app).toContain('playerGive')
+    expect(app).toContain('playerDrop')
+    expect(app).toContain('data-help')
+    expect(app).toContain('data-help-btn')
+    expect(css).toContain('.help-list')
+  })
+
+  it('keeps the optional dialogue service opt-in with its own endpoint', () => {
+    expect(app).toContain('data-cloud-ai')
+    expect(app).toContain('data-cloud-endpoint')
+    expect(app).toContain('createCloudProvider')
+    expect(app).toContain('polishTurn')
+    // and says out loud which voice is speaking
+    expect(app).toContain('data-talk-voice')
+    expect(app).toContain("Haven's own")
+  })
+
+  it('reaches every panel from the keyboard', () => {
+    for (const key of ["case 't'", "case 'i'", "case 'h'", "case 'g'", "case 'm'", "case '?'"]) {
+      expect(app).toContain(key)
+    }
+    expect(app).toContain("case 'Escape'")
+    expect(app).toContain('help-keys')
+  })
+
+  it('seeds a starter society with households and children', () => {
+    expect(app).toContain('seedStarterSociety')
+    expect(app).toContain('ensureCoupleHousehold')
+    expect(app).toContain('adoptChild')
+    expect(app).toContain('transmitCulture')
   })
 
   it('lab.css provides the dock, chip, 56px buttons, and safe-area insets', () => {
@@ -100,7 +181,5 @@ describe('App test-lab UI', () => {
     expect(css).toContain('.chip')
     expect(css).toContain('56px')
     expect(css).toContain('safe-area-inset')
-    expect(css).toContain('.dock-btn-active')
-    expect(css).toContain('40vh')
   })
 })

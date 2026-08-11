@@ -14,6 +14,20 @@ import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
 import { refreshBrain, clampCoord } from '../lab/sim'
 import { ITEM_IDS, type ItemId } from '../lab/inventory'
+import { recordFrameTime } from '../lab/lod'
+import { bodyScale } from '../lab/genetics'
+import { isOpen, timeOfDay } from '../lab/institutions'
+import { producerOf } from '../lab/jobs'
+
+/** Which good each counter sells, for the "sold out" sign. */
+const TOWER_GOODS: Record<string, string | undefined> = {
+  food: 'bread',
+  pharmacy: 'medicine',
+  tavern: 'brew',
+  tools: 'weapon',
+  farm: 'grain',
+  den: 'herb',
+}
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -41,6 +55,17 @@ interface CreatureRig {
   hair: THREE.Group
   emotionBadge: THREE.Mesh
   emotionBadgeGroup: THREE.Group
+  /** a worker's tool of trade, shown only while they hold the role */
+  roleMark: THREE.Sprite
+  roleShown: string | null
+  /** household colour band — the same on everyone who lives together */
+  householdBand: THREE.Mesh
+  householdShown: number | null
+  /** how this creature feels about whoever is beside them, right now */
+  feelingMark: THREE.Sprite
+  feelingShown: string | null
+  /** body scale from age and genes, so children read as children */
+  baseScale: number
   phase: number
   targetX: number
   targetZ: number
@@ -175,19 +200,103 @@ function buildItemMesh(id: ItemId): THREE.Object3D {
     }
     case 'stick':
       return mkBox(0.16, 0.16, 1.3, 0x76502f)
+    case 'water': {
+      const jug = mkCyl(0.16, 0.18, 0.46, 10, 0x6fc2d9)
+      const lip = mkCyl(0.08, 0.1, 0.1, 8, 0xcfeef6)
+      lip.position.y = 0.28
+      const g = new THREE.Group()
+      g.add(jug, lip)
+      return g
+    }
+    case 'cloak': {
+      const fold = mkBox(0.46, 0.5, 0.22, 0x8a6a9a)
+      fold.rotation.z = 0.2
+      return fold
+    }
+    case 'trinket':
+      return new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), mkMat(0xb8d9e8, { roughness: 0.2 }))
+    case 'gem':
+      return new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.22, 0),
+        mkMat(0x4fd9a1, { emissive: 0x1a6a4a, emissiveIntensity: 0.4, roughness: 0.15 }),
+      )
+    case 'satchel': {
+      const bag = mkBox(0.44, 0.4, 0.26, 0x8a6440)
+      const flap = mkBox(0.46, 0.16, 0.28, 0x6e4a2e)
+      flap.position.y = 0.16
+      const g = new THREE.Group()
+      g.add(bag, flap)
+      return g
+    }
+    case 'timber':
+      return mkCyl(0.14, 0.14, 1, 8, 0x8a6440)
+    case 'grain': {
+      const sheaf = mkCyl(0.16, 0.1, 0.6, 8, 0xd9c46a)
+      return sheaf
+    }
   }
 }
 
-/** One shared model per good; rigs clone() these. */
-const ITEM_MESHES: Record<ItemId, THREE.Object3D> = {
-  bread: buildItemMesh('bread'),
-  medicine: buildItemMesh('medicine'),
-  brew: buildItemMesh('brew'),
-  herb: buildItemMesh('herb'),
-  spark: buildItemMesh('spark'),
-  tonic: buildItemMesh('tonic'),
-  stick: buildItemMesh('stick'),
+/** What each trade carries, so you can tell the healer from the farmer. */
+const ROLE_MARKS: Record<string, string> = {
+  shopkeep: '🍞',
+  healer: '✚',
+  bartender: '🍺',
+  farmer: '🌾',
+  porter: '⚒️',
+  teacher: '🎓',
 }
+
+/** Redraw a text sprite in place, reusing its material and texture slot. */
+function replaceSpriteText(
+  sprite: THREE.Sprite,
+  text: string,
+  opts: { size?: number; color?: string; bg?: string; radius?: number } = {},
+): void {
+  const fresh = makeTextSprite(text, opts)
+  const material = sprite.material as THREE.SpriteMaterial
+  const old = material.map
+  material.map = (fresh.material as THREE.SpriteMaterial).map
+  material.needsUpdate = true
+  old?.dispose()
+  sprite.scale.copy(fresh.scale)
+}
+
+/**
+ * The strongest thing this creature feels about somebody within sight of it.
+ * Only real intensity shows — otherwise everyone would be wearing a face.
+ */
+function strongestFeelingNearby(sim: Sim, c: Creature): string | null {
+  let best: string | null = null
+  let bestWeight = 0.45
+  for (const other of sim.creatures) {
+    if (other.id === c.id || !other.alive) continue
+    const d = Math.hypot(other.pos.x - c.pos.x, other.pos.z - c.pos.z)
+    if (d > 7) continue
+    const edge = c.social[other.id]
+    if (!edge) continue
+    const candidates: [string, number][] = [
+      ['💗', other.id === c.partnerId ? edge.affection + 0.2 : edge.attraction],
+      ['😠', edge.resentment],
+      ['😨', edge.fear],
+      ['🙏', edge.gratitude],
+      ['🤨', edge.suspicion],
+    ]
+    for (const [mark, weight] of candidates) {
+      if (weight > bestWeight) {
+        bestWeight = weight
+        best = mark
+      }
+    }
+  }
+  return best
+}
+
+/** One shared model per good; rigs clone() these. */
+const ITEM_MESHES: Record<ItemId, THREE.Object3D> = ITEM_IDS.reduce((acc, id) => {
+  acc[id] = buildItemMesh(id)
+  return acc
+}, {} as Record<ItemId, THREE.Object3D>)
 
 /** Total units a creature carries in its inventory (badge number). */
 function carriedCount(c: Creature): number {
@@ -433,9 +542,13 @@ export class LabView {
     const sun = new THREE.DirectionalLight(0xfff2d8, 1.4)
     sun.position.set(20, 40, 10)
     this.scene.add(sun)
+    this.hemi = hemi
+    this.sun = sun
 
     // towers
     for (const t of TOWERS) this.buildTower(t)
+    // furniture the player and creatures actually use
+    this.buildFixtures()
 
     // creatures
     for (const c of sim.creatures) {
@@ -469,6 +582,92 @@ export class LabView {
     this.renderer.domElement.remove()
   }
 
+  setSpeed(s: number): void {
+    this.speed = s
+  }
+
+  setPaused(p: boolean): void {
+    this.paused = p
+  }
+
+  /** Apply graphics/sim presentation settings from the HUD. */
+  applySettings(s: { pixelRatioCap?: number; showLabels?: boolean; showParticles?: boolean }): void {
+    if (s.pixelRatioCap != null) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap))
+    }
+    this.showLabels = s.showLabels ?? this.showLabels
+    this.showParticles = s.showParticles ?? this.showParticles
+    for (const rig of this.rigs) {
+      if (rig.nameLabel) rig.nameLabel.visible = this.showLabels
+      if (rig.emotionBadgeGroup) rig.emotionBadgeGroup.visible = this.showLabels
+    }
+  }
+
+  showLabels = true
+  showParticles = true
+
+  /** Replace the simulation (loading a save) without rebuilding the scene. */
+  swapSim(next: Sim): void {
+    for (const rig of this.rigs) this.scene.remove(rig.group)
+    this.rigs = []
+    this.knownIds.clear()
+    for (const m of this.dropMarkers) this.scene.remove(m.mesh)
+    this.dropMarkers = []
+    for (const g of this.graveMarkers) this.scene.remove(g.mesh)
+    this.graveMarkers = []
+    this.sim = next
+    for (const c of next.creatures) {
+      this.knownIds.add(c.id)
+      this.addCreature(c)
+    }
+    ;(window as unknown as Record<string, unknown>).__lab = { view: this, sim: next }
+  }
+
+  /** Beds, chests, and counters — small props that mark usable spots. */
+  private buildFixtures(): void {
+    for (const f of this.sim.fixtures) {
+      let mesh: THREE.Object3D
+      if (f.kind === 'bed') {
+        const bed = new THREE.Group()
+        const frame = mkBox(1.6, 0.28, 0.9, 0x6a4a2a)
+        frame.position.y = 0.28
+        const mattress = mkBox(1.5, 0.18, 0.82, 0xe8dcc0)
+        mattress.position.y = 0.5
+        const pillow = mkBox(0.4, 0.14, 0.6, 0xf4efe0)
+        pillow.position.set(-0.5, 0.62, 0)
+        bed.add(frame, mattress, pillow)
+        mesh = bed
+      } else if (f.kind === 'container') {
+        const chest = new THREE.Group()
+        const box = mkBox(0.9, 0.6, 0.7, 0x7a5a34)
+        box.position.y = 0.3
+        const lid = mkBox(0.94, 0.14, 0.74, 0x5c4126)
+        lid.position.y = 0.66
+        chest.add(box, lid)
+        mesh = chest
+      } else if (f.kind === 'counter') {
+        const counter = mkBox(2.2, 0.9, 0.7, 0x8a6440)
+        counter.position.y = 0.45
+        mesh = counter
+      } else if (f.kind === 'bench') {
+        const bench = new THREE.Group()
+        const seat = mkBox(1.8, 0.14, 0.5, 0x8a6440)
+        seat.position.y = 0.5
+        const legL = mkBox(0.14, 0.5, 0.45, 0x6a4a2a)
+        legL.position.set(-0.7, 0.25, 0)
+        const legR = mkBox(0.14, 0.5, 0.45, 0x6a4a2a)
+        legR.position.set(0.7, 0.25, 0)
+        bench.add(seat, legL, legR)
+        mesh = bench
+      } else {
+        continue // doors are part of the building shell already
+      }
+      mesh.position.set(f.x, 0, f.z)
+      this.scene.add(mesh)
+      this.towerMeshes.push(mesh)
+    }
+  }
+
   // ── towers: houses with real gabled roofs, chimneys, framed windows, doors
   //    with steps, and a wooden sign post beside the door. graveyard / den /
   //    school / farm / park get their own themed builds. ──
@@ -476,7 +675,12 @@ export class LabView {
     const group = new THREE.Group()
     const color = new THREE.Color(t.color)
 
-    if (t.id === 'graveyard') {
+    if (t.id.startsWith('house')) {
+      // a dwelling: smaller than a civic building, with a lit window and a
+      // path to the door so the homes quarter reads as a neighbourhood
+      this.buildHouse(group, t, color)
+      group.scale.setScalar(0.78)
+    } else if (t.id === 'graveyard') {
       this.buildGraveyard(group)
     } else if (t.id === 'den') {
       this.buildDen(group)
@@ -499,16 +703,33 @@ export class LabView {
     label.position.set(0, labelY, 0)
     group.add(label)
 
+    // a lamp by the door: lit when the place is open and someone is working,
+    // dim when it is shut, so the settlement's state reads from a distance
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.34, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0x3a3428, emissive: 0x000000 }),
+    )
+    lamp.position.set(1.9, 3.5, 3.4)
+    group.add(lamp)
+
+    // a small sign under the label saying whether there is anything to buy
+    const stateSign = makeTextSprite('', { size: 26, color: '#1c1a14', bg: '#f0e2bc', radius: 10 })
+    stateSign.position.set(0, labelY - 1, 0)
+    stateSign.visible = false
+    group.add(stateSign)
+
     group.position.set(t.x, 0, t.z)
     this.scene.add(group)
     this.towerMeshes.push(group)
+    this.towerStates.push({ tower: t, lamp, stateSign, shown: '' })
   }
 
   /** The standard tower: gabled house with overhanging roof, chimney, framed windows, door + step. */
   private buildHouse(group: THREE.Group, t: Tower, color: THREE.Color): void {
-    // the pharmacy reads as a clinic: white plaster walls under the same roof
-    const wallMat = mkMat(t.id === 'pharmacy' ? 0xf2f2ee : color.clone().multiplyScalar(0.8), { roughness: 0.95 })
-    const trimMat = mkMat(t.id === 'pharmacy' ? 0xb8e0d0 : color.clone().multiplyScalar(1.18), { roughness: 0.8 })
+    // the pharmacy / clinic read as medical: white plaster walls under the same roof
+    const medical = t.id === 'pharmacy' || t.id === 'clinic'
+    const wallMat = mkMat(medical ? 0xf2f2ee : color.clone().multiplyScalar(0.8), { roughness: 0.95 })
+    const trimMat = mkMat(medical ? (t.id === 'clinic' ? 0xe07070 : 0xb8e0d0) : color.clone().multiplyScalar(1.18), { roughness: 0.8 })
     const roofMat = mkMat(color.clone().multiplyScalar(1.3), { roughness: 0.55 })
     const ridgeMat = mkMat(color.clone().multiplyScalar(0.85), { roughness: 0.6 })
 
@@ -583,8 +804,20 @@ export class LabView {
         coin.position.set(3.7, 0.07 + i * 0.15, 2.8)
         group.add(coin)
       }
-    } else if (t.id === 'pharmacy') {
-      // clinic identity: red cross over the door + potted plant on white walls
+    } else if (t.id === 'pharmacy' || t.id === 'clinic') {
+      // medical identity: red cross over the door + potted plant on white walls
+      const crossV = mkBox(0.35, 1.4, 0.12, 0xc04040)
+      crossV.position.set(0, 4.2, 3.4)
+      group.add(crossV)
+      const crossH = mkBox(1.1, 0.35, 0.12, 0xc04040)
+      crossH.position.set(0, 4.2, 3.4)
+      group.add(crossH)
+      if (t.id === 'clinic') {
+        // canopy marking the treatment entrance
+        const canopy = mkBox(3.2, 0.12, 1.2, 0xe8f0f2)
+        canopy.position.set(0, 3.7, 3.9)
+        group.add(canopy)
+      }
       const crossMat = mkMat(0xd94a4a)
       const v = mkBox(0.3, 1.0, 0.06, crossMat)
       v.position.set(0, 2.7, 3.33)
@@ -1066,6 +1299,28 @@ export class LabView {
     emotionBadgeGroup.position.set(0, 5.2, 0)
     group.add(emotionBadgeGroup)
 
+    // what they do for a living, worn where you can see it
+    const roleMark = makeTextSprite('', { size: 30, color: '#1c1a14', bg: '#e8dcc0', radius: 14 })
+    roleMark.position.set(0, 3.5, 0)
+    roleMark.visible = false
+    group.add(roleMark)
+
+    // a coloured band shared by everyone in the same household
+    const householdBand = new THREE.Mesh(
+      new THREE.TorusGeometry(1.2, 0.12, 8, 20),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }),
+    )
+    householdBand.rotation.x = Math.PI / 2
+    householdBand.position.y = 0.85
+    householdBand.visible = false
+    group.add(householdBand)
+
+    // how they feel about the creature they are standing next to
+    const feelingMark = makeTextSprite('', { size: 34 })
+    feelingMark.position.set(0.9, 4.7, 0)
+    feelingMark.visible = false
+    group.add(feelingMark)
+
     group.position.set(c.pos.x, GROUND_Y, c.pos.z)
     this.scene.add(group)
 
@@ -1090,11 +1345,149 @@ export class LabView {
       hair,
       emotionBadge,
       emotionBadgeGroup,
+      roleMark,
+      roleShown: null,
+      householdBand,
+      householdShown: null,
+      feelingMark,
+      feelingShown: null,
+      baseScale: 1,
       phase: Math.random() * Math.PI * 2,
       targetX: c.pos.x,
       targetZ: c.pos.z,
       swing: 0,
     })
+  }
+
+  private socialTick = 0
+  private hemi!: THREE.HemisphereLight
+  private sun!: THREE.DirectionalLight
+
+  /**
+   * The sky follows the settlement's own clock: warm and high at midday, low
+   * and amber at dusk, cold and dim overnight. The shops close as the light
+   * goes, so the hour is something you feel rather than read off a panel.
+   */
+  private syncDaylight(): void {
+    const t = timeOfDay(this.sim.time)
+    // The settlement's own clock: 0 is the small hours, 0.5 is midday, and the
+    // shops keep their hours inside that. A new world opens at noon.
+    const daylight = 0.5 - Math.cos(t * Math.PI * 2) * 0.5
+    const dawn = Math.max(0, 1 - Math.abs(t - 0.16) * 7) // amber band at sunrise
+    const dusk = Math.max(0, 1 - Math.abs(t - 0.84) * 7) // and again at sunset
+
+    // Night is moonlit, not pitch black: the player still has to be able to
+    // watch the settlement, and a town you cannot see is not atmospheric.
+    const sky = new THREE.Color().setHSL(
+      0.6 - daylight * 0.47 + (dusk + dawn) * 0.02,
+      0.3 + (dusk + dawn) * 0.3,
+      0.22 + daylight * 0.46,
+    )
+    ;(this.scene.background as THREE.Color).lerp(sky, 0.05)
+
+    this.sun.intensity = 0.45 + daylight * 1.05
+    this.sun.color.setHSL(
+      daylight > 0.25 ? 0.11 - dusk * 0.06 : 0.6, // moonlight is cold
+      0.2 + dusk * 0.45,
+      0.6 + daylight * 0.22,
+    )
+    // the sun tracks across the sky rather than hanging in one corner
+    const angle = t * Math.PI * 2 - Math.PI * 0.5
+    this.sun.position.set(Math.cos(angle) * 40, 16 + daylight * 42, Math.sin(angle) * 25)
+    this.hemi.intensity = 0.5 + daylight * 0.6
+    this.hemi.color.setHSL(daylight > 0.25 ? 0.12 : 0.6, 0.25, 0.75)
+  }
+  private towerStates: {
+    tower: Tower
+    lamp: THREE.Mesh
+    stateSign: THREE.Sprite
+    shown: string
+  }[] = []
+
+  /**
+   * Buildings say what state they are in: lit and stocked, lit but empty, or
+   * dark because the door is shut at this hour.
+   */
+  private syncTowerStates(): void {
+    for (const entry of this.towerStates) {
+      const id = entry.tower.id
+      const open = isOpen(this.sim.institutions, id, this.sim.time)
+      const goodId = TOWER_GOODS[id]
+      const stock = goodId ? (this.sim.economy.goods[goodId]?.stock ?? 0) : null
+      const job = producerOf(goodId ?? '')
+      const staffed = job ? this.sim.jobs.holders[job.id] !== undefined : true
+
+      const state = !open ? 'closed' : stock === 0 ? 'empty' : !staffed ? 'unstaffed' : 'open'
+      if (state === entry.shown) continue
+      entry.shown = state
+
+      const lampMat = entry.lamp.material as THREE.MeshStandardMaterial
+      const lit = state === 'open' || state === 'unstaffed'
+      lampMat.emissive.setHex(lit ? 0xffcf7a : 0x000000)
+      lampMat.emissiveIntensity = lit ? 1.4 : 0
+      lampMat.color.setHex(lit ? 0xffe6b0 : 0x3a3428)
+
+      const caption = state === 'closed' ? 'closed'
+        : state === 'empty' ? 'sold out'
+          : state === 'unstaffed' ? 'no one here'
+            : ''
+      entry.stateSign.visible = caption.length > 0 && this.showLabels
+      if (caption) {
+        replaceSpriteText(entry.stateSign, caption, { size: 26, color: '#1c1a14', bg: '#f0e2bc', radius: 10 })
+      }
+    }
+  }
+
+  /**
+   * Make social state legible without opening a panel: what someone does for
+   * a living, who they live with, how old they are, and how they feel about
+   * whoever is standing next to them.
+   */
+  private syncSocialMarks(rig: CreatureRig): void {
+    const c = rig.creature
+
+    // age and genes decide how big they are; a child is visibly a child
+    const stageScale = c.stage === 'child' ? 0.6 : c.stage === 'adolescent' ? 0.82 : c.stage === 'elder' ? 0.94 : 1
+    const wanted = bodyScale(c.genome) * stageScale
+    if (Math.abs(rig.baseScale - wanted) > 0.01) {
+      rig.baseScale = wanted
+      rig.group.scale.setScalar(wanted)
+    }
+    // elders stoop a little; it reads instantly at a distance
+    rig.group.rotation.x = c.stage === 'elder' ? 0.1 : 0
+
+    // the tool of the trade, only while they hold the role
+    const role = c.alive ? c.job : null
+    if (role !== rig.roleShown) {
+      rig.roleShown = role
+      if (role) {
+        rig.roleMark.visible = this.showLabels
+        replaceSpriteText(rig.roleMark, ROLE_MARKS[role] ?? '•', {
+          size: 30, color: '#1c1a14', bg: '#e8dcc0', radius: 14,
+        })
+      } else {
+        rig.roleMark.visible = false
+      }
+    }
+
+    // the household band: everyone under one roof wears the same colour
+    const household = c.alive ? c.householdId : null
+    if (household !== rig.householdShown) {
+      rig.householdShown = household
+      rig.householdBand.visible = household != null
+      if (household != null) {
+        const mat = rig.householdBand.material as THREE.MeshStandardMaterial
+        mat.color.setStyle(`hsl(${(household * 67) % 360} 70% 60%)`)
+      }
+    }
+
+    // and how they feel about whoever is beside them right now
+    const feeling = c.alive ? strongestFeelingNearby(this.sim, c) : null
+    if (feeling !== rig.feelingShown) {
+      rig.feelingShown = feeling
+      rig.feelingMark.visible = !!feeling && this.showLabels
+      if (feeling) replaceSpriteText(rig.feelingMark, feeling, { size: 34 })
+    }
   }
 
   /** Simple genetic hair: spiky cones, a tuft, curls, long strands, buzz, or bald. */
@@ -1478,6 +1871,7 @@ export class LabView {
   }
 
   private spawnParticle(mesh: THREE.Object3D, x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number): void {
+    if (!this.showParticles) return
     mesh.position.set(x, y, z)
     this.scene.add(mesh)
     this.particles.push({ mesh: mesh as THREE.Mesh | THREE.Sprite, life, max: life, vy, vx, vz })
@@ -1521,19 +1915,25 @@ export class LabView {
     this.syncGraves()
     this.syncRigs(dt)
     this.syncPlayer(dt)
+    this.syncTowerStates()
+    this.syncDaylight()
     this.updateParticles(dt)
     this.updateCamera(dt)
 
     this.renderer.render(this.scene, this.camera)
+    recordFrameTime(this.sim.lod, (performance.now() - now))
   }
 
   private syncRigs(dt: number): void {
     const t = performance.now() / 1000
+    // social state changes slowly; reading it every frame would be waste
+    const readSocial = this.socialTick++ % 12 === 0
     for (const rig of this.rigs) {
       const c = rig.creature
       const emo = deriveEmotion(c.chem, c.genome)
       const body = rig.body.material as THREE.MeshStandardMaterial
       body.color.lerp(new THREE.Color(emo.color), 1 - Math.pow(0.001, dt))
+      if (readSocial) this.syncSocialMarks(rig)
 
       // position — slower follow while hauling a corpse
       rig.targetX = c.pos.x
@@ -1893,14 +2293,6 @@ export class LabView {
     const ground = new THREE.Vector3()
     const hit = this.raycaster.ray.intersectPlane(this.groundPlane, ground)
     if (hit) this.callbacks.onTapWorld(ground.x, ground.z)
-  }
-
-  setPaused(p: boolean): void {
-    this.paused = p
-  }
-
-  setSpeed(s: number): void {
-    this.speed = s
   }
 
   resetCamera(): void {

@@ -651,14 +651,14 @@ button { font: inherit; cursor: pointer; }
 
 .player-inv {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  max-width: min(92vw, 480px);
+  max-width: min(92vw, 620px);
   padding: 6px 8px;
   border: 1px solid var(--amber-dim);
   border-radius: 10px;
   background: rgba(28, 26, 20, 0.9);
-  overflow-x: auto;
 }
 
 .player-wallet {
@@ -947,5 +947,424 @@ button { font: inherit; cursor: pointer; }
   margin-top: 10px;
 }
 .vocab-chip b {
+  color: var(--amber);
+}
+
+/* ── Luma Haven: talk / inspector / settings ── */
+.talk, .inspector, .settings {
+  position: absolute;
+  z-index: 12;
+  left: 12px;
+  top: 64px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  color: var(--ink);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(20, 16, 10, 0.35);
+}
+.inspector { left: auto; right: 12px; width: min(420px, calc(100vw - 24px)); }
+.settings { top: auto; bottom: 88px; width: min(340px, calc(100vw - 24px)); }
+.talk-head, .inspector-head, .settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.talk-head h2, .inspector-head h2, .settings-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.talk-close, .inspector-close, .settings-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 40px;
+  min-height: 40px;
+}
+.talk-hint, .settings-hint, .inspector-empty {
+  margin: 0 0 8px;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+.talk-row { display: flex; gap: 8px; }
+.talk-input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px;
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+.talk-reply {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-radius: 10px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+.inspector-mood { margin: 0 0 8px; opacity: 0.85; font-size: 0.9rem; }
+.inspector-reason {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.inspector-scores { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.inspector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.inspector-grid h3, .inspector-mem h3, .inspector-talk h3 {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.inspector-bond, .inspector-mem div, .inspector-talk div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.inspector-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+  opacity: 0.85;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+.settings-row input[type="range"] { flex: 1; }
+.settings-row .chip.active {
+  background: var(--amber);
+  color: #1c1a14;
+}
+
+/* ── society panel, perf overlay, save slots ── */
+.society {
+  position: absolute;
+  z-index: 12;
+  right: 12px;
+  top: 64px;
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(72vh, 560px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  color: var(--ink);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(20, 16, 10, 0.35);
+}
+.society-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.society-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.society-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 40px;
+  min-height: 40px;
+}
+.society h3 {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+.society-line {
+  margin: 0 0 4px;
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+.society-jobs,
+.society-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.society-overheard div,
+.society-chronicle div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.society-empty {
+  font-size: 0.82rem;
+  opacity: 0.6;
+}
+.chip-dim {
+  opacity: 0.55;
+}
+.inspector-family div,
+.inspector-beliefs div,
+.inspector-promises div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.inspector-habits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.perf {
+  position: absolute;
+  z-index: 14;
+  left: 12px;
+  bottom: 96px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(16, 14, 10, 0.78);
+  color: #e8dcc0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.save-note {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 110px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(16, 14, 10, 0.85);
+  color: #e8dcc0;
+  font-size: 0.85rem;
+}
+.settings-saves {
+  flex-wrap: wrap;
+}
+/* the settings panel is taller than its box: make that obvious */
+.settings {
+  scrollbar-gutter: stable;
+}
+.settings::after {
+  content: '';
+  display: block;
+  height: 4px;
+}
+.slot-pair {
+  display: inline-flex;
+  gap: 4px;
+}
+.fixture-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(224, 180, 106, 0.3);
+}
+.fixture-label {
+  font-size: 0.72rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── story feed ── */
+.society-stories .story-line,
+.society-since div,
+.society-shortages div,
+.inspector-life div,
+.inspector-debts div {
+  font-size: 0.82rem;
+  margin-bottom: 5px;
+  line-height: 1.35;
+  opacity: 0.92;
+}
+.story-because {
+  opacity: 0.62;
+  font-style: italic;
+}
+.society-since {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.society-shortages div {
+  color: #e8a06a;
+}
+
+/* ── controls card ── */
+.help {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  padding: 16px 18px 18px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  color: var(--ink);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 16px 48px rgba(20, 16, 10, 0.5);
+}
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.help-head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.help-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+.help-intro {
+  margin: 0 0 12px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+.help-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.88rem;
+}
+.help-list dt {
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--amber);
+}
+.help-list dd {
+  margin: 0;
+  opacity: 0.9;
+}
+.player-inv-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.player-inv-mini {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px;
+  min-width: 26px;
+  min-height: 26px;
+  opacity: 0.75;
+}
+.player-inv-mini:hover {
+  opacity: 1;
+}
+.settings-section {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+.settings-section:first-of-type {
+  margin-top: 4px;
+}
+
+/* `.chip` is the floating creature card; the same word is used for the small
+   inline controls inside panels. Inside a panel they must sit in the flow. */
+.talk .chip,
+.inspector .chip,
+.settings .chip,
+.society .chip,
+.teach .chip,
+.help .chip {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings .chip[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Panels sit above the world controls, so their close buttons are never
+   sitting underneath the pointer-lock button in the corner. */
+.talk,
+.inspector,
+.settings,
+.society {
+  z-index: 17;
+}
+.perf-split {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(232, 220, 192, 0.25);
+  opacity: 0.85;
+}
+.talk-voice {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+.talk-voice b {
+  color: var(--amber);
+}
+.help-keys {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+.help-keys b {
   color: var(--amber);
 }

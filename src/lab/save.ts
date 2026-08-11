@@ -1,7 +1,8 @@
 /**
- * save — deep-state persistence for the test lab.
- * No 70KB cap anymore: brains, memories, vendettas, bonds all persist.
- * version 3 rejects old observer-city saves cleanly.
+ * save — deep-state persistence for Luma Haven.
+ * version 5 adds social graphs, psyche, households, illness, dialogue snippets.
+ * Missing optional fields receive deterministic defaults for graceful recovery.
+ * v4 saves still load (fields defaulted).
  */
 import { createSim, type Sim } from './sim'
 import { createCreature } from './creature'
@@ -15,11 +16,25 @@ import { createBrain } from './brain'
 import type { ActionName } from './mind'
 import type { Genome } from './genetics'
 import { mulberry32 } from './rng'
+import { createSocialGraph, type SocialGraph } from './socialbond'
+import { createPsyche, type Psyche } from './psyche'
+import type { HavenSociety } from './household'
+import { createSociety } from './household'
+import type { GameSettings } from './settings'
+import { DEFAULT_SETTINGS } from './settings'
+import { createBeliefs, createHabits, type BeliefStore, type HabitStore } from './beliefs'
+import { createChatter, type ChatterState } from './chatter'
+import { createCulture, type Culture } from './norms'
+import { createJobBoard, type JobBoard } from './jobs'
+import { createLedger, migrateEconomy, type Ledger } from './economy'
+import { createStoryLog, type StoryLog } from './story'
+import { lifeStageFor } from './lifecycle'
+import { completeGenome } from './genetics'
 
-export const SAVE_VERSION = 4
+export const SAVE_VERSION = 6
 
 export interface LabSave {
-  version: 4
+  version: 4 | 5 | 6
   seed: number
   time: number
   nextId: number
@@ -28,6 +43,16 @@ export interface LabSave {
   graves: { creatureId: number; name: string; x: number; z: number; tick: number }[]
   economy: Economy
   player: SavedPlayer
+  society?: HavenSociety
+  settings?: Partial<GameSettings>
+  chatter?: ChatterState
+  culture?: Culture
+  jobs?: JobBoard
+  ledger?: Ledger
+  /** container contents keyed by fixture id (the furniture itself is rebuilt) */
+  containers?: Record<string, { items: Record<string, number>; owners?: Record<string, number> }>
+  /** the notable moments and why they happened */
+  stories?: StoryLog
 }
 
 interface SavedCreature {
@@ -66,6 +91,17 @@ interface SavedCreature {
   inventory: { items: Record<string, number> }
   vengeance: { grudges: Record<string, { targetId: number; intensity: number; since: number }> }
   want: { type: string; progress: number; age: number; fulfilled: boolean }
+  social?: SocialGraph
+  psyche?: Psyche
+  householdId?: number | null
+  parentIds?: number[]
+  recentDialogue?: string[]
+  illness?: number
+  injury?: number
+  beliefs?: BeliefStore
+  habits?: HabitStore
+  job?: string | null
+  lastTaught?: number
 }
 
 export interface SavedPlayer {
@@ -115,13 +151,37 @@ export function saveSim(sim: Sim): LabSave {
     emotions: { ...c.emotions },
     reputation: JSON.parse(JSON.stringify(c.reputation)),
     brain: c.brain.serialize(),
-    vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })),
+    vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({
+      concept,
+      word: entry.word,
+      strength: entry.strength,
+    })),
     inventory: { items: { ...c.inventory.items } },
-    vengeance: { grudges: Object.fromEntries(Object.entries(c.vengeance.grudges).map(([k, g]) => [k, { ...g }])) },
-    want: { type: c.want.type, progress: c.want.progress, age: c.want.age, fulfilled: c.want.fulfilled },
+    vengeance: {
+      grudges: Object.fromEntries(
+        Object.entries(c.vengeance.grudges).map(([k, g]) => [k, { ...g }]),
+      ),
+    },
+    want: {
+      type: c.want.type,
+      progress: c.want.progress,
+      age: c.want.age,
+      fulfilled: c.want.fulfilled,
+    },
+    social: JSON.parse(JSON.stringify(c.social)),
+    psyche: JSON.parse(JSON.stringify(c.psyche)),
+    householdId: c.householdId,
+    parentIds: [...c.parentIds],
+    recentDialogue: [...c.recentDialogue],
+    illness: c.illness,
+    injury: c.injury,
+    beliefs: JSON.parse(JSON.stringify(c.beliefs)),
+    habits: { ...c.habits },
+    job: c.job,
+    lastTaught: c.lastTaught,
   }))
   return {
-    version: 4,
+    version: 6,
     seed: sim.seed,
     time: sim.time,
     nextId: sim.nextId,
@@ -140,20 +200,62 @@ export function saveSim(sim: Sim): LabSave {
       bondWith: [...sim.player.bondWith],
       name: sim.player.name,
       hunger: sim.player.hunger,
-      language: { vocab: Array.from(sim.player.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })) },
+      language: {
+        vocab: Array.from(sim.player.language.vocab.entries()).map(([concept, entry]) => ({
+          concept,
+          word: entry.word,
+          strength: entry.strength,
+        })),
+      },
     },
+    society: JSON.parse(JSON.stringify(sim.society)),
+    settings: { ...sim.settings },
+    chatter: JSON.parse(JSON.stringify(sim.chatter)),
+    culture: JSON.parse(JSON.stringify(sim.culture)),
+    jobs: JSON.parse(JSON.stringify(sim.jobs)),
+    ledger: JSON.parse(JSON.stringify(sim.ledger)),
+    stories: JSON.parse(JSON.stringify(sim.stories)),
+    containers: Object.fromEntries(
+      sim.fixtures
+        .filter((f) => f.storage && Object.keys(f.storage.items).length > 0)
+        .map((f) => [f.id, JSON.parse(JSON.stringify(f.storage))]),
+    ),
   }
 }
 
+/** Oldest save version this build can still read. */
+export const MIN_SAVE_VERSION = 4
+
 export function loadSim(data: LabSave): Sim {
-  if (data.version !== SAVE_VERSION) {
-    throw new Error(`save version ${data.version} not supported (need ${SAVE_VERSION}) — old saves were rebuilt`)
+  if (data.version < MIN_SAVE_VERSION || data.version > SAVE_VERSION) {
+    throw new Error(
+      `save version ${data.version} not supported (need ${MIN_SAVE_VERSION}–${SAVE_VERSION}) — old saves were rebuilt`,
+    )
   }
   const sim = createSim(data.seed)
   sim.time = data.time
   sim.nextId = data.nextId
+  if (data.settings) sim.settings = { ...DEFAULT_SETTINGS, ...data.settings }
+  sim.society = data.society ? JSON.parse(JSON.stringify(data.society)) : createSociety()
+  sim.chatter = data.chatter ? JSON.parse(JSON.stringify(data.chatter)) : createChatter()
+  sim.culture = data.culture
+    ? { ...createCulture(), ...JSON.parse(JSON.stringify(data.culture)) }
+    : createCulture()
+  sim.jobs = data.jobs ? JSON.parse(JSON.stringify(data.jobs)) : createJobBoard()
+  sim.ledger = data.ledger ? JSON.parse(JSON.stringify(data.ledger)) : createLedger()
+  sim.stories = data.stories ? JSON.parse(JSON.stringify(data.stories)) : createStoryLog()
+  if (data.containers) {
+    for (const f of sim.fixtures) {
+      const saved = data.containers[f.id]
+      if (f.storage && saved) {
+        f.storage.items = { ...saved.items } as typeof f.storage.items
+        f.storage.owners = { ...saved.owners } as typeof f.storage.owners
+      }
+    }
+  }
+
   sim.creatures = data.creatures.map((sc) => {
-    const c = createCreature(sc.id, sc.name, sc.genome, sc.pos.x, sc.pos.z)
+    const c = createCreature(sc.id, sc.name, completeGenome(sc.genome), sc.pos.x, sc.pos.z)
     c.chem = { ...createChem(), ...JSON.parse(JSON.stringify(sc.chem)) }
     c.memory = { ...createMemory(), ...JSON.parse(JSON.stringify(sc.memory)) }
     c.facing = sc.facing
@@ -198,14 +300,33 @@ export function loadSim(data: LabSave): Sim {
       }
     }
     if (sc.want) {
-      c.want = { type: sc.want.type as never, progress: sc.want.progress, age: sc.want.age, fulfilled: sc.want.fulfilled }
+      c.want = {
+        type: sc.want.type as never,
+        progress: sc.want.progress,
+        age: sc.want.age,
+        fulfilled: sc.want.fulfilled,
+      }
     }
+    c.social = sc.social ? JSON.parse(JSON.stringify(sc.social)) : createSocialGraph()
+    c.psyche = sc.psyche ? JSON.parse(JSON.stringify(sc.psyche)) : createPsyche(c)
+    c.householdId = sc.householdId ?? null
+    c.parentIds = sc.parentIds ? [...sc.parentIds] : []
+    c.recentDialogue = sc.recentDialogue ? [...sc.recentDialogue] : []
+    c.illness = sc.illness ?? 0
+    c.injury = sc.injury ?? 0
+    c.beliefs = sc.beliefs ? JSON.parse(JSON.stringify(sc.beliefs)) : createBeliefs()
+    c.habits = sc.habits ? { ...sc.habits } : createHabits()
+    c.job = sc.job ?? null
+    c.lastTaught = sc.lastTaught ?? 0
+    c.stage = lifeStageFor(c.age)
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)
   sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
   sim.graves = (data.graves ?? []).map((g) => ({ ...g }))
-  sim.economy = data.economy ? JSON.parse(JSON.stringify(data.economy)) : createEconomy()
+  sim.economy = data.economy
+    ? migrateEconomy(JSON.parse(JSON.stringify(data.economy)))
+    : createEconomy()
   if (data.player) {
     const sp = data.player
     sim.player.pos = { ...sp.pos }
