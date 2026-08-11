@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { TOWERS, findTower, TOWER_IDS, WORLD_SIZE, type TowerId } from './world'
 
 describe('world — simple labeled towers', () => {
-  it('has the labeled service towers including the clinic', () => {
+  it('has the labeled service buildings plus individual houses', () => {
     expect(TOWER_IDS).toEqual([
       'food', 'bank', 'pharmacy', 'clinic', 'homes', 'tools',
       'tavern', 'play', 'work', 'den', 'school', 'graveyard', 'farm', 'park',
+      'house1', 'house2', 'house3', 'house4',
     ])
-    expect(TOWERS.length).toBe(14)
+    expect(TOWERS.length).toBe(18)
     expect(findTower('clinic')?.label).toBe('clinic')
+    expect(findTower('house1')?.icon).toBe('🏡')
   })
 
   it('every tower has a label, icon, color, position and interaction radius', () => {

@@ -29,6 +29,7 @@ import { saveSim, loadSim } from './lab/save'
 import { applySocialEvent } from './lab/socialbond'
 import { ensureCoupleHousehold, adoptChild } from './lab/household'
 import { transmitCulture } from './lab/norms'
+import { fixtureAt } from './lab/interact'
 import { saveWorldBlob, loadWorldBlob, loadWorldBackup, hasWorldSlot } from './lab/creature-storage'
 
 import './lab.css'
@@ -728,6 +729,17 @@ export default function App() {
     setTick((t) => t + 1)
   }, [])
 
+  const useFixture = useCallback((action: 'rest' | 'toggle' | 'take' | 'store'): void => {
+    const s = simRef.current
+    if (!s) return
+    const note = s.playerUseFixture(action)
+    if (note) {
+      setSaveNote(note)
+      window.setTimeout(() => setSaveNote(null), 2000)
+    }
+    setTick((t) => t + 1)
+  }, [])
+
   const applyJoystick = useCallback((x: number, y: number): void => {
     if (viewRef.current) viewRef.current.joystick = { x, y }
   }, [])
@@ -830,6 +842,11 @@ export default function App() {
       }
     }
   }
+
+  // what furniture is within arm's reach right now (contextual prompts)
+  const nearFixture = sim && playerC?.alive
+    ? fixtureAt(sim.fixtures, playerC.pos.x, playerC.pos.z)
+    : undefined
 
   const fightPlayer = useCallback((): void => {
     const s = simRef.current
@@ -1383,6 +1400,33 @@ export default function App() {
               >
                 ⚔️
               </button>
+            )}
+            {nearFixture && (
+              <span className="fixture-actions" data-fixture-actions>
+                <span className="fixture-label" data-fixture-kind={nearFixture.kind}>
+                  {nearFixture.kind}
+                </span>
+                {nearFixture.kind === 'bed' && (
+                  <button type="button" className="player-inv-item" data-fixture-rest onClick={() => useFixture('rest')}>
+                    😴
+                  </button>
+                )}
+                {nearFixture.kind === 'door' && (
+                  <button type="button" className="player-inv-item" data-fixture-door onClick={() => useFixture('toggle')}>
+                    🚪
+                  </button>
+                )}
+                {nearFixture.kind === 'container' && (
+                  <>
+                    <button type="button" className="player-inv-item" data-fixture-take onClick={() => useFixture('take')}>
+                      🫳
+                    </button>
+                    <button type="button" className="player-inv-item" data-fixture-store onClick={() => useFixture('store')}>
+                      📦
+                    </button>
+                  </>
+                )}
+              </span>
             )}
           </div>
         </section>

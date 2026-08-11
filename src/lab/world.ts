@@ -11,6 +11,8 @@ export type TowerId =
   | 'food' | 'bank' | 'pharmacy' | 'clinic' | 'homes' | 'tools'
   | 'tavern' | 'play' | 'work' | 'den' | 'school' | 'graveyard'
   | 'farm' | 'park'
+  // individual houses in the homes quarter — households live in these
+  | 'house1' | 'house2' | 'house3' | 'house4'
 
 export interface Tower {
   id: TowerId
@@ -25,7 +27,11 @@ export interface Tower {
 export const TOWER_IDS: TowerId[] = [
   'food', 'bank', 'pharmacy', 'clinic', 'homes', 'tools',
   'tavern', 'play', 'work', 'den', 'school', 'graveyard', 'farm', 'park',
+  'house1', 'house2', 'house3', 'house4',
 ]
+
+/** The individual dwellings a household can claim. */
+export const HOUSE_IDS: TowerId[] = ['house1', 'house2', 'house3', 'house4']
 
 /**
  * Pure data registry shared by sim, renderer, and QA.
@@ -53,6 +59,12 @@ export const TOWERS: Tower[] = [
   { id: 'park', label: 'park', icon: '🌳', color: '#4fae8a', x: 52, z: 0, radius: 5 },
   // clinic — treatment beyond pharmacy self-serve medicine
   { id: 'clinic', label: 'clinic', icon: '✚', color: '#e8f0f2', x: 52, z: -36, radius: 5 },
+  // the homes quarter: separate dwellings clustered around the commons hall,
+  // close enough to be a neighbourhood, far enough to be someone's own place
+  { id: 'house1', label: 'house', icon: '🏡', color: '#8f7bb5', x: -50, z: -16, radius: 4 },
+  { id: 'house2', label: 'house', icon: '🏡', color: '#a07bb5', x: -52, z: 14, radius: 4 },
+  { id: 'house3', label: 'house', icon: '🏡', color: '#8f8bc9', x: -30, z: -16, radius: 4 },
+  { id: 'house4', label: 'house', icon: '🏡', color: '#9a8bd4', x: -30, z: 16, radius: 4 },
 ]
 
 export function findTower(id: TowerId): Tower | undefined {

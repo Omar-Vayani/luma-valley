@@ -3,7 +3,7 @@
  * Homes are slots around the homes tower; partners + children form a household.
  */
 import type { Creature } from './creature'
-import { findTower } from './world'
+import { findTower, HOUSE_IDS, type TowerId } from './world'
 import { clamp01 } from './util'
 
 export interface Household {
@@ -28,8 +28,13 @@ export function createSociety(): HavenSociety {
 const HOME_SLOTS = 8
 const SLOT_RADIUS = 10
 
-/** World position for a home slot around the homes tower. */
+/**
+ * World position for a home slot. The first households get their own house in
+ * the homes quarter; later ones share lodgings around the commons hall.
+ */
 export function homeSlotPos(slot: number): { x: number; z: number } {
+  const house = HOUSE_IDS[slot] ? findTower(HOUSE_IDS[slot]) : undefined
+  if (house) return { x: house.x, z: house.z }
   const homes = findTower('homes')
   const cx = homes?.x ?? -36
   const cz = homes?.z ?? 0
@@ -38,6 +43,11 @@ export function homeSlotPos(slot: number): { x: number; z: number } {
     x: cx + Math.cos(angle) * SLOT_RADIUS,
     z: cz + Math.sin(angle) * SLOT_RADIUS,
   }
+}
+
+/** The dwelling this household calls home, if it claimed one. */
+export function homeTowerOf(h: Household): TowerId | null {
+  return HOUSE_IDS[h.homeSlot] ?? null
 }
 
 export function householdOf(society: HavenSociety, creatureId: number): Household | undefined {

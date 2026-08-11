@@ -466,6 +466,8 @@ export class LabView {
 
     // towers
     for (const t of TOWERS) this.buildTower(t)
+    // furniture the player and creatures actually use
+    this.buildFixtures()
 
     // creatures
     for (const c of sim.creatures) {
@@ -540,6 +542,51 @@ export class LabView {
     ;(window as unknown as Record<string, unknown>).__lab = { view: this, sim: next }
   }
 
+  /** Beds, chests, and counters — small props that mark usable spots. */
+  private buildFixtures(): void {
+    for (const f of this.sim.fixtures) {
+      let mesh: THREE.Object3D
+      if (f.kind === 'bed') {
+        const bed = new THREE.Group()
+        const frame = mkBox(1.6, 0.28, 0.9, 0x6a4a2a)
+        frame.position.y = 0.28
+        const mattress = mkBox(1.5, 0.18, 0.82, 0xe8dcc0)
+        mattress.position.y = 0.5
+        const pillow = mkBox(0.4, 0.14, 0.6, 0xf4efe0)
+        pillow.position.set(-0.5, 0.62, 0)
+        bed.add(frame, mattress, pillow)
+        mesh = bed
+      } else if (f.kind === 'container') {
+        const chest = new THREE.Group()
+        const box = mkBox(0.9, 0.6, 0.7, 0x7a5a34)
+        box.position.y = 0.3
+        const lid = mkBox(0.94, 0.14, 0.74, 0x5c4126)
+        lid.position.y = 0.66
+        chest.add(box, lid)
+        mesh = chest
+      } else if (f.kind === 'counter') {
+        const counter = mkBox(2.2, 0.9, 0.7, 0x8a6440)
+        counter.position.y = 0.45
+        mesh = counter
+      } else if (f.kind === 'bench') {
+        const bench = new THREE.Group()
+        const seat = mkBox(1.8, 0.14, 0.5, 0x8a6440)
+        seat.position.y = 0.5
+        const legL = mkBox(0.14, 0.5, 0.45, 0x6a4a2a)
+        legL.position.set(-0.7, 0.25, 0)
+        const legR = mkBox(0.14, 0.5, 0.45, 0x6a4a2a)
+        legR.position.set(0.7, 0.25, 0)
+        bench.add(seat, legL, legR)
+        mesh = bench
+      } else {
+        continue // doors are part of the building shell already
+      }
+      mesh.position.set(f.x, 0, f.z)
+      this.scene.add(mesh)
+      this.towerMeshes.push(mesh)
+    }
+  }
+
   // ── towers: houses with real gabled roofs, chimneys, framed windows, doors
   //    with steps, and a wooden sign post beside the door. graveyard / den /
   //    school / farm / park get their own themed builds. ──
@@ -547,7 +594,12 @@ export class LabView {
     const group = new THREE.Group()
     const color = new THREE.Color(t.color)
 
-    if (t.id === 'graveyard') {
+    if (t.id.startsWith('house')) {
+      // a dwelling: smaller than a civic building, with a lit window and a
+      // path to the door so the homes quarter reads as a neighbourhood
+      this.buildHouse(group, t, color)
+      group.scale.setScalar(0.78)
+    } else if (t.id === 'graveyard') {
       this.buildGraveyard(group)
     } else if (t.id === 'den') {
       this.buildDen(group)

@@ -1176,3 +1176,17 @@ button { font: inherit; cursor: pointer; }
   display: inline-flex;
   gap: 4px;
 }
+.fixture-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(224, 180, 106, 0.3);
+}
+.fixture-label {
+  font-size: 0.72rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

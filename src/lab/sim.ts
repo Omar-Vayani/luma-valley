@@ -30,7 +30,7 @@ import { DEFAULT_SETTINGS, type GameSettings } from './settings'
 import { createLodState, pickAiBatch, markDecided, bandFor, chemStride, type LodState } from './lod'
 import {
   createSociety, ensureCoupleHousehold, adoptChild, tickHouseholdCare, pruneHouseholds,
-  householdOf, type HavenSociety,
+  householdOf, homeTowerOf, type HavenSociety,
 } from './household'
 import {
   applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge, romanticInterest,
@@ -56,6 +56,9 @@ import { appraise } from './emotions'
 import { applyCrowding, applyPurpose, applyComfort } from './chem'
 import { courtStep, partnershipStep, reconcileStep } from './courtship'
 import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './genetics'
+import {
+  createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, type Fixture,
+} from './interact'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
@@ -139,6 +142,10 @@ export interface Sim {
   ledger: Ledger
   /** natural-language lines the player overheard recently */
   overheard: string[]
+  /** beds, doors, counters, and containers the world is furnished with */
+  fixtures: Fixture[]
+  /** Use the nearest fixture as the player: sleep, open, take, or store. */
+  playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
 }
 
 /** Where each institutional role is performed. */
@@ -188,6 +195,47 @@ export function createSim(seed = 1): Sim {
     jobs: createJobBoard(),
     ledger: createLedger(),
     overheard: [],
+    fixtures: createFixtures(),
+    playerUseFixture(action, itemId): string | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      const actor = { pos: p.pos, inventory: p.inventory, id: 0 }
+      const f = fixtureAt(sim.fixtures, p.pos.x, p.pos.z)
+      if (!f) return null
+      if (action === 'rest') {
+        const res = useBed(actor, f)
+        if (!res.ok) return null
+        p.health = clamp01(p.health + 0.15)
+        p.hunger = clamp01(p.hunger - 0.02)
+        return 'you rest for a while'
+      }
+      if (action === 'toggle') {
+        const res = toggleDoor(actor, f)
+        return res.ok ? `door ${res.effect}` : null
+      }
+      if (action === 'store' && itemId) {
+        const res = storeItem(actor, f, itemId)
+        return res.ok ? res.effect : null
+      }
+      if (action === 'take') {
+        const target = itemId ?? (Object.keys(f.storage?.items ?? {})[0] as ItemId | undefined)
+        if (!target) return null
+        const res = takeItem(actor, f, target)
+        if (!res.ok) return null
+        if (res.stolen) {
+          // taking what someone else stored is noticed by anyone watching
+          for (const c of sim.creatures) {
+            if (!c.alive) continue
+            if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > OBSERVE_RANGE) continue
+            observeEvent(c, 'steal', 0)
+            applySocialEvent(c.social, 0, 'steal', 1)
+          }
+          witnessedAct(sim.culture, 'property', true, 1)
+        }
+        return res.effect
+      }
+      return null
+    },
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
       const alive = sim.creatures.filter((c) => c.alive).length
       if (alive >= sim.settings.populationCap && alive > 0) {
@@ -1252,13 +1300,21 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'sleep': {
-      if (at?.id === 'homes' || c.chem.energy < 0.2) {
+      // A creature with a household sleeps in its OWN house; everyone else
+      // uses the common lodgings. Sleeping in your own bed is more restful.
+      const ownHome = homeTowerFor(sim, c)
+      const atOwnHome = ownHome !== null && at?.id === ownHome
+      if (atOwnHome || at?.id === 'homes' || c.chem.energy < 0.2) {
         c.sleeping = true
         c.action = 'sleep'
-        c.chem.energy = clamp01(c.chem.energy + 0.35)
+        c.chem.energy = clamp01(c.chem.energy + (atOwnHome ? 0.4 : 0.35))
+        if (atOwnHome) {
+          applyComfort(c.chem, 0.05)
+          c.chem.privacy = clamp01(c.chem.privacy + 0.03)
+        }
         return
       }
-      goTo(sim, c, 'homes')
+      goTo(sim, c, (ownHome ?? 'homes') as TowerId)
       return
     }
     case 'heal': {
@@ -1657,6 +1713,14 @@ export function shareDirections(speaker: Creature, listener: Creature, trust: nu
   }
 }
 
+/** The dwelling this creature calls home, if their household claimed one. */
+function homeTowerFor(sim: Sim, c: Creature): TowerId | null {
+  const house = householdOf(sim.society, c.id)
+  if (!house) return null
+  const tower = homeTowerOf(house)
+  return tower && c.knowsTower(tower) ? tower : null
+}
+
 /** Is this tower known to the creature? (actions require knowledge — no omniscience) */
 function knows(sim: Sim, c: Creature, towerId: string): boolean {
   void sim
@@ -1919,8 +1983,12 @@ function carryCorpseDirect(sim: Sim, c: Creature): void {
 function wakeNearbySleepers(sim: Sim): void {
   for (const c of sim.creatures) {
     if (!c.alive || !c.sleeping) continue
+    const home = householdOf(sim.society, c.id)
     for (const o of sim.creatures) {
       if (o.id === c.id || !o.alive || o.sleeping) continue
+      // You do not jolt awake because the person you live with walked past.
+      const familiar = o.id === c.partnerId || (home?.memberIds.includes(o.id) ?? false)
+      if (familiar) continue
       if (dist(c.pos.x, c.pos.z, o.pos.x, o.pos.z) < 3) {
         c.sleeping = false
         c.action = 'wake'

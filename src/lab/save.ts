@@ -48,6 +48,8 @@ export interface LabSave {
   culture?: Culture
   jobs?: JobBoard
   ledger?: Ledger
+  /** container contents keyed by fixture id (the furniture itself is rebuilt) */
+  containers?: Record<string, { items: Record<string, number>; owners?: Record<string, number> }>
 }
 
 interface SavedCreature {
@@ -207,6 +209,11 @@ export function saveSim(sim: Sim): LabSave {
     culture: JSON.parse(JSON.stringify(sim.culture)),
     jobs: JSON.parse(JSON.stringify(sim.jobs)),
     ledger: JSON.parse(JSON.stringify(sim.ledger)),
+    containers: Object.fromEntries(
+      sim.fixtures
+        .filter((f) => f.storage && Object.keys(f.storage.items).length > 0)
+        .map((f) => [f.id, JSON.parse(JSON.stringify(f.storage))]),
+    ),
   }
 }
 
@@ -230,6 +237,15 @@ export function loadSim(data: LabSave): Sim {
     : createCulture()
   sim.jobs = data.jobs ? JSON.parse(JSON.stringify(data.jobs)) : createJobBoard()
   sim.ledger = data.ledger ? JSON.parse(JSON.stringify(data.ledger)) : createLedger()
+  if (data.containers) {
+    for (const f of sim.fixtures) {
+      const saved = data.containers[f.id]
+      if (f.storage && saved) {
+        f.storage.items = { ...saved.items } as typeof f.storage.items
+        f.storage.owners = { ...(saved.owners ?? {}) } as typeof f.storage.owners
+      }
+    }
+  }
 
   sim.creatures = data.creatures.map((sc) => {
     const c = createCreature(sc.id, sc.name, completeGenome(sc.genome), sc.pos.x, sc.pos.z)
