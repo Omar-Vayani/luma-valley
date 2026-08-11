@@ -14,6 +14,8 @@ import { ageLimitFor } from './lifecycle'
 import { createInventory, type Inventory } from './inventory'
 import { createVengeance, type VengeanceState } from './vengeance'
 import { createWant, wantForState } from './wants'
+import { createSocialGraph, type SocialGraph } from './socialbond'
+import { createPsyche, type Psyche } from './psyche'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -59,6 +61,18 @@ export interface Creature {
   talkingTo: number | null // creature id being talked to (stops to interact)
   busyTicks: number // remaining ticks of a committed interaction (talk/fight)
   want: import('./wants').Want // current Sims-style desire (icon above head)
+  /** Multidimensional directed relationships (asymmetric). */
+  social: SocialGraph
+  /** Simplified psyche connecting stress, belonging, values, mood. */
+  psyche: Psyche
+  /** Household / family id, if any. */
+  householdId: number | null
+  /** Parent ids for family tree (empty = founder). */
+  parentIds: number[]
+  /** Recent NL lines for inspector / speech bubbles (capped). */
+  recentDialogue: string[]
+  /** Illness 0..1 — treated at clinic; pharmacy sells medicine. */
+  illness: number
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -117,6 +131,12 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     talkingTo: null,
     busyTicks: 0,
     want: createWant(wantForState({ hunger: 0.8, energy: 0.8, social: 0.8, pleasure: 0.8 })),
+    social: createSocialGraph(),
+    psyche: createPsyche({ genome }),
+    householdId: null,
+    parentIds: [],
+    recentDialogue: [],
+    illness: 0,
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },

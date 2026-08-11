@@ -20,6 +20,13 @@ import { dist } from './lab/util'
 import type { ItemId } from './lab/inventory'
 import { GOODS, marketPrice, priceTrend } from './lab/economy'
 import { CONCEPTS } from './lab/language'
+import { inspectCreature, type InspectReport } from './lab/inspect'
+import {
+  loadSettings, saveSettings, applyPreset, type GameSettings, type QualityPreset,
+} from './lab/settings'
+import { avgFrameMs } from './lab/lod'
+import { saveSim, loadSim } from './lab/save'
+import { saveWorldBlob, loadWorldBlob } from './lab/creature-storage'
 
 import './lab.css'
 
@@ -117,6 +124,66 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
   )
 }
 
+function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: () => void }) {
+  return (
+    <section className="inspector" data-inspector aria-label="mind inspector">
+      <header className="inspector-head">
+        <h2>🧠 {report.name}</h2>
+        <button type="button" className="inspector-close" data-inspector-close aria-label="Close inspector" onClick={onClose}>✕</button>
+      </header>
+      <p className="inspector-mood">{report.emotion} · {report.action}{report.intention ? ` → ${report.intention}` : ''}</p>
+      <ul className="inspector-reason" data-inspector-reason>
+        {report.reasoning.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <div className="inspector-scores" data-inspector-scores>
+        {report.topScores.map((s) => (
+          <span key={s.action} className="chip">{s.action} {s.score}</span>
+        ))}
+      </div>
+      <div className="inspector-grid">
+        <div>
+          <h3>needs</h3>
+          {report.needs.slice(0, 6).map((n) => (
+            <Bar key={n.key} label={n.key} value={n.value} color="#7a9" />
+          ))}
+        </div>
+        <div>
+          <h3>bonds</h3>
+          {report.relationships.length === 0 && <p className="inspector-empty">none yet</p>}
+          {report.relationships.map((r) => (
+            <div key={r.id} className="inspector-bond">
+              {r.name} · trust {r.trust.toFixed(1)} · friend {r.friend.toFixed(1)}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="inspector-meta">
+        <span>🪙 {Math.round(report.wallet)} / 🏦 {Math.round(report.banked)}</span>
+        <span>~{report.costKb} KB mind</span>
+        <span>{report.job}</span>
+      </div>
+      {report.memories.length > 0 && (
+        <div className="inspector-mem" data-inspector-mem>
+          <h3>memories</h3>
+          {report.memories.map((m) => (
+            <div key={m}>{m}</div>
+          ))}
+        </div>
+      )}
+      {report.recentTalk.length > 0 && (
+        <div className="inspector-talk" data-inspector-talk>
+          <h3>recent talk</h3>
+          {report.recentTalk.map((t) => (
+            <div key={t}>{t}</div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null)
   const simRef = useRef<Sim | null>(null)
@@ -136,6 +203,13 @@ export default function App() {
   const [teachOpen, setTeachOpen] = useState(false)
   const [teachConcept, setTeachConcept] = useState<string>(CONCEPTS[0])
   const [teachWord, setTeachWord] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatText, setChatText] = useState('')
+  const [chatReply, setChatReply] = useState<string | null>(null)
+  const [inspectOpen, setInspectOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settings, setSettings] = useState<GameSettings>(() => loadSettings())
+  const [perfMs, setPerfMs] = useState(0)
 
   // view mode: first-person (you ARE the visitor) or top view (watch the world)
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
@@ -193,7 +267,27 @@ export default function App() {
     const parsed = seedRaw !== null ? Number(seedRaw) : NaN
     const seed = Number.isFinite(parsed) ? parsed : Math.floor(Math.random() * 1e9)
 
-    const sim = createSim(seed)
+    let sim = createSim(seed)
+    // restore autosave when present (unless ?fresh=1 or explicit seed)
+    const fresh = params.get('fresh') === '1'
+    if (!fresh && seedRaw === null) {
+      try {
+        const blob = loadWorldBlob()
+        if (blob) sim = loadSim(JSON.parse(blob))
+      } catch {
+        // corrupted save — start fresh
+        sim = createSim(seed)
+      }
+    }
+    sim.settings = { ...loadSettings() }
+    // modest starter society when empty
+    if (sim.creatures.filter((c) => c.alive).length === 0) {
+      const starters = Math.min(8, sim.settings.populationCap)
+      for (let i = 0; i < starters; i++) {
+        const angle = (i / starters) * Math.PI * 2
+        sim.spawnCreature(undefined, Math.cos(angle) * 12, Math.sin(angle) * 12)
+      }
+    }
     simRef.current = sim
 
     const view = new LabView(mount, sim, {
@@ -211,6 +305,7 @@ export default function App() {
           return
         }
         setSelectedId(id)
+        setChatOpen(true)
       },
       onTapWorld: (x: number, z: number) => {
         const mode = toolRef.current
@@ -227,15 +322,40 @@ export default function App() {
       },
     })
     viewRef.current = view
+    view.applySettings?.(sim.settings)
     // The game is FIRST-PERSON ONLY — you start as the visitor immediately.
     view.setFirstPerson(1)
     setViewMode('first-person')
 
     setTick((t) => t + 1)
     const id = window.setInterval(() => setTick((t) => t + 1), 300)
+    // autosave every ~20s
+    const saveId = window.setInterval(() => {
+      const s = simRef.current
+      if (!s) return
+      try {
+        saveWorldBlob(JSON.stringify(saveSim(s)))
+      } catch {
+        // ignore quota
+      }
+    }, 20000)
+    const perfId = window.setInterval(() => {
+      const s = simRef.current
+      if (s) setPerfMs(avgFrameMs(s.lod))
+    }, 1000)
 
     return () => {
       window.clearInterval(id)
+      window.clearInterval(saveId)
+      window.clearInterval(perfId)
+      // final autosave
+      if (simRef.current) {
+        try {
+          saveWorldBlob(JSON.stringify(saveSim(simRef.current)))
+        } catch {
+          /* ignore */
+        }
+      }
       viewRef.current?.dispose()
       viewRef.current = null
       simRef.current = null
@@ -337,6 +457,43 @@ export default function App() {
     setTeachOpen(false)
     setTick((t) => t + 1)
   }, [teachConcept, teachWord])
+
+  const submitChat = useCallback((): void => {
+    const sim = simRef.current
+    const text = chatText.trim()
+    if (!sim || !text) return
+    const turn = sim.playerTalk(text, selectedId ?? undefined)
+    setChatReply(turn?.text ?? 'No one nearby to hear you.')
+    setChatText('')
+    setTick((t) => t + 1)
+  }, [chatText, selectedId])
+
+  const updateSettings = useCallback((patch: Partial<GameSettings>): void => {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch }
+      saveSettings(next)
+      if (simRef.current) simRef.current.settings = next
+      viewRef.current?.applySettings?.(next)
+      return next
+    })
+  }, [])
+
+  const setQuality = useCallback((q: QualityPreset): void => {
+    setSettings((prev) => {
+      const next = applyPreset(prev, q)
+      saveSettings(next)
+      if (simRef.current) simRef.current.settings = next
+      viewRef.current?.applySettings?.(next)
+      return next
+    })
+  }, [])
+
+  const manualSave = useCallback((): void => {
+    const s = simRef.current
+    if (!s) return
+    saveWorldBlob(JSON.stringify(saveSim(s)))
+    setTick((t) => t + 1)
+  }, [])
 
   const usePlayerItem = useCallback((id: ItemId): void => {
     simRef.current?.playerUseItem(id)
@@ -515,7 +672,7 @@ export default function App() {
       )}
 
       <header className="topbar" data-topbar>
-        <h1 className="logo">Luma Lab</h1>
+        <h1 className="logo">Luma Haven</h1>
         <div className="topbar-right">
           <span className="pill" data-count="alive">
             🐣 {alive}
@@ -595,6 +752,39 @@ export default function App() {
             onClick={() => setTeachOpen((o) => !o)}
           >
             💬
+          </button>
+          {/* talk: typed natural language with nearby Luma */}
+          <button
+            type="button"
+            className="speed-btn talk-btn"
+            data-talk-btn
+            aria-pressed={chatOpen}
+            aria-label={chatOpen ? 'Close talk' : 'Talk to a Luma'}
+            onClick={() => setChatOpen((o) => !o)}
+          >
+            🗨️
+          </button>
+          {/* mind inspector */}
+          <button
+            type="button"
+            className="speed-btn inspect-btn"
+            data-inspect-btn
+            aria-pressed={inspectOpen}
+            aria-label={inspectOpen ? 'Close mind inspector' : 'Open mind inspector'}
+            onClick={() => setInspectOpen((o) => !o)}
+          >
+            🧠
+          </button>
+          {/* settings */}
+          <button
+            type="button"
+            className="speed-btn settings-btn"
+            data-settings-btn
+            aria-pressed={settingsOpen}
+            aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+            onClick={() => setSettingsOpen((o) => !o)}
+          >
+            ⚙️
           </button>
           {/* view toggle: first-person ↔ top view */}
           <button
@@ -716,6 +906,110 @@ export default function App() {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {/* natural-language talk panel */}
+      {chatOpen && sim && (
+        <section className="talk" data-talk aria-label="talk with luma">
+          <header className="talk-head">
+            <h2>🗨️ talk{selected ? ` · ${selected.name}` : ''}</h2>
+            <button type="button" className="talk-close" data-talk-close aria-label="Close talk" onClick={() => setChatOpen(false)}>✕</button>
+          </header>
+          <p className="talk-hint">Type naturally — greet, ask how they feel, request help, flirt, apologize…</p>
+          <div className="talk-row">
+            <input
+              className="talk-input"
+              data-talk-input
+              type="text"
+              maxLength={120}
+              placeholder={selected ? `say something to ${selected.name}…` : 'say something to the nearest Luma…'}
+              value={chatText}
+              onChange={(e) => setChatText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitChat()
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button type="button" className="dock-btn talk-submit" data-talk-submit disabled={!chatText.trim()} onClick={submitChat}>
+              say
+            </button>
+          </div>
+          {chatReply && (
+            <p className="talk-reply" data-talk-reply>{chatReply}</p>
+          )}
+        </section>
+      )}
+
+      {/* mind inspector */}
+      {inspectOpen && sim && selected && (
+        <InspectorPanel report={inspectCreature(sim, selected)} onClose={() => setInspectOpen(false)} />
+      )}
+
+      {/* settings + performance */}
+      {settingsOpen && (
+        <section className="settings" data-settings aria-label="settings">
+          <header className="settings-head">
+            <h2>⚙️ settings</h2>
+            <button type="button" className="settings-close" data-settings-close aria-label="Close settings" onClick={() => setSettingsOpen(false)}>✕</button>
+          </header>
+          <div className="settings-row">
+            <span>quality</span>
+            {(['low', 'medium', 'high'] as QualityPreset[]).map((q) => (
+              <button
+                key={q}
+                type="button"
+                className={`chip ${settings.quality === q ? 'active' : ''}`}
+                data-quality={q}
+                aria-pressed={settings.quality === q}
+                onClick={() => setQuality(q)}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+          <label className="settings-row">
+            <span>population cap</span>
+            <input
+              type="range"
+              min={4}
+              max={32}
+              value={settings.populationCap}
+              data-pop-cap
+              onChange={(e) => updateSettings({ populationCap: Number(e.target.value) })}
+            />
+            <b>{settings.populationCap}</b>
+          </label>
+          <label className="settings-row">
+            <span>AI batch</span>
+            <input
+              type="range"
+              min={1}
+              max={12}
+              value={settings.aiBatchSize}
+              data-ai-batch
+              onChange={(e) => updateSettings({ aiBatchSize: Number(e.target.value) })}
+            />
+            <b>{settings.aiBatchSize}</b>
+          </label>
+          <label className="settings-row">
+            <span>gentle mode</span>
+            <input
+              type="checkbox"
+              checked={settings.gentleMode}
+              data-gentle
+              onChange={(e) => updateSettings({ gentleMode: e.target.checked })}
+            />
+          </label>
+          <div className="settings-row" data-perf>
+            <span>frame cost</span>
+            <b>{perfMs.toFixed(1)} ms</b>
+            <span className="settings-hint">target ~16ms for 60fps</span>
+          </div>
+          <button type="button" className="dock-btn" data-manual-save onClick={manualSave}>
+            save now
+          </button>
         </section>
       )}
 

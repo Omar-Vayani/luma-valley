@@ -53,8 +53,12 @@ describe('sim — economy and stealing', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 0.3 // hungry + broke → motivated to work
-    c.pos = { x: 0, z: 58 } // at work tower
+    c.pos = { x: 0, z: 52 } // at work tower
+    c.learnTower('work')
     c.wallet = 0
+    c.intention = 'work'
+    c.intentionTicks = 40
+    c.goalTowerId = 'work'
     // needs ~24 ticks of staying put before payday
     for (let i = 0; i < 30; i++) s.tick()
     expect(c.wallet).toBeGreaterThan(0)

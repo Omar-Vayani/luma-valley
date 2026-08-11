@@ -1,7 +1,8 @@
 /**
- * save — deep-state persistence for the test lab.
- * No 70KB cap anymore: brains, memories, vendettas, bonds all persist.
- * version 3 rejects old observer-city saves cleanly.
+ * save — deep-state persistence for Luma Haven.
+ * version 5 adds social graphs, psyche, households, illness, dialogue snippets.
+ * Missing optional fields receive deterministic defaults for graceful recovery.
+ * v4 saves still load (fields defaulted).
  */
 import { createSim, type Sim } from './sim'
 import { createCreature } from './creature'
@@ -15,11 +16,17 @@ import { createBrain } from './brain'
 import type { ActionName } from './mind'
 import type { Genome } from './genetics'
 import { mulberry32 } from './rng'
+import { createSocialGraph, type SocialGraph } from './socialbond'
+import { createPsyche, type Psyche } from './psyche'
+import type { HavenSociety } from './household'
+import { createSociety } from './household'
+import type { GameSettings } from './settings'
+import { DEFAULT_SETTINGS } from './settings'
 
-export const SAVE_VERSION = 4
+export const SAVE_VERSION = 5
 
 export interface LabSave {
-  version: 4
+  version: 4 | 5
   seed: number
   time: number
   nextId: number
@@ -28,6 +35,8 @@ export interface LabSave {
   graves: { creatureId: number; name: string; x: number; z: number; tick: number }[]
   economy: Economy
   player: SavedPlayer
+  society?: HavenSociety
+  settings?: Partial<GameSettings>
 }
 
 interface SavedCreature {
@@ -66,6 +75,12 @@ interface SavedCreature {
   inventory: { items: Record<string, number> }
   vengeance: { grudges: Record<string, { targetId: number; intensity: number; since: number }> }
   want: { type: string; progress: number; age: number; fulfilled: boolean }
+  social?: SocialGraph
+  psyche?: Psyche
+  householdId?: number | null
+  parentIds?: number[]
+  recentDialogue?: string[]
+  illness?: number
 }
 
 export interface SavedPlayer {
@@ -115,13 +130,32 @@ export function saveSim(sim: Sim): LabSave {
     emotions: { ...c.emotions },
     reputation: JSON.parse(JSON.stringify(c.reputation)),
     brain: c.brain.serialize(),
-    vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })),
+    vocab: Array.from(c.language.vocab.entries()).map(([concept, entry]) => ({
+      concept,
+      word: entry.word,
+      strength: entry.strength,
+    })),
     inventory: { items: { ...c.inventory.items } },
-    vengeance: { grudges: Object.fromEntries(Object.entries(c.vengeance.grudges).map(([k, g]) => [k, { ...g }])) },
-    want: { type: c.want.type, progress: c.want.progress, age: c.want.age, fulfilled: c.want.fulfilled },
+    vengeance: {
+      grudges: Object.fromEntries(
+        Object.entries(c.vengeance.grudges).map(([k, g]) => [k, { ...g }]),
+      ),
+    },
+    want: {
+      type: c.want.type,
+      progress: c.want.progress,
+      age: c.want.age,
+      fulfilled: c.want.fulfilled,
+    },
+    social: JSON.parse(JSON.stringify(c.social)),
+    psyche: JSON.parse(JSON.stringify(c.psyche)),
+    householdId: c.householdId,
+    parentIds: [...c.parentIds],
+    recentDialogue: [...c.recentDialogue],
+    illness: c.illness,
   }))
   return {
-    version: 4,
+    version: 5,
     seed: sim.seed,
     time: sim.time,
     nextId: sim.nextId,
@@ -140,18 +174,31 @@ export function saveSim(sim: Sim): LabSave {
       bondWith: [...sim.player.bondWith],
       name: sim.player.name,
       hunger: sim.player.hunger,
-      language: { vocab: Array.from(sim.player.language.vocab.entries()).map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength })) },
+      language: {
+        vocab: Array.from(sim.player.language.vocab.entries()).map(([concept, entry]) => ({
+          concept,
+          word: entry.word,
+          strength: entry.strength,
+        })),
+      },
     },
+    society: JSON.parse(JSON.stringify(sim.society)),
+    settings: { ...sim.settings },
   }
 }
 
 export function loadSim(data: LabSave): Sim {
-  if (data.version !== SAVE_VERSION) {
-    throw new Error(`save version ${data.version} not supported (need ${SAVE_VERSION}) — old saves were rebuilt`)
+  if (data.version !== 4 && data.version !== 5) {
+    throw new Error(
+      `save version ${data.version} not supported (need 4–5) — old saves were rebuilt`,
+    )
   }
   const sim = createSim(data.seed)
   sim.time = data.time
   sim.nextId = data.nextId
+  if (data.settings) sim.settings = { ...DEFAULT_SETTINGS, ...data.settings }
+  sim.society = data.society ? JSON.parse(JSON.stringify(data.society)) : createSociety()
+
   sim.creatures = data.creatures.map((sc) => {
     const c = createCreature(sc.id, sc.name, sc.genome, sc.pos.x, sc.pos.z)
     c.chem = { ...createChem(), ...JSON.parse(JSON.stringify(sc.chem)) }
@@ -198,8 +245,19 @@ export function loadSim(data: LabSave): Sim {
       }
     }
     if (sc.want) {
-      c.want = { type: sc.want.type as never, progress: sc.want.progress, age: sc.want.age, fulfilled: sc.want.fulfilled }
+      c.want = {
+        type: sc.want.type as never,
+        progress: sc.want.progress,
+        age: sc.want.age,
+        fulfilled: sc.want.fulfilled,
+      }
     }
+    c.social = sc.social ? JSON.parse(JSON.stringify(sc.social)) : createSocialGraph()
+    c.psyche = sc.psyche ? JSON.parse(JSON.stringify(sc.psyche)) : createPsyche(c)
+    c.householdId = sc.householdId ?? null
+    c.parentIds = sc.parentIds ? [...sc.parentIds] : []
+    c.recentDialogue = sc.recentDialogue ? [...sc.recentDialogue] : []
+    c.illness = sc.illness ?? 0
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)

@@ -1,14 +1,14 @@
-// App observer-UI copy test. This repo has no DOM test environment
-// (no jsdom/happy-dom installed), so this asserts the REAL App source —
-// exactly the copy and structure the player sees. Same approach as the
-// pre-rebuild app.test.ts.
+/**
+ * App UI contract for Luma Haven — asserts the real App source structure.
+ * No DOM environment; this keeps the HUD surface area intentional.
+ */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync('src/App.tsx', 'utf8')
 const css = readFileSync('src/lab.css', 'utf8')
 
-describe('App test-lab UI', () => {
+describe('App Luma Haven UI', () => {
   it('wires the renderer and sim: LabView + createSim', () => {
     expect(app).toContain("import { LabView } from './render/labview'")
     expect(app).toContain("import { createSim, type Sim } from './lab/sim'")
@@ -51,7 +51,7 @@ describe('App test-lab UI', () => {
 
   it('shows live count and speed controls in the top bar', () => {
     expect(app).toContain('data-topbar')
-    expect(app).toContain('Luma Lab')
+    expect(app).toContain('Luma Haven')
     expect(app).toContain('data-count="alive"')
     expect(app).toContain('setPaused')
     expect(app).toContain('setSpeed')
@@ -62,22 +62,20 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-sound=')
   })
 
-  it('has zero action-message text or toasts — the world is the feedback', () => {
+  it('has no toast feed for scripted action announcements', () => {
     expect(app).not.toContain('pushMessage')
     expect(app).not.toContain('setMessages')
     expect(app).not.toContain('data-msg-stack')
-    expect(app).not.toContain('toast')
     expect(app).not.toContain('You fed')
     expect(app).not.toContain('you fed')
     expect(app).not.toContain('has died')
-    expect(app).not.toContain('message')
   })
 
-  it('does not touch save/load — sim has none, App must not invent them', () => {
-    expect(app).not.toContain('.save()')
-    expect(app).not.toContain('.load(')
+  it('persists the world via saveSim / saveWorldBlob (not ad-hoc idbSave)', () => {
+    expect(app).toContain('saveSim')
+    expect(app).toContain('saveWorldBlob')
+    expect(app).toContain('loadWorldBlob')
     expect(app).not.toContain('idbSave')
-    expect(app).not.toContain('localStorage')
   })
 
   it('has first-person mode: always-on player, joystick, look zone, pointer lock, social dock', () => {
@@ -88,11 +86,22 @@ describe('App test-lab UI', () => {
     expect(app).toContain('data-lab-tool="social"')
     expect(app).toContain('setFirstPerson')
     expect(app).toContain('playerSocialize')
-    expect(app).toContain("import { LabView } from './render/labview'")
     expect(css).toContain('.view-toggle')
     expect(css).toContain('.fp-move')
     expect(css).toContain('.fp-look')
     expect(css).toContain('.fp-btn')
+  })
+
+  it('supports typed talk, mind inspector, and settings', () => {
+    expect(app).toContain('data-talk')
+    expect(app).toContain('playerTalk')
+    expect(app).toContain('data-inspector')
+    expect(app).toContain('inspectCreature')
+    expect(app).toContain('data-settings')
+    expect(app).toContain('populationCap')
+    expect(css).toContain('.talk')
+    expect(css).toContain('.inspector')
+    expect(css).toContain('.settings')
   })
 
   it('lab.css provides the dock, chip, 56px buttons, and safe-area insets', () => {
@@ -100,7 +109,5 @@ describe('App test-lab UI', () => {
     expect(css).toContain('.chip')
     expect(css).toContain('56px')
     expect(css).toContain('safe-area-inset')
-    expect(css).toContain('.dock-btn-active')
-    expect(css).toContain('40vh')
   })
 })

@@ -949,3 +949,115 @@ button { font: inherit; cursor: pointer; }
 .vocab-chip b {
   color: var(--amber);
 }
+
+/* ── Luma Haven: talk / inspector / settings ── */
+.talk, .inspector, .settings {
+  position: absolute;
+  z-index: 12;
+  left: 12px;
+  top: 64px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  color: var(--ink);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(20, 16, 10, 0.35);
+}
+.inspector { left: auto; right: 12px; width: min(420px, calc(100vw - 24px)); }
+.settings { top: auto; bottom: 88px; width: min(340px, calc(100vw - 24px)); }
+.talk-head, .inspector-head, .settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.talk-head h2, .inspector-head h2, .settings-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.talk-close, .inspector-close, .settings-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 40px;
+  min-height: 40px;
+}
+.talk-hint, .settings-hint, .inspector-empty {
+  margin: 0 0 8px;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+.talk-row { display: flex; gap: 8px; }
+.talk-input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px;
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+.talk-reply {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-radius: 10px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+.inspector-mood { margin: 0 0 8px; opacity: 0.85; font-size: 0.9rem; }
+.inspector-reason {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.inspector-scores { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.inspector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.inspector-grid h3, .inspector-mem h3, .inspector-talk h3 {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.inspector-bond, .inspector-mem div, .inspector-talk div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.inspector-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+  opacity: 0.85;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+.settings-row input[type="range"] { flex: 1; }
+.settings-row .chip.active {
+  background: var(--amber);
+  color: #1c1a14;
+}

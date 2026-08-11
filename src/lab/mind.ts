@@ -25,6 +25,7 @@ export type ActionName =
   | 'work'     // go to work tower, stay for a shift
   | 'sleep'    // go home and sleep
   | 'heal'     // go to pharmacy and buy medicine
+  | 'clinic'   // go to clinic for illness / serious treatment
   | 'drink'    // go to tavern and buy brew
   | 'den'      // go to the den and buy herb/spark
   | 'school'   // go to school and learn (raises future earnings)
@@ -136,6 +137,8 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     sleep: press.tired * (at?.id === 'homes' ? 1.2 : 0.8) + collapsing,
     // heal: wounded, only if affordable
     heal: (wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut) * (c.knowsTower('pharmacy') ? 1 : 0.2),
+    // clinic: illness or severe injury — more effective than pharmacy alone
+    clinic: ((c.illness > 0.2 ? 1.4 : 0) + (hp < 0.45 ? 0.8 : 0)) * (c.wallet >= 5 ? 1 : 0.2) * (c.knowsTower('clinic') ? 1 : 0.2),
     // drink: ONLY a sad/bored creature or a real addict craves a drink. A
     // happy creature at a tavern has no reason to drink (no instant booze death).
     drink: ((c.chem.addiction.brew ?? 0) * 2.2 + press.bored * 1.1) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9) * (c.knowsTower('tavern') ? 1 : 0.15),
@@ -337,6 +340,7 @@ export function towerIdForAction(action: ActionName): string | null {
     case 'work': return 'work'
     case 'sleep': return 'homes'
     case 'heal': return 'pharmacy'
+    case 'clinic': return 'clinic'
     case 'drink': return 'tavern'
     case 'den': return 'den'
     case 'school': return 'school'

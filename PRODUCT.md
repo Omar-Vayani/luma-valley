@@ -1,14 +1,15 @@
-# Luma Valley
+# Luma Haven
 
-A 3D artificial-life game inspired by the original *Creatures* (1996): real neural-network brains, biochemistry, heritable genetics, and creatures you can raise, teach, and emotionally bond with. Low-poly, warm vibrant-light art direction. Runs in the browser (desktop + mobile).
+A first-person artificial-life game inspired by the spirit of *Creatures* (1996): autonomous Luma with genetics, biochemistry-style needs, heritable temperament, multidimensional relationships, and a compact working settlement. Runs offline in the browser (desktop + mobile).
 
-See PLAN.md (research) and DESIGN.md (visual direction).
+See `docs/ARCHITECTURE.md` (stack + systems) and `DESIGN.md` (visual direction).
 
-## The systems (all pure TS, TDD)
+## Systems (pure TypeScript, tested)
 
-- **Brain** — neural-net lobes (perception → decision → motor), neurons with stimulation/threshold/state/leak, dendrite weights, Hebbian reinforcement gated by pleasure/pain chemistry. Creatures *learn from experience* and can be trained.
-- **Biochemistry** — blood chemicals (hunger, thirst, fatigue, boredom, loneliness, fear, pleasure, pain, health) with synthesis, reactions, half-life. Drives are chemicals feeding the brain.
-- **Genetics** — chromosomes, genes for chemical rates, brain params, temperament, appearance, lifespan. Breeding = crossover + mutation; traits are heritable.
-- **World** — procedural low-poly valley: terrain, stream, plants/berries, den, day/night. Fixed per save (your world is yours).
-- **Language lite** — teach words by speaking near a creature; they associate word → object/action and respond.
-- **Persistence** — IndexedDB autosave + export/import `.lumavalley` save file (target < 300 KB per world).
+- **Mind** — utility scoring + tiny TF.js net + psyche (stress, belonging, values)
+- **Social** — asymmetric trust/affection/attraction/resentment edges; households; gossip
+- **Dialogue** — semantic intents + offline NL for player talk; compact creature↔creature chatter
+- **Genetics / life** — crossover + mutation; aging; abstract reproduction with population caps
+- **Economy** — scarcity prices, work, bank, clinic, pharmacy, market, tavern
+- **Persistence** — versioned saves (v5), autosave, graceful recovery
+- **Performance** — sim LOD, AI time-slicing, quality presets aimed at ~60 FPS on a G14-class laptop

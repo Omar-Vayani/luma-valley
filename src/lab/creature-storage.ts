@@ -84,3 +84,25 @@ export function loadCreatureState(storage: CreatureStorage, id: number): unknown
     return null
   }
 }
+
+const WORLD_KEY = 'luma-haven-world-v5'
+
+/** Autosave the whole world blob (versioned LabSave JSON). */
+export function saveWorldBlob(json: string): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false
+    window.localStorage.setItem(WORLD_KEY, json)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function loadWorldBlob(): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage.getItem(WORLD_KEY)
+  } catch {
+    return null
+  }
+}

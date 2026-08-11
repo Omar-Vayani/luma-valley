@@ -26,6 +26,17 @@ import { tickEmotions, applyEmotionFeedback } from './emotions'
 import { observeEvent, gossipSpread, trustTowards, getReputation } from './reputation'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
+import { DEFAULT_SETTINGS, type GameSettings } from './settings'
+import { createLodState, pickAiBatch, markDecided, bandFor, chemStride, type LodState } from './lod'
+import {
+  createSociety, ensureCoupleHousehold, adoptChild, tickHouseholdCare, pruneHouseholds,
+  type HavenSociety,
+} from './household'
+import {
+  applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge,
+} from './socialbond'
+import { parsePlayerText, respondToPlayer, type DialogueTurn } from './dialogue'
+import { tickPsyche } from './psyche'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
@@ -93,6 +104,12 @@ export interface Sim {
   playerUseItem(id: ItemId): void
   playerEquip(id: ItemId): boolean
   creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean
+  /** Typed natural-language talk with the nearest (or selected) creature. */
+  playerTalk(text: string, targetId?: number): DialogueTurn | null
+  settings: GameSettings
+  lod: LodState
+  society: HavenSociety
+  dialogueLog: DialogueTurn[]
 }
 
 const SPEED = 0.3 // calm, visible pace — the player can keep up and interact
@@ -123,7 +140,18 @@ export function createSim(seed = 1): Sim {
     graves: [],
     economy: createEconomy(),
     player: createPlayer(0, 0, 'Visitor'),
+    settings: { ...DEFAULT_SETTINGS },
+    lod: createLodState(),
+    society: createSociety(),
+    dialogueLog: [],
     spawnCreature(genome?: Genome, x?: number, z?: number): Creature {
+      const alive = sim.creatures.filter((c) => c.alive).length
+      if (alive >= sim.settings.populationCap && alive > 0) {
+        // at cap — still allow explicit spawn for lab tools by replacing nothing;
+        // return last alive so callers that ignore the return stay safe
+        const existing = sim.creatures.find((c) => c.alive)
+        if (existing && !genome) return existing
+      }
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
@@ -159,6 +187,7 @@ export function createSim(seed = 1): Sim {
         return
       }
       near.bonds[0] = clamp01((near.bonds[0] ?? 0) + 0.12)
+      applySocialEvent(near.social, 0, 'talk', 1)
       near.chem.fear = clamp01(near.chem.fear - 0.05)
       applySocial(near.chem)
       if (!p.bondWith.includes(near.id)) p.bondWith.push(near.id)
@@ -192,6 +221,7 @@ export function createSim(seed = 1): Sim {
         if (dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) > 10) continue
         hearWord(c.language, cleaned, concept, 0.85)
         c.bonds[0] = clamp01((c.bonds[0] ?? 0) + 0.08)
+        applySocialEvent(c.social, 0, 'teach', 1)
         c.action = 'learn'
         c.talkingTo = 0
         c.busyTicks = Math.max(c.busyTicks, 15)
@@ -214,6 +244,78 @@ export function createSim(seed = 1): Sim {
         c.busyTicks = Math.max(c.busyTicks, 12)
         emit(sim, 'say', c, undefined, c.pos.x, c.pos.z, { word: word ?? '', concept })
       }
+    },
+    playerTalk(text: string, targetId?: number): DialogueTurn | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      const target =
+        (targetId != null ? sim.creatureById(targetId) : null) ??
+        nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE + 2)
+      if (!target || !target.alive) return null
+
+      const parsed = parsePlayerText(text)
+      // teaching via NL: "the word for food is wum"
+      if (parsed.intent === 'teach' && parsed.concept && parsed.word) {
+        sim.playerTeach(parsed.concept, parsed.word)
+      }
+
+      const knownPlaces = TOWERS.filter((t) => target.knowsTower(t.id)).map((t) => t.id)
+      const nearbyNames = sim.creatures
+        .filter((o) => o.alive && o.id !== target.id && dist(o.pos.x, o.pos.z, target.pos.x, target.pos.z) < 14)
+        .map((o) => o.name)
+
+      const turn = respondToPlayer(
+        {
+          creature: target,
+          playerName: p.name,
+          playerTrust: trustTowards(target, 0),
+          graph: target.social,
+          nearbyNames,
+          knownPlaces,
+          tick: sim.time,
+        },
+        parsed,
+        0,
+      )
+
+      // social consequences of the conversation
+      applySocialEvent(target.social, 0, parsed.intent === 'flirt' ? 'flirt'
+        : parsed.intent === 'apologize' ? 'forgive'
+          : parsed.intent === 'comfort' ? 'comfort'
+            : parsed.intent === 'accuse' ? 'hurt'
+              : parsed.intent === 'offer_gift' ? 'gift'
+                : 'talk', 1)
+
+      if (parsed.intent === 'greet' || parsed.intent === 'ask_feeling' || parsed.intent === 'ask_name') {
+        target.bonds[0] = clamp01((target.bonds[0] ?? 0) + 0.04)
+        applySocial(target.chem)
+      }
+      if (parsed.intent === 'command' && !turn.obeyed) {
+        applyEmotionFeedback(target.emotions, 'spite', 0.05)
+      }
+      if (parsed.intent === 'flirt') {
+        const compat = geneticCompatibility(target.genome, {
+          sociability: 0.6, loyalty: 0.5, aggression: 0.2, lovePropensity: 0.5, fearfulness: 0.3,
+        })
+        bumpEdge(target.social, 0, 'attraction', 0.08 * compat)
+      }
+
+      target.talkingTo = 0
+      target.busyTicks = Math.max(target.busyTicks, 24)
+      target.action = 'chat'
+      target.facing = Math.atan2(p.pos.x - target.pos.x, p.pos.z - target.pos.z)
+      target.recentDialogue.push(`You: ${text.trim().slice(0, 80)}`)
+      target.recentDialogue.push(`${target.name}: ${turn.text}`)
+      if (target.recentDialogue.length > 12) target.recentDialogue.splice(0, target.recentDialogue.length - 12)
+
+      sim.dialogueLog.push(turn)
+      if (sim.dialogueLog.length > 40) sim.dialogueLog.splice(0, sim.dialogueLog.length - 40)
+      emit(sim, 'say', target, undefined, target.pos.x, target.pos.z, {
+        word: turn.text.slice(0, 48),
+        concept: parsed.intent,
+        fromPlayer: false,
+      })
+      return turn
     },
     poke(id: number): void {
       const c = sim.creatureById(id)
@@ -356,23 +458,27 @@ export function createSim(seed = 1): Sim {
     tick(): void {
       sim.time++
       learnFromSight(sim) // learn BEFORE deciding so knowledge gates actions
-      // decisions for every alive creature
+      const focusX = sim.player.alive ? sim.player.pos.x : 0
+      const focusZ = sim.player.alive ? sim.player.pos.z : 0
+
+      // Time-sliced AI: only a batch of due creatures get a full decide()
+      const batch = new Set(pickAiBatch(sim.creatures, focusX, focusZ, sim.settings, sim.lod, sim.time).map((c) => c.id))
+
       for (const c of sim.creatures) {
         if (!c.alive) continue
         // INTERACTION HOLD: a creature mid-chat stands still facing the player.
-        // It ignores its own wants for a few ticks so the player can interact.
         if (c.busyTicks > 0) {
           c.busyTicks--
           c.action = c.talkingTo === 0 ? 'chat' : c.action
           c.goalTowerId = null
           c.intention = null
           if (c.busyTicks === 0) c.talkingTo = null
-          continue // no decide, no movement, no brain work while chatting
+          continue
         }
-        // SLEEP SUSPENSION: a sleeping creature does zero brain/decision work
-        // until energy recovers or a proximity event wakes it.
+        const band = bandFor(c, focusX, focusZ, sim.settings)
+        // SLEEP SUSPENSION: light chem restore, no full AI unless woken
         if (c.sleeping) {
-          c.chem.energy = clamp01(c.chem.energy + 0.35) // rest restores stamina
+          c.chem.energy = clamp01(c.chem.energy + 0.35)
           if (c.chem.energy > 0.55) {
             c.sleeping = false
             c.action = 'wake'
@@ -381,10 +487,9 @@ export function createSim(seed = 1): Sim {
             c.action = 'sleep'
             c.intention = null
             c.goalTowerId = null
-            continue // suspended: no decide, no movement, no brain
+            continue
           }
         }
-        // aging: creatures eventually die of old age unless player-bonded
         if (c.age > c.ageLimit) {
           const dmg = agingDamage(c.age, c.playerBond)
           if (dmg > 0) {
@@ -393,10 +498,34 @@ export function createSim(seed = 1): Sim {
           }
         }
         if (!c.alive) continue
-        decide(sim, c)
-        // wants: doing the thing the want points at advances it
+
+        // illness creeps; clinic/pharmacy heal it
+        if (c.illness > 0.05) {
+          c.chem.health = clamp01(c.chem.health - c.illness * 0.002)
+          c.illness = clamp01(c.illness - 0.001)
+        } else if (sim.rng() < 0.0008 * (1.1 - c.genome.energy)) {
+          c.illness = clamp01(c.illness + 0.15 + sim.rng() * 0.2)
+        }
+
+        // continue committed movement even when not in AI batch
+        if (!batch.has(c.id) && c.intention && c.goalTowerId && c.goalTowerId !== 'none') {
+          const goal = towerAt(c.pos.x, c.pos.z)
+          if (goal?.id !== c.goalTowerId) {
+            execute(sim, c, c.intention)
+            c.pos.x = clampCoord(c.pos.x)
+            c.pos.z = clampCoord(c.pos.z)
+            continue
+          }
+        }
+
+        if (batch.has(c.id) || band === 'near' || !c.intention) {
+          decide(sim, c)
+          markDecided(sim.lod, c.id, sim.time)
+        } else if (c.intention && actionValid(sim, c, c.intention)) {
+          execute(sim, c, c.intention)
+        }
+
         wantProgress(c.want, c.action)
-        // stay inside the world — nothing escapes the lab
         c.pos.x = clampCoord(c.pos.x)
         c.pos.z = clampCoord(c.pos.z)
       }
@@ -423,11 +552,22 @@ export function createSim(seed = 1): Sim {
       }
       // chemistry decay + memory decay + emotions decay + events trim
       for (const c of sim.creatures) {
-        tickChem(c.chem, sim.time)
-        decayMemory(c.memory)
-        tickDrives(c.drives, c.chem, c.genome)
-        tickEmotions(c.emotions)
-        decayGrudges(c.vengeance, 0.002)
+        if (!c.alive && c.action === 'dead') continue
+        const band = bandFor(c, focusX, focusZ, sim.settings)
+        const stride = chemStride(band)
+        if (sim.time % stride.every === 0) {
+          tickChem(c.chem, sim.time)
+          // apply extra decay steps when striding
+          for (let i = 1; i < stride.dt; i++) tickChem(c.chem, sim.time)
+        }
+        if (band !== 'far' || sim.time % 4 === 0) {
+          decayMemory(c.memory)
+          tickDrives(c.drives, c.chem, c.genome)
+          tickEmotions(c.emotions)
+          tickSocialGraph(c.social)
+          tickPsyche(c)
+          decayGrudges(c.vengeance, 0.002)
+        }
         c.age++
         if (c.fightCooldown > 0) c.fightCooldown--
         // want lifecycle: age it, progress on matching actions, refresh when done
@@ -437,10 +577,17 @@ export function createSim(seed = 1): Sim {
           c.want = refreshWant(c.want, { hunger: c.chem.hunger, energy: c.chem.energy, social: c.chem.social, pleasure: c.chem.pleasure })
         }
         if (c.chem.health <= 0 && c.action !== 'dead') {
-          c.alive = false
-          c.action = 'dead'
-          emit(sim, 'death', c, undefined, c.pos.x, c.pos.z)
-          grieve(sim, c)
+          // gentle mode: suppress starvation / illness permadeath (old age still applies)
+          if (sim.settings.gentleMode && c.age <= c.ageLimit) {
+            c.chem.health = 0.05
+            c.chem.hunger = Math.max(c.chem.hunger, 0.15)
+            c.illness = 0
+          } else {
+            c.alive = false
+            c.action = 'dead'
+            emit(sim, 'death', c, undefined, c.pos.x, c.pos.z)
+            grieve(sim, c)
+          }
         }
       }
       tickEconomy(sim.economy)
@@ -449,6 +596,8 @@ export function createSim(seed = 1): Sim {
         tickMarketDay(sim.economy, Math.floor(sim.time / sim.economy.DAY_TICKS))
       }
       tickRelationships(sim)
+      tickHouseholdCare(sim.society, sim.creatures)
+      if (sim.time % 30 === 0) pruneHouseholds(sim.society, sim.creatures)
       gossipNearby(sim)
       wakeNearbySleepers(sim)
       // ── the player (a distinct character): hunger, regen, pickup, barter ──
@@ -623,9 +772,11 @@ function decide(sim: Sim, c: Creature): void {
   if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
     const partner = sim.creatureById(c.partnerId)
     const lastBirth = c.memory.facts.partnerIsHere ?? -1000
+    const alive = sim.creatures.filter((o) => o.alive).length
     if (
       partner && partner.alive && partner.chem.bond > 0.7
       && sim.time - lastBirth > BIRTH_COOLDOWN
+      && alive < sim.settings.populationCap
       && canProcreate(c.chem.energy, partner.chem.energy, c.age)
     ) {
       // energy cost paid by both parents — life is not free
@@ -633,6 +784,7 @@ function decide(sim: Sim, c: Creature): void {
       partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
       c.memory.facts.partnerIsHere = sim.time
       partner.memory.facts.partnerIsHere = sim.time
+      ensureCoupleHousehold(sim.society, c, partner, sim.time)
       procreate(sim, c, partner)
       return
     }
@@ -794,11 +946,30 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         c.chem.health = clamp01(c.chem.health + 0.3)
         c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
         c.chem.lastDose.medicine = sim.time
+        c.illness = clamp01(c.illness - 0.15)
         emit(sim, 'medicine', c, undefined, c.pos.x, c.pos.z)
         c.action = 'medicine'
         return
       }
       goTo(sim, c, 'pharmacy')
+      return
+    }
+    case 'clinic': {
+      if (at?.id === 'clinic') {
+        const fee = 5
+        if (c.wallet >= fee && (c.illness > 0.05 || c.chem.health < 0.7)) {
+          c.wallet -= fee
+          c.chem.health = clamp01(c.chem.health + 0.45)
+          c.illness = 0
+          c.chem.fear = clamp01(c.chem.fear - 0.1)
+          preferPlace(c.memory, 'clinic')
+          emit(sim, 'heal', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'clinic'
+          c.intention = null
+        }
+        return
+      }
+      goTo(sim, c, 'clinic')
       return
     }
     case 'drink': {
@@ -876,6 +1047,17 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       const near = nearestOther(sim, c, SOCIAL_RANGE)
       if (near) {
         c.socialize(near)
+        applySocialEvent(c.social, near.id, 'talk', 1)
+        applySocialEvent(near.social, c.id, 'talk', 1)
+        // romance spark when compatible and unpartnered
+        if (c.partnerId === null && near.partnerId === null) {
+          const compat = geneticCompatibility(c.genome, near.genome)
+          bumpEdge(c.social, near.id, 'attraction', 0.06 * compat * c.genome.lovePropensity)
+          bumpEdge(near.social, c.id, 'attraction', 0.06 * compat * near.genome.lovePropensity)
+        }
+        if (c.partnerId === near.id) {
+          ensureCoupleHousehold(sim.society, c, near, sim.time)
+        }
         emit(sim, 'love', c, near, c.pos.x, c.pos.z)
         c.action = 'social'
         return
@@ -905,6 +1087,9 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         applyEmotionFeedback(c.emotions, 'joy', 0.15)
         applyEmotionFeedback(near.emotions, 'joy', 0.1)
         applyEmotionFeedback(near.emotions, 'affection', 0.1)
+        applyEmotionFeedback(near.emotions, 'forgiveness', 0.1)
+        applySocialEvent(near.social, c.id, 'share', 1)
+        applySocialEvent(c.social, near.id, 'share', 0.5)
         forgiveGift(near, c.id)
         observeEvent(near, 'share', c.id)
         witness(sim, c, 'share', c.id)
@@ -1345,6 +1530,8 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   victim.chem.fear = clamp01(victim.chem.fear + 0.05)
   observeEvent(victim, bonded ? 'betray' : 'steal', thief.id)
   witness(sim, victim, 'steal', thief.id)
+  applySocialEvent(victim.social, thief.id, bonded ? 'betray' : 'steal', 1)
+  applySocialEvent(thief.social, victim.id, 'meet', 0.3)
   emit(sim, 'steal', thief, victim, victim.pos.x, victim.pos.z)
   thief.action = 'steal'
 }
@@ -1377,6 +1564,8 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   const defending = protectFriendNear(sim, a) // a stepped in to defend a friend
   observeEvent(b, 'aggress', a.id) // b saw who hit it
   witness(sim, a, defending ? 'protect' : 'aggress', a.id)
+  applySocialEvent(b.social, a.id, 'hurt', 1)
+  applySocialEvent(a.social, b.id, defending ? 'help' : 'hurt', 0.6)
   emit(sim, 'fight', a, b, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2)
   a.action = 'fight'
   b.action = 'fight'
@@ -1399,10 +1588,26 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
 }
 
 function procreate(sim: Sim, a: Creature, b: Creature): void {
+  const alive = sim.creatures.filter((c) => c.alive).length
+  if (alive >= sim.settings.populationCap) {
+    a.action = 'overcrowded'
+    return
+  }
   const childGenome = mutate(crossover(a.genome, b.genome, sim.rng), 0.15, sim.rng)
   const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8)
   child.wallet = 1
+  child.parentIds = [a.id, b.id]
   sim.creatures.push(child)
+  const house = ensureCoupleHousehold(sim.society, a, b, sim.time)
+  adoptChild(sim.society, a, child)
+  // parents grow multidimensional attachment
+  applySocialEvent(a.social, b.id, 'flirt', 0.5)
+  applySocialEvent(b.social, a.id, 'flirt', 0.5)
+  applySocialEvent(a.social, child.id, 'help', 1)
+  applySocialEvent(b.social, child.id, 'help', 1)
+  applySocialEvent(child.social, a.id, 'meet', 1)
+  applySocialEvent(child.social, b.id, 'meet', 1)
+  void house
   emit(sim, 'birth', a, b, a.pos.x, a.pos.z)
   a.action = 'birth'
   b.action = 'birth'

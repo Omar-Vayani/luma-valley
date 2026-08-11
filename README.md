@@ -1,44 +1,53 @@
-# Luma Valley
+# Luma Haven
 
-A 3D artificial-life game inspired by the original *Creatures* (1996). Raise tiny creatures with **real brains** — neural networks that learn from pleasure and pain, heritable genetics, biochemistry, and permadeath that makes every little life matter.
+A first-person artificial-life game — a spiritual successor to the *idea* of *Creatures* (1996), not a copy. You live among **Luma**, autonomous beings with genetics, needs, emotions, memories, relationships, jobs, and a small functioning settlement.
 
-**Live demo:** deploy via Netlify — or run locally with `npm run dev`.
+**Offline-first.** Runs in any modern browser. No account, no mandatory cloud AI.
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/Omar-Vayani/luma-valley)
-
-## What makes it alive (not scripted)
-
-- **Neural-net brains** — each creature has a small network of neurons (perception → decision → motor) with dendrite weights, thresholds, and leak.
-- **Learning** — pleasure/pain chemicals reinforce the connections that caused the behavior (Hebbian + eligibility traces). You can literally *train* a creature: feed it when it comes to you, and it learns to come.
-- **Biochemistry** — hunger, thirst, fatigue, boredom, loneliness, fear, pleasure, pain, health. Drives are chemicals feeding the brain.
-- **Genetics** — chromosome-style genes control appearance, temperament, brain parameters, lifespan, and fertility. Breeding mixes parents' genomes with mutation; children look and behave like their parents.
-- **Language** — teach words ("food", "water", "come") and creatures respond to them.
-- **World** — a procedural low-poly valley with a stream, berry bushes, a den, and a day/night cycle. Your world is yours — fixed by seed, saved with you.
-- **Persistence** — autosave to your browser, three manual slots, and export/import `.luma.json` save files (a few dozen KB per world).
-
-## Controls
-
-- **Tap/click** a creature to select it and open its care panel
-- **Feed / Tickle / Carry** — build a bond; every interaction is reinforcement learning
-- **Teach words** — type a word or use the chips; creatures learn and respond
-- **Drag** to orbit the camera; scroll to zoom; **☰ menu** for saves, gentle mode, follow, sound
-- **Gentle mode** — no permadeath from hunger/thirst (old age still comes for everyone)
-
-## Tech
-
-- Vite + React 19 + TypeScript, Three.js (WebGL), pure-TS TDD simulation core (48 unit tests)
-- Works in any modern browser — desktop and mobile
-- No backend, no accounts, no assets to download — everything is procedural
-
-## Development
+## Quick start
 
 ```bash
 npm install
-npm run dev       # local dev server
-npm test          # vitest (sim core)
-npm run lint      # oxlint
+npm run dev       # open the local URL (Vite)
+npm test          # simulation + UI contract tests
 npm run build     # production build → dist/
 ```
+
+Or open a Netlify deploy of this repo. On first launch you wake in the plaza of **Haven** with a handful of Luma already living their lives.
+
+### Controls
+
+| Input | Action |
+|---|---|
+| WASD / left touch zone | Move |
+| Mouse look / right touch zone | Look |
+| Click lock button | Pointer lock (desktop) |
+| Tap a Luma | Select + open talk |
+| 🗨️ Talk | Type natural language (greet, ask, request, flirt, apologize…) |
+| 🧠 Inspector | Why did they do that? needs, scores, bonds, memories |
+| ⚙️ Settings | Quality, population cap, AI batch, gentle mode, save |
+| Dock tools | Spawn, drop bread/coins, comfort/heal/gift, poke/hit/scare/rob |
+| 💬 Teach | Associate a word with a concept nearby Luma can learn |
+
+Saves autosave to the browser (~every 20s). Use **save now** in settings, or `?fresh=1` to start clean.
+
+## What is alive (not scripted)
+
+- Utility mind + tiny neural net + psyche — decisions from needs, genes, reputation, habits
+- Multidimensional relationships (trust, affection, attraction, resentment…)
+- Love, jealousy, households, abstract reproduction with inheritance
+- Economy with scarcity prices, work, bank, clinic, pharmacy, tavern, market
+- Theft, gossip, forgiveness, rivalry — events ripple through memory and reputation
+- Typed conversation: creatures evaluate trust before believing or obeying
+
+## Performance (G14 / RTX 5070 laptop class)
+
+Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio cap 1.5. Distant / sleeping Luma update less often. Trade quality, population, and AI batch in settings. Frame-cost readout helps you stay near ~16 ms/frame.
+
+## Docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack choice, systems, limits
+- [`DESIGN.md`](DESIGN.md) — visual direction
 
 ## License
 

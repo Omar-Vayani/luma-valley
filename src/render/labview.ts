@@ -14,6 +14,7 @@ import { hairStyle } from '../lab/hair'
 import { SoundEngine } from '../lab/audio'
 import { refreshBrain, clampCoord } from '../lab/sim'
 import { ITEM_IDS, type ItemId } from '../lab/inventory'
+import { recordFrameTime } from '../lab/lod'
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -469,6 +470,30 @@ export class LabView {
     this.renderer.domElement.remove()
   }
 
+  setSpeed(s: number): void {
+    this.speed = s
+  }
+
+  setPaused(p: boolean): void {
+    this.paused = p
+  }
+
+  /** Apply graphics/sim presentation settings from the HUD. */
+  applySettings(s: { pixelRatioCap?: number; showLabels?: boolean; showParticles?: boolean }): void {
+    if (s.pixelRatioCap != null) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, s.pixelRatioCap))
+    }
+    this.showLabels = s.showLabels ?? this.showLabels
+    this.showParticles = s.showParticles ?? this.showParticles
+    for (const rig of this.rigs) {
+      if (rig.nameLabel) rig.nameLabel.visible = this.showLabels
+      if (rig.emotionBadgeGroup) rig.emotionBadgeGroup.visible = this.showLabels
+    }
+  }
+
+  showLabels = true
+  showParticles = true
+
   // ── towers: houses with real gabled roofs, chimneys, framed windows, doors
   //    with steps, and a wooden sign post beside the door. graveyard / den /
   //    school / farm / park get their own themed builds. ──
@@ -506,9 +531,10 @@ export class LabView {
 
   /** The standard tower: gabled house with overhanging roof, chimney, framed windows, door + step. */
   private buildHouse(group: THREE.Group, t: Tower, color: THREE.Color): void {
-    // the pharmacy reads as a clinic: white plaster walls under the same roof
-    const wallMat = mkMat(t.id === 'pharmacy' ? 0xf2f2ee : color.clone().multiplyScalar(0.8), { roughness: 0.95 })
-    const trimMat = mkMat(t.id === 'pharmacy' ? 0xb8e0d0 : color.clone().multiplyScalar(1.18), { roughness: 0.8 })
+    // the pharmacy / clinic read as medical: white plaster walls under the same roof
+    const medical = t.id === 'pharmacy' || t.id === 'clinic'
+    const wallMat = mkMat(medical ? 0xf2f2ee : color.clone().multiplyScalar(0.8), { roughness: 0.95 })
+    const trimMat = mkMat(medical ? (t.id === 'clinic' ? 0xe07070 : 0xb8e0d0) : color.clone().multiplyScalar(1.18), { roughness: 0.8 })
     const roofMat = mkMat(color.clone().multiplyScalar(1.3), { roughness: 0.55 })
     const ridgeMat = mkMat(color.clone().multiplyScalar(0.85), { roughness: 0.6 })
 
@@ -583,8 +609,20 @@ export class LabView {
         coin.position.set(3.7, 0.07 + i * 0.15, 2.8)
         group.add(coin)
       }
-    } else if (t.id === 'pharmacy') {
-      // clinic identity: red cross over the door + potted plant on white walls
+    } else if (t.id === 'pharmacy' || t.id === 'clinic') {
+      // medical identity: red cross over the door + potted plant on white walls
+      const crossV = mkBox(0.35, 1.4, 0.12, 0xc04040)
+      crossV.position.set(0, 4.2, 3.4)
+      group.add(crossV)
+      const crossH = mkBox(1.1, 0.35, 0.12, 0xc04040)
+      crossH.position.set(0, 4.2, 3.4)
+      group.add(crossH)
+      if (t.id === 'clinic') {
+        // canopy marking the treatment entrance
+        const canopy = mkBox(3.2, 0.12, 1.2, 0xe8f0f2)
+        canopy.position.set(0, 3.7, 3.9)
+        group.add(canopy)
+      }
       const crossMat = mkMat(0xd94a4a)
       const v = mkBox(0.3, 1.0, 0.06, crossMat)
       v.position.set(0, 2.7, 3.33)
@@ -1478,6 +1516,7 @@ export class LabView {
   }
 
   private spawnParticle(mesh: THREE.Object3D, x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number): void {
+    if (!this.showParticles) return
     mesh.position.set(x, y, z)
     this.scene.add(mesh)
     this.particles.push({ mesh: mesh as THREE.Mesh | THREE.Sprite, life, max: life, vy, vx, vz })
@@ -1525,6 +1564,7 @@ export class LabView {
     this.updateCamera(dt)
 
     this.renderer.render(this.scene, this.camera)
+    recordFrameTime(this.sim.lod, (performance.now() - now))
   }
 
   private syncRigs(dt: number): void {
@@ -1893,14 +1933,6 @@ export class LabView {
     const ground = new THREE.Vector3()
     const hit = this.raycaster.ray.intersectPlane(this.groundPlane, ground)
     if (hit) this.callbacks.onTapWorld(ground.x, ground.z)
-  }
-
-  setPaused(p: boolean): void {
-    this.paused = p
-  }
-
-  setSpeed(s: number): void {
-    this.speed = s
   }
 
   resetCamera(): void {
