@@ -16,6 +16,8 @@ import { createVengeance, type VengeanceState } from './vengeance'
 import { createWant, wantForState } from './wants'
 import { createSocialGraph, type SocialGraph } from './socialbond'
 import { createPsyche, type Psyche } from './psyche'
+import { createBeliefs, createHabits, type BeliefStore, type HabitStore } from './beliefs'
+import { lifeStageFor, type LifeStage } from './lifecycle'
 import type { Genome } from './genetics'
 import type { ActionName } from './mind'
 import { clamp01 } from './util'
@@ -73,6 +75,20 @@ export interface Creature {
   recentDialogue: string[]
   /** Illness 0..1 — treated at clinic; pharmacy sells medicine. */
   illness: number
+  /** Injury 0..1 — physical wounds, treated differently from illness. */
+  injury: number
+  /** What this creature thinks is true, with confidence and provenance. */
+  beliefs: BeliefStore
+  /** Repeated behavior biases (learned routine). */
+  habits: HabitStore
+  /** Claimed job role, if any (shopkeep, healer, bartender, …). */
+  job: string | null
+  /** Cached life stage; recomputed as the creature ages. */
+  stage: LifeStage
+  /** Ticks spent pressed against an obstacle without progress. */
+  stuckTicks: number
+  /** Which way this creature prefers to walk around a wall (+1 / -1). */
+  detourSign: number
   knowsTower(towerId: string): boolean
   learnTower(towerId: string): void
   hurt(amount: number): void
@@ -137,6 +153,13 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     parentIds: [],
     recentDialogue: [],
     illness: 0,
+    injury: 0,
+    beliefs: createBeliefs(),
+    habits: createHabits(),
+    job: null,
+    stage: lifeStageFor(0),
+    stuckTicks: 0,
+    detourSign: id % 2 === 0 ? 1 : -1,
     knowsTower(towerId: string): boolean {
       return (c.knowledge[towerId] ?? 0) > 0.3
     },

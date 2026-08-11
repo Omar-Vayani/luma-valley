@@ -85,24 +85,48 @@ export function loadCreatureState(storage: CreatureStorage, id: number): unknown
   }
 }
 
-const WORLD_KEY = 'luma-haven-world-v5'
+const WORLD_KEY = 'luma-haven-world'
+
+/** Autosave slot 0; manual slots 1..3. */
+function worldKey(slot = 0): string {
+  return slot === 0 ? WORLD_KEY : `${WORLD_KEY}-slot${slot}`
+}
 
 /** Autosave the whole world blob (versioned LabSave JSON). */
-export function saveWorldBlob(json: string): boolean {
+export function saveWorldBlob(json: string, slot = 0): boolean {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return false
-    window.localStorage.setItem(WORLD_KEY, json)
+    // keep a one-deep backup of the autosave so a corrupt write is recoverable
+    if (slot === 0) {
+      const previous = window.localStorage.getItem(worldKey(0))
+      if (previous) window.localStorage.setItem(`${WORLD_KEY}-backup`, previous)
+    }
+    window.localStorage.setItem(worldKey(slot), json)
     return true
   } catch {
     return false
   }
 }
 
-export function loadWorldBlob(): string | null {
+export function loadWorldBlob(slot = 0): string | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null
-    return window.localStorage.getItem(WORLD_KEY)
+    return window.localStorage.getItem(worldKey(slot))
   } catch {
     return null
   }
+}
+
+/** The previous autosave, used when the newest one fails to parse. */
+export function loadWorldBackup(): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage.getItem(`${WORLD_KEY}-backup`)
+  } catch {
+    return null
+  }
+}
+
+export function hasWorldSlot(slot: number): boolean {
+  return loadWorldBlob(slot) !== null
 }

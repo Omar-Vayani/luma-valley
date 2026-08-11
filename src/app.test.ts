@@ -104,6 +104,40 @@ describe('App Luma Haven UI', () => {
     expect(css).toContain('.settings')
   })
 
+  it('shows the society pulse: norms, jobs, overheard talk, chronicle', () => {
+    expect(app).toContain('data-society')
+    expect(app).toContain('inspectSociety')
+    expect(app).toContain('data-society-norms')
+    expect(app).toContain('data-society-jobs')
+    expect(app).toContain('data-society-overheard')
+    expect(css).toContain('.society')
+  })
+
+  it('exposes debugging depth: beliefs, habits, family, promises, perf overlay', () => {
+    expect(app).toContain('data-inspector-beliefs')
+    expect(app).toContain('data-inspector-habits')
+    expect(app).toContain('data-inspector-family')
+    expect(app).toContain('data-inspector-promises')
+    expect(app).toContain('data-perf-overlay')
+    expect(app).toContain("e.key === 'F3'")
+    expect(css).toContain('.perf')
+  })
+
+  it('manages saves: slots, export, import, and graceful recovery', () => {
+    expect(app).toContain('data-save-slots')
+    expect(app).toContain('data-export-save')
+    expect(app).toContain('data-import-save')
+    expect(app).toContain('loadWorldBackup')
+    expect(app).toContain('hasWorldSlot')
+  })
+
+  it('seeds a starter society with households and children', () => {
+    expect(app).toContain('seedStarterSociety')
+    expect(app).toContain('ensureCoupleHousehold')
+    expect(app).toContain('adoptChild')
+    expect(app).toContain('transmitCulture')
+  })
+
   it('lab.css provides the dock, chip, 56px buttons, and safe-area insets', () => {
     expect(css).toContain('.dock')
     expect(css).toContain('.chip')

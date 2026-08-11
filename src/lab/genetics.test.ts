@@ -4,7 +4,7 @@ import { randomGenome, crossover, mutate, GENE_NAMES, type Genome } from './gene
 const G = (): Genome => randomGenome(() => 0.5)
 
 describe('genetics — heritable personality', () => {
-  it('exposes all twelve susceptibility genes in 0..1', () => {
+  it('exposes every susceptibility and body gene in 0..1', () => {
     const g = G()
     for (const name of GENE_NAMES) {
       expect(g[name]).toBeGreaterThanOrEqual(0)
@@ -23,7 +23,7 @@ describe('genetics — heritable personality', () => {
     const a = randomGenome(() => 0.1)
     const b = randomGenome(() => 0.9)
     // rng() < 0.5 picks a, else b — force a-picks then b-picks per call
-    const picks: number[] = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
+    const picks: number[] = GENE_NAMES.map(() => 0.2)
     const child = crossover(a, b, () => picks.shift() ?? 0.9)
     for (const name of GENE_NAMES) {
       expect(child[name]).toBeCloseTo(0.1, 5)

@@ -1061,3 +1061,118 @@ button { font: inherit; cursor: pointer; }
   background: var(--amber);
   color: #1c1a14;
 }
+
+/* ── society panel, perf overlay, save slots ── */
+.society {
+  position: absolute;
+  z-index: 12;
+  right: 12px;
+  top: 64px;
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(72vh, 560px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.3);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  color: var(--ink);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 28px rgba(20, 16, 10, 0.35);
+}
+.society-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.society-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.society-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 40px;
+  min-height: 40px;
+}
+.society h3 {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+.society-line {
+  margin: 0 0 4px;
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+.society-jobs,
+.society-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.society-overheard div,
+.society-chronicle div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.society-empty {
+  font-size: 0.82rem;
+  opacity: 0.6;
+}
+.chip-dim {
+  opacity: 0.55;
+}
+.inspector-family div,
+.inspector-beliefs div,
+.inspector-promises div {
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.inspector-habits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.perf {
+  position: absolute;
+  z-index: 14;
+  left: 12px;
+  bottom: 96px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(16, 14, 10, 0.78);
+  color: #e8dcc0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.save-note {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 110px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(16, 14, 10, 0.85);
+  color: #e8dcc0;
+  font-size: 0.85rem;
+}
+.settings-saves {
+  flex-wrap: wrap;
+}
+.slot-pair {
+  display: inline-flex;
+  gap: 4px;
+}

@@ -18,6 +18,10 @@ import { marketPrice } from './economy'
 import { findTower, towerAt } from './world'
 import { trustTowards, reputationOf } from './reputation'
 import { revengeScore } from './vengeance'
+import { normPressure } from './norms'
+import { emotionalRiskBias } from './emotions'
+import { riskModifier } from './psyche'
+import { vigorFor, isMature } from './lifecycle'
 import { dist } from './util'
 
 export type ActionName =
@@ -86,6 +90,14 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
   const near = nearestOther(sim, c, 3)
   const moneyDrop = nearestMoneyDrop(sim, c, 40)
 
+  // Norm pressure: the settlement's expectations, filtered through this
+  // creature's conformity. Strong norms make transgressions feel costlier.
+  const propertyNorm = normPressure(sim.culture, c, 'property')
+  const violenceNorm = normPressure(sim.culture, c, 'nonviolence')
+  const generosityNorm = normPressure(sim.culture, c, 'generosity')
+  // Emotion and psyche shift how much risk feels acceptable right now.
+  const risk = 1 + emotionalRiskBias(c.emotions) + riskModifier(c)
+
   // ── social awareness: what do I believe about the creature next to me? ──
   // trust: -1..1 (negative = distrust). Reputation is hearsay-tolerant: a
   // creature can distrust a known thief it has never met (gossip network).
@@ -131,14 +143,22 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     // (and when the shelf is empty, food loses its pull — go earn/steal instead)
     // Knowledge-gated: a creature that never saw the food tower must explore first.
     food: (press.hungry * (0.9 + g.greed * 0.3) * (canAffordFood ? 1 : 0.25) * (breadInStock ? 1 : 0.2) + (canAffordFood ? starving : 0) * (breadInStock ? 1 : 0.1)) * (c.knowsTower('food') ? 1 : 0.15),
-    // work: needed to afford food/medicine; honest creatures work, thieves prefer other means
-    work: ((hungry > 0 ? (canAffordFood ? 0.15 : 1) : 0) * (0.6 + g.greed * 0.4) + starving * (canAffordFood ? 0.4 : (1 - g.theft) * 1.6) + bleedingOut * 0.6) * (c.knowsTower('work') ? 1 : 0.15),
+    // work: needed to afford food/medicine; honest creatures work, thieves
+    // prefer other means. A creature with a claimed role also works for
+    // purpose, not only because the belly is empty. Children do not work.
+    work: (((hungry > 0 ? (canAffordFood ? 0.15 : 1) : 0) * (0.6 + g.greed * 0.4)
+      + starving * (canAffordFood ? 0.4 : (1 - g.theft) * 1.6)
+      + bleedingOut * 0.6
+      + (c.job ? 0.3 + (1 - c.chem.purpose) * 0.5 : 0))
+      * (c.knowsTower('work') || c.job ? 1 : 0.15))
+      * (isMature(c.stage) ? 1 : 0.05),
     // sleep: tired or at home
     sleep: press.tired * (at?.id === 'homes' ? 1.2 : 0.8) + collapsing,
     // heal: wounded, only if affordable
     heal: (wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut) * (c.knowsTower('pharmacy') ? 1 : 0.2),
-    // clinic: illness or severe injury — more effective than pharmacy alone
-    clinic: ((c.illness > 0.2 ? 1.4 : 0) + (hp < 0.45 ? 0.8 : 0)) * (c.wallet >= 5 ? 1 : 0.2) * (c.knowsTower('clinic') ? 1 : 0.2),
+    // clinic: illness or a real wound — more effective than pharmacy alone
+    clinic: ((c.illness > 0.2 ? 1.4 : 0) + (c.injury > 0.25 ? 1.2 : 0) + (hp < 0.45 ? 0.8 : 0))
+      * (c.wallet >= 5 ? 1 : 0.2) * (c.knowsTower('clinic') ? 1 : 0.2),
     // drink: ONLY a sad/bored creature or a real addict craves a drink. A
     // happy creature at a tavern has no reason to drink (no instant booze death).
     drink: ((c.chem.addiction.brew ?? 0) * 2.2 + press.bored * 1.1) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9) * (c.knowsTower('tavern') ? 1 : 0.15),
@@ -171,9 +191,16 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
       * (0.2 + g.theft * 1.6)
       * (near && near.wallet > 0 ? 1.4 : 0.05)
       * (bondedNear ? BOND_PENALTY : 1)
-      * (near && (knownProtector || trustNear > 0.3) ? 0.3 : 1),
+      * (near && (knownProtector || trustNear > 0.3) ? 0.3 : 1)
+      // a settlement that punishes theft makes thieves think twice
+      * (1 - propertyNorm * 0.55)
+      * Math.max(0.3, risk)
+      // guilt and shame from past wrongs restrain the next one
+      * (1 - c.emotions.guilt * 0.3 - c.emotions.shame * 0.2),
     // share: grateful + social conscience + reciprocity + affection
-    share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6 + c.emotions.affection * 0.5 + c.emotions.joy * 0.3)
+    share: ((c.gratitude[near?.id ?? 0] ?? 0) * 1.2 + c.drives.reciprocity * 0.6 + c.emotions.affection * 0.5
+      + c.emotions.joy * 0.3 + c.emotions.gratitude * 0.5 + c.emotions.guilt * 0.6)
+      * (0.6 + generosityNorm * 0.8)
       * (near && near.wallet < 2 && c.wallet > 8 ? 1.5 : 0.1),
     // fight: vendetta + REVENGE + aggression + spite/resentment + tribal + protect friends
     // + shun known aggressors. A bond to the target dampens it, never blocks.
@@ -183,7 +210,12 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
       + tribalDefense(sim, c, near)
       + protectFriend(sim, c)
       + (knownAggressor && near ? 0.6 : 0))
-      * (bondedNear ? BOND_PENALTY + 0.25 : 1),
+      * (bondedNear ? BOND_PENALTY + 0.25 : 1)
+      // a community that condemns violence dampens the swing
+      * (1 - violenceNorm * 0.45)
+      * Math.max(0.3, risk)
+      // children and elders are not brawlers
+      * vigorFor(c.stage),
     // collect: poor/greedy + hoarding drive + envy (hoard-hoarding) and a pile
     // nearby (hoarders grab free money even when they already have some)
     collect: ((c.wallet < 4 ? 0.8 : 0.2) + g.greed * 0.9 + c.drives.greed * 0.8 + c.emotions.envy * 0.7) * (moneyDrop ? 1.4 : 0.05),

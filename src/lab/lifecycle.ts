@@ -14,6 +14,45 @@ export const AGE_LIMIT_SPREAD = 1500 // genetic variation
 export const PLAYER_BOND_THRESHOLD = 0.55 // bonds above this shield from aging
 export const CREATURE_STORAGE_BYTES = 3 * 1024 * 1024 // 3MB per creature
 
+/** Life stages: childhood shapes learning, elders slow down. */
+export type LifeStage = 'child' | 'adolescent' | 'adult' | 'elder'
+
+export const CHILD_UNTIL = 400
+export const ADOLESCENT_UNTIL = 600
+export const ELDER_FROM = 2600
+
+export function lifeStageFor(age: number): LifeStage {
+  if (age < CHILD_UNTIL) return 'child'
+  if (age < ADOLESCENT_UNTIL) return 'adolescent'
+  if (age < ELDER_FROM) return 'adult'
+  return 'elder'
+}
+
+/** Children learn faster; elders learn slower but keep what they know. */
+export function learningRateFor(stage: LifeStage): number {
+  switch (stage) {
+    case 'child': return 1.6
+    case 'adolescent': return 1.25
+    case 'adult': return 1
+    case 'elder': return 0.7
+  }
+}
+
+/** Only mature creatures work, court, and reproduce. */
+export function isMature(stage: LifeStage): boolean {
+  return stage === 'adult' || stage === 'elder'
+}
+
+/** Physical capability multiplier (children weak, elders fading). */
+export function vigorFor(stage: LifeStage): number {
+  switch (stage) {
+    case 'child': return 0.5
+    case 'adolescent': return 0.8
+    case 'adult': return 1
+    case 'elder': return 0.7
+  }
+}
+
 /** How much aging damage a creature takes at a given age (0 = none yet). */
 export function agingDamage(age: number, playerBond: number): number {
   if (isAgeProtected(age, playerBond)) return 0

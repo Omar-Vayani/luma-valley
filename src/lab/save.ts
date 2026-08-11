@@ -22,11 +22,18 @@ import type { HavenSociety } from './household'
 import { createSociety } from './household'
 import type { GameSettings } from './settings'
 import { DEFAULT_SETTINGS } from './settings'
+import { createBeliefs, createHabits, type BeliefStore, type HabitStore } from './beliefs'
+import { createChatter, type ChatterState } from './chatter'
+import { createCulture, type Culture } from './norms'
+import { createJobBoard, type JobBoard } from './jobs'
+import { createLedger, type Ledger } from './economy'
+import { lifeStageFor } from './lifecycle'
+import { completeGenome } from './genetics'
 
-export const SAVE_VERSION = 5
+export const SAVE_VERSION = 6
 
 export interface LabSave {
-  version: 4 | 5
+  version: 4 | 5 | 6
   seed: number
   time: number
   nextId: number
@@ -37,6 +44,10 @@ export interface LabSave {
   player: SavedPlayer
   society?: HavenSociety
   settings?: Partial<GameSettings>
+  chatter?: ChatterState
+  culture?: Culture
+  jobs?: JobBoard
+  ledger?: Ledger
 }
 
 interface SavedCreature {
@@ -81,6 +92,10 @@ interface SavedCreature {
   parentIds?: number[]
   recentDialogue?: string[]
   illness?: number
+  injury?: number
+  beliefs?: BeliefStore
+  habits?: HabitStore
+  job?: string | null
 }
 
 export interface SavedPlayer {
@@ -153,9 +168,13 @@ export function saveSim(sim: Sim): LabSave {
     parentIds: [...c.parentIds],
     recentDialogue: [...c.recentDialogue],
     illness: c.illness,
+    injury: c.injury,
+    beliefs: JSON.parse(JSON.stringify(c.beliefs)),
+    habits: { ...c.habits },
+    job: c.job,
   }))
   return {
-    version: 5,
+    version: 6,
     seed: sim.seed,
     time: sim.time,
     nextId: sim.nextId,
@@ -184,13 +203,20 @@ export function saveSim(sim: Sim): LabSave {
     },
     society: JSON.parse(JSON.stringify(sim.society)),
     settings: { ...sim.settings },
+    chatter: JSON.parse(JSON.stringify(sim.chatter)),
+    culture: JSON.parse(JSON.stringify(sim.culture)),
+    jobs: JSON.parse(JSON.stringify(sim.jobs)),
+    ledger: JSON.parse(JSON.stringify(sim.ledger)),
   }
 }
 
+/** Oldest save version this build can still read. */
+export const MIN_SAVE_VERSION = 4
+
 export function loadSim(data: LabSave): Sim {
-  if (data.version !== 4 && data.version !== 5) {
+  if (data.version < MIN_SAVE_VERSION || data.version > SAVE_VERSION) {
     throw new Error(
-      `save version ${data.version} not supported (need 4–5) — old saves were rebuilt`,
+      `save version ${data.version} not supported (need ${MIN_SAVE_VERSION}–${SAVE_VERSION}) — old saves were rebuilt`,
     )
   }
   const sim = createSim(data.seed)
@@ -198,9 +224,15 @@ export function loadSim(data: LabSave): Sim {
   sim.nextId = data.nextId
   if (data.settings) sim.settings = { ...DEFAULT_SETTINGS, ...data.settings }
   sim.society = data.society ? JSON.parse(JSON.stringify(data.society)) : createSociety()
+  sim.chatter = data.chatter ? JSON.parse(JSON.stringify(data.chatter)) : createChatter()
+  sim.culture = data.culture
+    ? { ...createCulture(), ...JSON.parse(JSON.stringify(data.culture)) }
+    : createCulture()
+  sim.jobs = data.jobs ? JSON.parse(JSON.stringify(data.jobs)) : createJobBoard()
+  sim.ledger = data.ledger ? JSON.parse(JSON.stringify(data.ledger)) : createLedger()
 
   sim.creatures = data.creatures.map((sc) => {
-    const c = createCreature(sc.id, sc.name, sc.genome, sc.pos.x, sc.pos.z)
+    const c = createCreature(sc.id, sc.name, completeGenome(sc.genome), sc.pos.x, sc.pos.z)
     c.chem = { ...createChem(), ...JSON.parse(JSON.stringify(sc.chem)) }
     c.memory = { ...createMemory(), ...JSON.parse(JSON.stringify(sc.memory)) }
     c.facing = sc.facing
@@ -258,6 +290,11 @@ export function loadSim(data: LabSave): Sim {
     c.parentIds = sc.parentIds ? [...sc.parentIds] : []
     c.recentDialogue = sc.recentDialogue ? [...sc.recentDialogue] : []
     c.illness = sc.illness ?? 0
+    c.injury = sc.injury ?? 0
+    c.beliefs = sc.beliefs ? JSON.parse(JSON.stringify(sc.beliefs)) : createBeliefs()
+    c.habits = sc.habits ? { ...sc.habits } : createHabits()
+    c.job = sc.job ?? null
+    c.stage = lifeStageFor(c.age)
     return c
   })
   sim.rng = mulberry32(data.seed + data.time)

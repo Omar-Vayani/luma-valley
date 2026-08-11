@@ -35,6 +35,7 @@ export type IntentKind =
   | 'promise'
   | 'gossip'
   | 'farewell'
+  | 'talk_small'
   | 'unknown'
 
 export interface SemanticMessage {

@@ -176,19 +176,48 @@ function buildItemMesh(id: ItemId): THREE.Object3D {
     }
     case 'stick':
       return mkBox(0.16, 0.16, 1.3, 0x76502f)
+    case 'water': {
+      const jug = mkCyl(0.16, 0.18, 0.46, 10, 0x6fc2d9)
+      const lip = mkCyl(0.08, 0.1, 0.1, 8, 0xcfeef6)
+      lip.position.y = 0.28
+      const g = new THREE.Group()
+      g.add(jug, lip)
+      return g
+    }
+    case 'cloak': {
+      const fold = mkBox(0.46, 0.5, 0.22, 0x8a6a9a)
+      fold.rotation.z = 0.2
+      return fold
+    }
+    case 'trinket':
+      return new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), mkMat(0xb8d9e8, { roughness: 0.2 }))
+    case 'gem':
+      return new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.22, 0),
+        mkMat(0x4fd9a1, { emissive: 0x1a6a4a, emissiveIntensity: 0.4, roughness: 0.15 }),
+      )
+    case 'satchel': {
+      const bag = mkBox(0.44, 0.4, 0.26, 0x8a6440)
+      const flap = mkBox(0.46, 0.16, 0.28, 0x6e4a2e)
+      flap.position.y = 0.16
+      const g = new THREE.Group()
+      g.add(bag, flap)
+      return g
+    }
+    case 'timber':
+      return mkCyl(0.14, 0.14, 1, 8, 0x8a6440)
+    case 'grain': {
+      const sheaf = mkCyl(0.16, 0.1, 0.6, 8, 0xd9c46a)
+      return sheaf
+    }
   }
 }
 
 /** One shared model per good; rigs clone() these. */
-const ITEM_MESHES: Record<ItemId, THREE.Object3D> = {
-  bread: buildItemMesh('bread'),
-  medicine: buildItemMesh('medicine'),
-  brew: buildItemMesh('brew'),
-  herb: buildItemMesh('herb'),
-  spark: buildItemMesh('spark'),
-  tonic: buildItemMesh('tonic'),
-  stick: buildItemMesh('stick'),
-}
+const ITEM_MESHES: Record<ItemId, THREE.Object3D> = ITEM_IDS.reduce((acc, id) => {
+  acc[id] = buildItemMesh(id)
+  return acc
+}, {} as Record<ItemId, THREE.Object3D>)
 
 /** Total units a creature carries in its inventory (badge number). */
 function carriedCount(c: Creature): number {
@@ -493,6 +522,23 @@ export class LabView {
 
   showLabels = true
   showParticles = true
+
+  /** Replace the simulation (loading a save) without rebuilding the scene. */
+  swapSim(next: Sim): void {
+    for (const rig of this.rigs) this.scene.remove(rig.group)
+    this.rigs = []
+    this.knownIds.clear()
+    for (const m of this.dropMarkers) this.scene.remove(m.mesh)
+    this.dropMarkers = []
+    for (const g of this.graveMarkers) this.scene.remove(g.mesh)
+    this.graveMarkers = []
+    this.sim = next
+    for (const c of next.creatures) {
+      this.knownIds.add(c.id)
+      this.addCreature(c)
+    }
+    ;(window as unknown as Record<string, unknown>).__lab = { view: this, sim: next }
+  }
 
   // ── towers: houses with real gabled roofs, chimneys, framed windows, doors
   //    with steps, and a wooden sign post beside the door. graveyard / den /

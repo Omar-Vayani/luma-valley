@@ -13,15 +13,20 @@ import { getReputation, trustTowards } from './reputation'
 import { estimateCreatureCostKb } from './lod'
 import { DRIVE_KEYS } from './drives'
 import { EMOTION_KEYS } from './emotions'
+import { promisesTo } from './chatter'
+import { currentLeader } from './norms'
+import { wealthInequality, totalOwedBy } from './economy'
 
 export interface InspectReport {
   id: number
   name: string
   alive: boolean
   age: number
+  stage: string
   action: string
   intention: string | null
   emotion: string
+  mood: string
   needs: { key: string; value: number }[]
   topScores: { action: string; score: number }[]
   reasoning: string[]
@@ -39,6 +44,19 @@ export interface InspectReport {
   inventory: string[]
   costKb: number
   recentTalk: string[]
+  /** learned behavioral biases: action -> strength */
+  habits: { key: string; value: number }[]
+  /** uncertain knowledge with provenance */
+  beliefKeys: { key: string; value: number; confidence: number; source: string }[]
+  /** parents and children by name */
+  family: { parents: string[]; children: string[]; partner: string | null }
+  /** open promises made to this creature */
+  promises: string[]
+  /** claimed institutional role */
+  role: string | null
+  /** health detail */
+  illness: number
+  injury: number
 }
 
 export function inspectCreature(sim: Sim, c: Creature): InspectReport {
@@ -108,14 +126,37 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     .filter(([, n]) => n > 0)
     .map(([id, n]) => `${id}×${n}`)
 
+  const parents = c.parentIds.map((id) => sim.creatureById(id)?.name ?? `#${id}`)
+  const children = sim.creatures
+    .filter((o) => o.parentIds.includes(c.id))
+    .map((o) => o.name)
+  const partner = c.partnerId !== null ? sim.creatureById(c.partnerId)?.name ?? null : null
+
+  const habits = Object.entries(c.habits)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([key, value]) => ({ key, value }))
+
+  const beliefKeys = Object.values(c.beliefs)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 8)
+    .map((b) => ({ key: b.key, value: b.value, confidence: b.confidence, source: b.source }))
+
+  const promises = promisesTo(sim.chatter, c.id).map((p) => {
+    const who = sim.creatureById(p.promiserId)?.name ?? `#${p.promiserId}`
+    return `${who} owes ${p.about}`
+  })
+
   return {
     id: c.id,
     name: c.name,
     alive: c.alive,
     age: c.age,
+    stage: c.stage,
     action: c.action,
     intention: c.intention,
     emotion: emotion.type,
+    mood: c.psyche?.mood ?? 'content',
     needs: [
       { key: 'hunger', value: c.chem.hunger },
       { key: 'thirst', value: c.chem.thirst },
@@ -142,6 +183,13 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     inventory,
     costKb: estimateCreatureCostKb(c),
     recentTalk: (c.recentDialogue ?? []).slice(-4),
+    habits,
+    beliefKeys,
+    family: { parents, children, partner },
+    promises,
+    role: c.job,
+    illness: c.illness,
+    injury: c.injury,
   }
 }
 
@@ -178,7 +226,62 @@ function buildReasoning(
     lines.push(`Committed to "${c.intention}" for ${c.intentionTicks} more ticks.`)
   }
   if (c.householdId != null) lines.push(`Household #${c.householdId}.`)
+  if (c.job) lines.push(`Works as the settlement's ${c.job}.`)
+  if (c.chem.purpose < 0.3) lines.push('Low purpose — looking for something that matters.')
+  if (c.chem.privacy < 0.3) lines.push('Crowded — wants space.')
+  if (c.injury > 0.3) lines.push('Carrying an untreated wound.')
+  if (c.illness > 0.3) lines.push('Sick — the clinic is on their mind.')
+  const strongHabit = Object.entries(c.habits).sort((a, b) => b[1] - a[1])[0]
+  if (strongHabit && strongHabit[1] > 0.3) {
+    lines.push(`Habit: keeps returning to "${strongHabit[0]}".`)
+  }
+  const owed = totalOwedBy(sim.ledger, c.id)
+  if (owed > 0) lines.push(`Owes ${Math.round(owed)} coins to others.`)
   return lines
+}
+
+export interface SocietyReport {
+  population: number
+  norms: { key: string; value: number }[]
+  leader: string | null
+  inequality: number
+  households: number
+  staffed: string[]
+  vacancies: string[]
+  sharedWords: { concept: string; word: string }[]
+  chronicle: string[]
+  debts: number
+  overheard: string[]
+}
+
+/** A settlement-level readout: what kind of place has this become? */
+export function inspectSociety(sim: Sim): SocietyReport {
+  const living = sim.creatures.filter((c) => c.alive)
+  const leader = currentLeader(sim.culture, sim.creatures)
+  const staffed: string[] = []
+  const vacancies: string[] = []
+  for (const [jobId, holder] of Object.entries(sim.jobs.holders)) {
+    if (holder !== undefined) {
+      const who = sim.creatureById(holder)
+      staffed.push(`${jobId}: ${who?.name ?? holder}`)
+    }
+  }
+  for (const jobId of ['shopkeep', 'healer', 'bartender', 'farmer', 'porter', 'teacher']) {
+    if (sim.jobs.holders[jobId as keyof typeof sim.jobs.holders] === undefined) vacancies.push(jobId)
+  }
+  return {
+    population: living.length,
+    norms: Object.entries(sim.culture.norms).map(([key, value]) => ({ key, value })),
+    leader: leader?.name ?? null,
+    inequality: Math.round(wealthInequality(living.map((c) => c.wallet)) * 100) / 100,
+    households: sim.society.households.length,
+    staffed,
+    vacancies,
+    sharedWords: Object.entries(sim.culture.sharedWords).map(([concept, word]) => ({ concept, word })),
+    chronicle: sim.culture.chronicle.slice(-6).map((e) => e.text),
+    debts: sim.ledger.debts.length,
+    overheard: sim.overheard.slice(-5),
+  }
 }
 
 function nearest(sim: Sim, c: Creature): Creature | null {

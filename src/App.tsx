@@ -20,13 +20,16 @@ import { dist } from './lab/util'
 import type { ItemId } from './lab/inventory'
 import { GOODS, marketPrice, priceTrend } from './lab/economy'
 import { CONCEPTS } from './lab/language'
-import { inspectCreature, type InspectReport } from './lab/inspect'
+import { inspectCreature, inspectSociety, type InspectReport, type SocietyReport } from './lab/inspect'
 import {
   loadSettings, saveSettings, applyPreset, type GameSettings, type QualityPreset,
 } from './lab/settings'
 import { avgFrameMs } from './lab/lod'
 import { saveSim, loadSim } from './lab/save'
-import { saveWorldBlob, loadWorldBlob } from './lab/creature-storage'
+import { applySocialEvent } from './lab/socialbond'
+import { ensureCoupleHousehold, adoptChild } from './lab/household'
+import { transmitCulture } from './lab/norms'
+import { saveWorldBlob, loadWorldBlob, loadWorldBackup, hasWorldSlot } from './lab/creature-storage'
 
 import './lab.css'
 
@@ -86,12 +89,19 @@ const SUBSTANCE_EMOJI: Record<string, string> = {
 // Tiny icons for every item the player or a creature can hold.
 const ITEM_EMOJI: Record<ItemId, string> = {
   bread: '🍞',
+  water: '💧',
   medicine: '💊',
   brew: '🍺',
   herb: '🌿',
   spark: '✨',
   tonic: '🧪',
   stick: '🪓',
+  cloak: '🧥',
+  trinket: '🔮',
+  gem: '💎',
+  satchel: '🎒',
+  timber: '🪵',
+  grain: '🌾',
 }
 
 // Compact drive labels for the drives row (full titles live in the tooltip).
@@ -124,6 +134,69 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
   )
 }
 
+function SocietyPanel({ report, onClose }: { report: SocietyReport; onClose: () => void }) {
+  return (
+    <section className="society" data-society aria-label="society pulse">
+      <header className="society-head">
+        <h2>🏘️ Haven</h2>
+        <button type="button" className="society-close" data-society-close aria-label="Close society panel" onClick={onClose}>✕</button>
+      </header>
+      <p className="society-line">
+        {report.population} Luma · {report.households} households · inequality {report.inequality.toFixed(2)}
+      </p>
+      <p className="society-line">
+        {report.leader ? `Most respected: ${report.leader}` : 'No one stands out yet'}
+      </p>
+      <h3>norms</h3>
+      <div className="society-norms" data-society-norms>
+        {report.norms.map((n) => (
+          <Bar key={n.key} label={n.key} value={n.value} color="#c9a44f" />
+        ))}
+      </div>
+      <h3>work</h3>
+      <div className="society-jobs" data-society-jobs>
+        {report.staffed.length === 0 && <span className="society-empty">nobody has taken a role yet</span>}
+        {report.staffed.map((s) => (
+          <span key={s} className="chip">{s}</span>
+        ))}
+        {report.vacancies.map((v) => (
+          <span key={v} className="chip chip-dim">{v}: vacant</span>
+        ))}
+      </div>
+      {report.sharedWords.length > 0 && (
+        <>
+          <h3>shared words</h3>
+          <div className="society-words" data-society-words>
+            {report.sharedWords.map((w) => (
+              <span key={w.concept} className="chip">{w.concept} = <b>{w.word}</b></span>
+            ))}
+          </div>
+        </>
+      )}
+      {report.overheard.length > 0 && (
+        <>
+          <h3>overheard</h3>
+          <div className="society-overheard" data-society-overheard>
+            {report.overheard.map((line, i) => (
+              <div key={`${line}-${i}`}>{line}</div>
+            ))}
+          </div>
+        </>
+      )}
+      {report.chronicle.length > 0 && (
+        <>
+          <h3>chronicle</h3>
+          <div className="society-chronicle" data-society-chronicle>
+            {report.chronicle.map((line, i) => (
+              <div key={`${line}-${i}`}>{line}</div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: () => void }) {
   return (
     <section className="inspector" data-inspector aria-label="mind inspector">
@@ -131,7 +204,11 @@ function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: (
         <h2>🧠 {report.name}</h2>
         <button type="button" className="inspector-close" data-inspector-close aria-label="Close inspector" onClick={onClose}>✕</button>
       </header>
-      <p className="inspector-mood">{report.emotion} · {report.action}{report.intention ? ` → ${report.intention}` : ''}</p>
+      <p className="inspector-mood">
+        {report.stage} · {report.emotion} · {report.mood} · {report.action}
+        {report.intention ? ` → ${report.intention}` : ''}
+        {report.role ? ` · ${report.role}` : ''}
+      </p>
       <ul className="inspector-reason" data-inspector-reason>
         {report.reasoning.map((line) => (
           <li key={line}>{line}</li>
@@ -163,7 +240,43 @@ function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: (
         <span>🪙 {Math.round(report.wallet)} / 🏦 {Math.round(report.banked)}</span>
         <span>~{report.costKb} KB mind</span>
         <span>{report.job}</span>
+        {report.illness > 0.05 && <span>🤒 illness {report.illness.toFixed(2)}</span>}
+        {report.injury > 0.05 && <span>🩹 injury {report.injury.toFixed(2)}</span>}
       </div>
+      <div className="inspector-family" data-inspector-family>
+        <h3>family</h3>
+        <div>
+          {report.family.partner ? `partner: ${report.family.partner}` : 'no partner'}
+          {report.family.parents.length > 0 ? ` · parents: ${report.family.parents.join(', ')}` : ''}
+          {report.family.children.length > 0 ? ` · children: ${report.family.children.join(', ')}` : ''}
+        </div>
+      </div>
+      {report.habits.length > 0 && (
+        <div className="inspector-habits" data-inspector-habits>
+          <h3>habits</h3>
+          {report.habits.map((h) => (
+            <span key={h.key} className="chip">{h.key} {h.value.toFixed(2)}</span>
+          ))}
+        </div>
+      )}
+      {report.beliefKeys.length > 0 && (
+        <div className="inspector-beliefs" data-inspector-beliefs>
+          <h3>beliefs</h3>
+          {report.beliefKeys.map((b) => (
+            <div key={b.key}>
+              {b.key} = {b.value.toFixed(2)} (sure {b.confidence.toFixed(2)}, {b.source})
+            </div>
+          ))}
+        </div>
+      )}
+      {report.promises.length > 0 && (
+        <div className="inspector-promises" data-inspector-promises>
+          <h3>promises</h3>
+          {report.promises.map((p) => (
+            <div key={p}>{p}</div>
+          ))}
+        </div>
+      )}
       {report.memories.length > 0 && (
         <div className="inspector-mem" data-inspector-mem>
           <h3>memories</h3>
@@ -182,6 +295,52 @@ function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: (
       )}
     </section>
   )
+}
+
+/**
+ * A first session should open on a place with history, not eight strangers.
+ * Two households already exist, with partners bonded and children born into
+ * them; everyone else arrives as an unattached newcomer.
+ */
+function seedStarterSociety(sim: Sim): void {
+  const cap = sim.settings.populationCap
+  const total = Math.min(9, cap)
+  const made: ReturnType<Sim['spawnCreature']>[] = []
+  for (let i = 0; i < total; i++) {
+    const angle = (i / total) * Math.PI * 2
+    made.push(sim.spawnCreature(undefined, Math.cos(angle) * 14, Math.sin(angle) * 14))
+  }
+  // pair the first two couples and give each a child
+  for (const [a, b] of [[0, 1], [2, 3]] as const) {
+    const one = made[a]
+    const two = made[b]
+    if (!one || !two || one === two) continue
+    one.partnerId = two.id
+    two.partnerId = one.id
+    one.chem.bond = 0.75
+    two.chem.bond = 0.75
+    one.bonds[two.id] = 0.7
+    two.bonds[one.id] = 0.7
+    applySocialEvent(one.social, two.id, 'flirt', 2)
+    applySocialEvent(two.social, one.id, 'flirt', 2)
+    ensureCoupleHousehold(sim.society, one, two, 0)
+  }
+  const kidA = made[4]
+  const kidB = made[5]
+  if (kidA && made[0] && made[1]) {
+    kidA.age = 120
+    kidA.stage = 'child'
+    kidA.parentIds = [made[0].id, made[1].id]
+    adoptChild(sim.society, made[0], kidA)
+    transmitCulture(made[0], kidA)
+  }
+  if (kidB && made[2] && made[3]) {
+    kidB.age = 260
+    kidB.stage = 'child'
+    kidB.parentIds = [made[2].id, made[3].id]
+    adoptChild(sim.society, made[2], kidB)
+    transmitCulture(made[2], kidB)
+  }
 }
 
 export default function App() {
@@ -207,9 +366,12 @@ export default function App() {
   const [chatText, setChatText] = useState('')
   const [chatReply, setChatReply] = useState<string | null>(null)
   const [inspectOpen, setInspectOpen] = useState(false)
+  const [societyOpen, setSocietyOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useState<GameSettings>(() => loadSettings())
   const [perfMs, setPerfMs] = useState(0)
+  const [perfOverlay, setPerfOverlay] = useState(false)
+  const [saveNote, setSaveNote] = useState<string | null>(null)
 
   // view mode: first-person (you ARE the visitor) or top view (watch the world)
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
@@ -268,25 +430,27 @@ export default function App() {
     const seed = Number.isFinite(parsed) ? parsed : Math.floor(Math.random() * 1e9)
 
     let sim = createSim(seed)
-    // restore autosave when present (unless ?fresh=1 or explicit seed)
+    // restore autosave when present (unless ?fresh=1 or explicit seed);
+    // a corrupt newest save falls back to the previous one before giving up
     const fresh = params.get('fresh') === '1'
     if (!fresh && seedRaw === null) {
-      try {
-        const blob = loadWorldBlob()
-        if (blob) sim = loadSim(JSON.parse(blob))
-      } catch {
-        // corrupted save — start fresh
-        sim = createSim(seed)
+      const blob = loadWorldBlob()
+      if (blob) {
+        try {
+          sim = loadSim(JSON.parse(blob))
+        } catch {
+          const backup = loadWorldBackup()
+          try {
+            sim = backup ? loadSim(JSON.parse(backup)) : createSim(seed)
+          } catch {
+            sim = createSim(seed)
+          }
+        }
       }
     }
     sim.settings = { ...loadSettings() }
-    // modest starter society when empty
     if (sim.creatures.filter((c) => c.alive).length === 0) {
-      const starters = Math.min(8, sim.settings.populationCap)
-      for (let i = 0; i < starters; i++) {
-        const angle = (i / starters) * Math.PI * 2
-        sim.spawnCreature(undefined, Math.cos(angle) * 12, Math.sin(angle) * 12)
-      }
+      seedStarterSociety(sim)
     }
     simRef.current = sim
 
@@ -374,6 +538,18 @@ export default function App() {
     }
     document.addEventListener('pointerlockchange', onChange)
     return () => document.removeEventListener('pointerlockchange', onChange)
+  }, [])
+
+  // F3 toggles the performance overlay, the way a debug build should.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'F3') {
+        e.preventDefault()
+        setPerfOverlay((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const setToolMode = useCallback((mode: ToolMode): void => {
@@ -488,12 +664,64 @@ export default function App() {
     })
   }, [])
 
-  const manualSave = useCallback((): void => {
+  const manualSave = useCallback((slot?: number): void => {
     const s = simRef.current
     if (!s) return
-    saveWorldBlob(JSON.stringify(saveSim(s)))
+    const ok = saveWorldBlob(JSON.stringify(saveSim(s)), slot)
+    setSaveNote(ok ? `saved${slot ? ` to slot ${slot}` : ''}` : 'save failed (storage full?)')
+    window.setTimeout(() => setSaveNote(null), 2500)
     setTick((t) => t + 1)
   }, [])
+
+  const loadSlot = useCallback((slot: number): void => {
+    const blob = loadWorldBlob(slot)
+    if (!blob) {
+      setSaveNote(`slot ${slot} is empty`)
+      window.setTimeout(() => setSaveNote(null), 2500)
+      return
+    }
+    try {
+      const next = loadSim(JSON.parse(blob))
+      next.settings = { ...settings }
+      simRef.current = next
+      viewRef.current?.swapSim(next)
+      setSelectedId(null)
+      setSaveNote(`loaded slot ${slot}`)
+    } catch {
+      setSaveNote(`slot ${slot} is unreadable — kept current world`)
+    }
+    window.setTimeout(() => setSaveNote(null), 2500)
+    setTick((t) => t + 1)
+  }, [settings])
+
+  const exportSave = useCallback((): void => {
+    const s = simRef.current
+    if (!s) return
+    const blob = new Blob([JSON.stringify(saveSim(s))], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `luma-haven-${Date.now()}.luma.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const importSave = useCallback((file: File): void => {
+    void file.text().then((text) => {
+      try {
+        const next = loadSim(JSON.parse(text))
+        next.settings = { ...settings }
+        simRef.current = next
+        viewRef.current?.swapSim(next)
+        setSelectedId(null)
+        setSaveNote('world imported')
+      } catch {
+        setSaveNote('that file could not be read')
+      }
+      window.setTimeout(() => setSaveNote(null), 2500)
+      setTick((t) => t + 1)
+    })
+  }, [settings])
 
   const usePlayerItem = useCallback((id: ItemId): void => {
     simRef.current?.playerUseItem(id)
@@ -775,6 +1003,17 @@ export default function App() {
           >
             🧠
           </button>
+          {/* society pulse */}
+          <button
+            type="button"
+            className="speed-btn society-btn"
+            data-society-btn
+            aria-pressed={societyOpen}
+            aria-label={societyOpen ? 'Close society panel' : 'Open society panel'}
+            onClick={() => setSocietyOpen((o) => !o)}
+          >
+            🏘️
+          </button>
           {/* settings */}
           <button
             type="button"
@@ -947,6 +1186,26 @@ export default function App() {
         <InspectorPanel report={inspectCreature(sim, selected)} onClose={() => setInspectOpen(false)} />
       )}
 
+      {/* society pulse */}
+      {societyOpen && sim && (
+        <SocietyPanel report={inspectSociety(sim)} onClose={() => setSocietyOpen(false)} />
+      )}
+
+      {/* performance overlay (F3) */}
+      {perfOverlay && sim && (
+        <section className="perf" data-perf-overlay aria-label="performance overlay">
+          <div>frame {perfMs.toFixed(1)} ms</div>
+          <div>sim {sim.lod.lastCpuMs.toFixed(1)} ms</div>
+          <div>luma {sim.creatures.filter((c) => c.alive).length}/{settings.populationCap}</div>
+          <div>ai batch {settings.aiBatchSize} · {settings.quality}</div>
+          <div>tick {sim.time}</div>
+        </section>
+      )}
+
+      {saveNote && (
+        <div className="save-note" data-save-note role="status">{saveNote}</div>
+      )}
+
       {/* settings + performance */}
       {settingsOpen && (
         <section className="settings" data-settings aria-label="settings">
@@ -1002,12 +1261,68 @@ export default function App() {
               onChange={(e) => updateSettings({ gentleMode: e.target.checked })}
             />
           </label>
+          <label className="settings-row">
+            <span>cloud voice (optional)</span>
+            <input
+              type="checkbox"
+              checked={settings.optionalCloudAi}
+              data-cloud-ai
+              onChange={(e) => updateSettings({ optionalCloudAi: e.target.checked })}
+            />
+            <span className="settings-hint">offline always works</span>
+          </label>
           <div className="settings-row" data-perf>
             <span>frame cost</span>
             <b>{perfMs.toFixed(1)} ms</b>
             <span className="settings-hint">target ~16ms for 60fps</span>
           </div>
-          <button type="button" className="dock-btn" data-manual-save onClick={manualSave}>
+          <label className="settings-row">
+            <span>perf overlay (F3)</span>
+            <input
+              type="checkbox"
+              checked={perfOverlay}
+              data-perf-toggle
+              onChange={(e) => setPerfOverlay(e.target.checked)}
+            />
+          </label>
+          <div className="settings-row settings-saves" data-save-slots>
+            <span>slots</span>
+            {[1, 2, 3].map((slot) => (
+              <span key={slot} className="slot-pair">
+                <button type="button" className="chip" data-save-slot={slot} onClick={() => manualSave(slot)}>
+                  save {slot}
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  data-load-slot={slot}
+                  disabled={!hasWorldSlot(slot)}
+                  onClick={() => loadSlot(slot)}
+                >
+                  load
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="settings-row">
+            <button type="button" className="chip" data-export-save onClick={exportSave}>
+              export file
+            </button>
+            <label className="chip" data-import-save>
+              import file
+              <input
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) importSave(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+          <button type="button" className="dock-btn" data-manual-save onClick={() => manualSave()}>
             save now
           </button>
         </section>
