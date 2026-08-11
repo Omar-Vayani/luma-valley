@@ -161,9 +161,11 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     nest: nestDrive(sim, c) * (at?.id === 'homes' ? 1.6 : 1.1),
     // heal: wounded, only if affordable
     heal: (wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut) * (c.knowsTower('pharmacy') ? 1 : 0.2),
-    // clinic: illness or a real wound — more effective than pharmacy alone
-    clinic: ((c.illness > 0.2 ? 1.4 : 0) + (c.injury > 0.25 ? 1.2 : 0) + (hp < 0.45 ? 0.8 : 0))
-      * (c.wallet >= 5 ? 1 : 0.2) * (c.knowsTower('clinic') ? 1 : 0.2),
+    // clinic: illness or a real wound. Being broke makes you hesitate, but
+    // someone badly hurt goes anyway and hopes the healer is charitable.
+    clinic: ((c.illness > 0.2 ? 1.4 : 0) + (c.injury > 0.25 ? 1.2 : 0) + (hp < 0.45 ? 0.8 : 0) + bleedingOut)
+      * (c.wallet >= 5 || hp < 0.4 ? 1 : 0.45)
+      * (c.knowsTower('clinic') ? 1 : 0.2),
     // drink: ONLY a sad/bored creature or a real addict craves a drink. A
     // happy creature at a tavern has no reason to drink (no instant booze death).
     drink: ((c.chem.addiction.brew ?? 0) * 2.2 + press.bored * 1.1) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9) * (c.knowsTower('tavern') ? 1 : 0.15),

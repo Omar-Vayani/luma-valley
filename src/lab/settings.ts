@@ -29,8 +29,13 @@ export interface GameSettings {
   gentleMode: boolean
   /** Travellers occasionally settle in Haven when the population thins. */
   allowNewcomers: boolean
-  /** Optional cloud NL assist (never required). */
+  /** Optional richer dialogue from a service you supply (never required). */
   optionalCloudAi: boolean
+  /**
+   * Where that service lives. Blank means the game uses its own voice, which
+   * is the default and works offline forever.
+   */
+  cloudEndpoint: string
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -46,6 +51,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   gentleMode: false,
   allowNewcomers: true,
   optionalCloudAi: false,
+  cloudEndpoint: '',
 }
 
 export function settingsForPreset(quality: QualityPreset): Partial<GameSettings> {

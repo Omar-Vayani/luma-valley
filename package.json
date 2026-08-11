@@ -8,6 +8,7 @@
     "playwright-core": "^1.62.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
+    "vite-node": "^6.0.0",
     "vitest": "^4.1.10"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
+    "bench": "vite-node scripts/bench.mjs",
     "lint": "oxlint src"
   }
 }

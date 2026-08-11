@@ -22,7 +22,7 @@ import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAli
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
 import { tickDrives, applySocialFeedback } from './drives'
-import { tickEmotions, applyEmotionFeedback } from './emotions'
+import { tickEmotions, applyEmotionFeedback, createEmotions } from './emotions'
 import { observeEvent, gossipSpread, trustTowards, getReputation } from './reputation'
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
@@ -35,11 +35,11 @@ import {
 import {
   applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge, romanticInterest,
 } from './socialbond'
-import { parsePlayerText, respondToPlayer, type DialogueTurn } from './dialogue'
+import { parsePlayerText, respondToPlayer, type DialogueTurn, type ParseResult } from './dialogue'
 import { tickPsyche } from './psyche'
 import { tickBeliefs, observeEvidence, reinforceHabit, tickHabits, habitBias } from './beliefs'
 import {
-  createChatter, speak, pickIntent, inEarshot, renderOverheard, tickPromises,
+  createChatter, speak, pickIntent, inEarshot, renderOverheard, tickPromises, makePromise,
   type ChatterState,
 } from './chatter'
 import {
@@ -47,10 +47,12 @@ import {
   updateSharedWords, chronicle, type Culture,
 } from './norms'
 import {
-  createJobBoard, openJobsFor, claimJob, pruneJobs, workShiftAt,
-  type JobBoard, type JobId,
+  createJobBoard, openJobsFor, claimJob, pruneJobs, workShiftAt, isProducedGoodStaffed,
+  producerOf, type JobBoard, type JobId,
 } from './jobs'
-import { createLedger, pruneLedger, valueTo, negotiate, type Ledger } from './economy'
+import {
+  createLedger, pruneLedger, valueTo, negotiate, addDebt, repayDebt, totalOwedBy, type Ledger,
+} from './economy'
 import { lifeStageFor, isMature, learningRateFor, vigorFor } from './lifecycle'
 import { appraise } from './emotions'
 import { applyCrowding, applyPurpose, applyComfort } from './chem'
@@ -59,6 +61,10 @@ import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './
 import {
   createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, type Fixture,
 } from './interact'
+import { createStoryLog, recordStory, explain, type StoryLog } from './story'
+import {
+  mentorScore, mentor, mediateScore, mediate, flatterScore, flatter, alliedPair, formAlliance,
+} from './socialacts'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
@@ -142,6 +148,8 @@ export interface Sim {
   ledger: Ledger
   /** natural-language lines the player overheard recently */
   overheard: string[]
+  /** the moments worth noticing, with the reason behind each one */
+  stories: StoryLog
   /** beds, doors, counters, and containers the world is furnished with */
   fixtures: Fixture[]
   /** Use the nearest fixture as the player: sleep, open, take, or store. */
@@ -195,6 +203,7 @@ export function createSim(seed = 1): Sim {
     jobs: createJobBoard(),
     ledger: createLedger(),
     overheard: [],
+    stories: createStoryLog(),
     fixtures: createFixtures(),
     playerUseFixture(action, itemId): string | null {
       const p = sim.player
@@ -372,6 +381,10 @@ export function createSim(seed = 1): Sim {
         parsed,
         0,
       )
+
+      // Some things said out loud actually change the world, not just the mood.
+      const outcome = applySpokenOutcome(sim, target, parsed, text)
+      if (outcome) turn.text = outcome
 
       // social consequences of the conversation
       applySocialEvent(target.social, 0, parsed.intent === 'flirt' ? 'flirt'
@@ -704,8 +717,11 @@ export function createSim(seed = 1): Sim {
           }
         }
       }
-      tickEconomy(sim.economy)
+      // shelves only refill where somebody is doing the work
+      tickEconomy(sim.economy, (goodId) => isProducedGoodStaffed(sim.jobs, goodId))
       if (sim.time % 20 === 0 || sim.time === 1) assignJobs(sim)
+      if (sim.time % 200 === 0) reportShortages(sim)
+      tickDebts(sim)
       tickNewcomers(sim)
       // market day rollover: adjust prices by yesterday's demand (visible ▲▼)
       if (sim.time % sim.economy.DAY_TICKS === 0) {
@@ -714,6 +730,7 @@ export function createSim(seed = 1): Sim {
       tickRelationships(sim)
       tickPartnerships(sim)
       tickFamilyPlans(sim)
+      tickSocialActs(sim)
       tickHouseholdCare(sim.society, sim.creatures)
       careForChildren(sim)
       if (sim.time % 30 === 0) {
@@ -727,7 +744,17 @@ export function createSim(seed = 1): Sim {
         updateSharedWords(sim.culture, sim.creatures)
       }
       chatterNearby(sim, focusX, focusZ)
-      tickPromises(sim.chatter, sim.time, (id) => sim.creatureById(id))
+      for (const broken of tickPromises(sim.chatter, sim.time, (id) => sim.creatureById(id))) {
+        if (!broken.promiser || !broken.promisee) continue
+        recordStory(sim.stories, {
+          kind: 'broken-promise',
+          tick: sim.time,
+          actor: broken.promiser,
+          target: broken.promisee,
+          text: `${broken.promiser.name} never made good on ${broken.promise.about} for ${broken.promisee.name}`,
+          because: explain(broken.promiser),
+        })
+      }
       gossipNearby(sim)
       wakeNearbySleepers(sim)
       // ── the player (a distinct character): hunger, regen, pickup, barter ──
@@ -744,6 +771,106 @@ export function createSim(seed = 1): Sim {
     },
   }
   return sim
+}
+
+/**
+ * Words with consequences: a trade the creature actually agrees to, a request
+ * it commits to, or a warning that changes what it believes about someone.
+ * Returns a replacement reply when the world changed, otherwise null.
+ */
+function applySpokenOutcome(
+  sim: Sim,
+  target: Creature,
+  parsed: ParseResult,
+  said: string,
+): string | null {
+  const p = sim.player
+
+  if (parsed.intent === 'request_trade') {
+    const itemId = (parsed.item ?? 'bread') as ItemId
+    const rep = getReputation(target, 0)
+    if (parsed.direction === 'sell') {
+      // the player is offering something
+      if (!hasItem(p.inventory, itemId)) return `You have no ${itemId} to offer.`
+      const worth = valueTo(sim.economy, {
+        chem: target.chem, wallet: target.wallet, genome: target.genome,
+        chemAddiction: target.chem.addiction,
+      }, itemId)
+      const price = Math.max(1, Math.round(worth * (rep.trust > 0.3 ? 1.1 : 0.8)))
+      if (target.wallet < price) return `"${target.name} turns out their pockets — they cannot afford it."`
+      tradeItem(p.inventory, target.inventory, itemId, 1, { newOwnerId: target.id })
+      target.wallet -= price
+      p.wallet += price
+      applySocialEvent(target.social, 0, 'share', 1)
+      recordStory(sim.stories, {
+        kind: 'generosity',
+        tick: sim.time,
+        actor: target,
+        text: `${target.name} bought ${itemId} from you for ${price} coins`,
+        because: explain(target),
+      })
+      return `"${price} coins, then." ${target.name} hands the money over and takes the ${itemId}.`
+    }
+
+    // the player wants to buy
+    if (!hasItem(target.inventory, itemId)) {
+      return `"I have no ${itemId} to spare," ${target.name} says.`
+    }
+    const worth = valueTo(sim.economy, {
+      chem: target.chem, wallet: target.wallet, genome: target.genome,
+      chemAddiction: target.chem.addiction,
+    }, itemId)
+    const offer = negotiate(sim.economy, itemId === 'bread' ? 'bread' : itemId,
+      { trust: rep.trust, thief: rep.thief }, p.wallet, worth)
+    if (offer.reason === 'refused-thief') {
+      return `"I don't deal with thieves," ${target.name} says flatly.`
+    }
+    const price = Math.max(1, offer.price || worth)
+    if (p.wallet < price) return `"${price} coins," ${target.name} says. You cannot afford it.`
+    tradeItem(target.inventory, p.inventory, itemId, 1, { newOwnerId: 0 })
+    p.wallet -= price
+    target.wallet += price
+    applySocialEvent(target.social, 0, 'share', 0.8)
+    return `${target.name} hands over the ${itemId} for ${price} coins.`
+  }
+
+  if (parsed.intent === 'request_help') {
+    const willing = trustTowards(target, 0) > 0.1 && target.chem.fear < 0.55
+    if (!willing) return null
+    makePromise(sim.chatter, target, playerAsCreature(sim), 'help', sim.time, 500)
+    recordStory(sim.stories, {
+      kind: 'promise',
+      tick: sim.time,
+      actor: target,
+      text: `${target.name} promised to help you`,
+    })
+    return `"Alright. I'll help you," ${target.name} says — and means it, for now.`
+  }
+
+  if (parsed.intent === 'warn' || parsed.intent === 'accuse') {
+    // who are we talking about? whichever creature the player named
+    const lower = said.toLowerCase()
+    const about = sim.creatures.find((c) => c.alive && c.id !== target.id && lower.includes(c.name.toLowerCase()))
+    if (!about) return null
+    const credibility = clamp01((trustTowards(target, 0) + 1) / 2)
+    if (credibility < 0.3) return `"Says who?" ${target.name} replies, unconvinced.`
+    observeEvidence(target.beliefs, `who:${about.id}:danger`, credibility, 'told', sim.time)
+    const rep = getReputation(target, about.id)
+    rep.trust = Math.max(-1, rep.trust - 0.25 * credibility)
+    return `${target.name} glances toward ${about.name}. "I'll be careful."`
+  }
+
+  return null
+}
+
+/** The player as a social entity (id 0) for systems that expect a creature. */
+function playerAsCreature(sim: Sim): Creature {
+  return {
+    id: 0,
+    name: sim.player.name,
+    social: {},
+    emotions: createEmotions(),
+  } as unknown as Creature
 }
 
 /** Push a renderer-visible event. */
@@ -864,7 +991,21 @@ function decide(sim: Sim, c: Creature): void {
       return
     }
     if (c.wallet >= breadPrice && !knows(sim, c, 'food')) {
-      // doesn't know where food is — must explore to find it
+      // Money but no idea where the market is: ask. Someone who knows, and
+      // does not mistrust you, will point the way — that is how a newcomer
+      // learns the settlement instead of starving in the middle of it.
+      const helper = nearestOther(sim, c, SOCIAL_RANGE + 3)
+      if (helper && !helper.sleeping) {
+        shareDirections(helper, c, trustTowards(helper, c.id))
+        speak(sim.chatter, c, helper, 'ask_where', sim.time, 'food')
+        c.action = 'ask'
+        if (knows(sim, c, 'food')) {
+          goTo(sim, c, 'food')
+          c.intention = 'food'
+          return
+        }
+      }
+      // nobody to ask — go and look
       explore(sim, c)
       return
     }
@@ -1126,6 +1267,14 @@ function tickPartnerships(sim: Sim): void {
     const state = partnershipStep(c, partner)
     if (state === 'ended') {
       chronicle(sim.culture, sim.time, `${c.name} and ${partner.name} separated.`)
+      recordStory(sim.stories, {
+        kind: 'separation',
+        tick: sim.time,
+        actor: c,
+        target: partner,
+        text: `${c.name} and ${partner.name} separated`,
+        because: explain(c),
+      })
       emit(sim, 'jealous', c, partner, c.pos.x, c.pos.z)
     }
   }
@@ -1164,7 +1313,188 @@ function tickNewcomers(sim: Sim): void {
   const newcomer = sim.spawnCreature(undefined, pos.x, pos.z)
   newcomer.wallet += 4
   chronicle(sim.culture, sim.time, `${newcomer.name} arrived in Haven.`)
+  recordStory(sim.stories, {
+    kind: 'arrival',
+    tick: sim.time,
+    actor: newcomer,
+    text: `${newcomer.name} arrived in Haven looking for a place to settle`,
+  })
   emit(sim, 'birth', newcomer, undefined, newcomer.pos.x, newcomer.pos.z)
+}
+
+/**
+ * The deliberate social moves: teaching the young, breaking up a fight,
+ * buttering someone up, and recognising an alliance. These are chosen from
+ * character and circumstance, which is why they produce different stories in
+ * different settlements.
+ */
+function tickSocialActs(sim: Sim): void {
+  if (sim.time % 18 !== 0) return
+
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping || c.busyTicks > 0) continue
+    const near = nearestOther(sim, c, SOCIAL_RANGE + 1)
+    if (!near || near.sleeping) continue
+
+    // teaching a child what you know
+    const teach = mentorScore(c, near)
+    if (teach > 0.5 && sim.rng() < teach * 0.5) {
+      const taught = mentor(c, near)
+      if (taught.taughtPlace || taught.taughtWord) {
+        c.action = 'teach'
+        near.action = 'learn'
+        emit(sim, 'school', c, near, c.pos.x, c.pos.z)
+        recordStory(sim.stories, {
+          kind: 'mentorship',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: taught.taughtPlace
+            ? `${c.name} showed ${near.name} where the ${taught.taughtPlace} is`
+            : `${c.name} taught ${near.name} the word "${taught.taughtWord}"`,
+          because: c.parentIds.includes(near.id) || near.parentIds.includes(c.id)
+            ? 'their own child'
+            : explain(c),
+        })
+        continue
+      }
+    }
+
+    // buttering someone up for what they have
+    const flattery = flatterScore(c, near)
+    if (flattery > 0.55 && sim.rng() < flattery * 0.4) {
+      const result = flatter(c, near)
+      c.action = 'flatter'
+      recordStory(sim.stories, {
+        kind: 'manipulation',
+        tick: sim.time,
+        actor: c,
+        target: near,
+        text: result.believed
+          ? `${c.name} won ${near.name} over with warm words`
+          : `${near.name} saw through ${c.name}'s flattery`,
+        because: explain(c),
+        weight: result.believed ? 1 : 1.2,
+      })
+      continue
+    }
+
+    // an alliance nobody declared, but everybody can see
+    if (alliedPair(c, near) && sim.rng() < 0.15) {
+      const already = c.beliefs[`ally:${near.id}`]
+      if (!already) {
+        formAlliance(c, near)
+        observeEvidence(c.beliefs, `ally:${near.id}`, 1, 'seen', sim.time)
+        observeEvidence(near.beliefs, `ally:${c.id}`, 1, 'seen', sim.time)
+        recordStory(sim.stories, {
+          kind: 'alliance',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: `${c.name} and ${near.name} have become firm allies`,
+        })
+      }
+    }
+  }
+
+  // stepping between two who are at each other's throats
+  for (const a of sim.creatures) {
+    if (!a.alive || a.fightCooldown < 40) continue
+    const b = nearestOther(sim, a, FIGHT_RANGE + 3)
+    if (!b || b.fightCooldown < 40) continue
+    for (const peacemaker of sim.creatures) {
+      if (!peacemaker.alive || peacemaker.sleeping) continue
+      if (dist(peacemaker.pos.x, peacemaker.pos.z, a.pos.x, a.pos.z) > SOCIAL_RANGE + 3) continue
+      const score = mediateScore(peacemaker, a, b, sim.culture.influence[peacemaker.id] ?? 0)
+      if (score < 0.5 || sim.rng() > score * 0.5) continue
+      const result = mediate(peacemaker, a, b)
+      peacemaker.action = 'mediate'
+      emit(sim, 'comfort', peacemaker, a, peacemaker.pos.x, peacemaker.pos.z)
+      recordStory(sim.stories, {
+        kind: 'mediation',
+        tick: sim.time,
+        actor: peacemaker,
+        target: a,
+        text: result.hurt
+          ? `${peacemaker.name} got between ${a.name} and ${b.name}, and took a blow for it`
+          : `${peacemaker.name} talked ${a.name} and ${b.name} down`,
+        because: explain(peacemaker),
+        weight: result.hurt ? 1.3 : 1,
+      })
+      break
+    }
+  }
+}
+
+/**
+ * Debts between individuals. A creature who owes somebody pays them back when
+ * it can, feels the obligation while it cannot, and a creditor who is never
+ * repaid starts to resent it.
+ */
+function tickDebts(sim: Sim): void {
+  if (sim.time % 50 !== 0) return
+  for (const debt of [...sim.ledger.debts]) {
+    const debtor = sim.creatureById(debt.fromId)
+    const creditor = sim.creatureById(debt.toId)
+    if (!debtor?.alive || !creditor?.alive) continue
+
+    // repay when you have enough to spare, and you are nearby to hand it over
+    const spare = debtor.wallet - 4
+    if (spare > 0 && dist(debtor.pos.x, debtor.pos.z, creditor.pos.x, creditor.pos.z) < SOCIAL_RANGE + 2) {
+      const paid = repayDebt(sim.ledger, debt.fromId, debt.toId, Math.min(spare, debt.amount))
+      if (paid > 0) {
+        debtor.wallet -= paid
+        creditor.wallet += paid
+        applySocialEvent(creditor.social, debtor.id, 'help', 0.6)
+        debtor.emotions.pride = clamp01(debtor.emotions.pride + 0.1)
+        debtor.emotions.guilt = clamp01(debtor.emotions.guilt - 0.15)
+        if (totalOwedBy(sim.ledger, debtor.id) <= 0) {
+          recordStory(sim.stories, {
+            kind: 'debt',
+            tick: sim.time,
+            actor: debtor,
+            target: creditor,
+            text: `${debtor.name} paid off what they owed ${creditor.name}`,
+          })
+        }
+      }
+      continue
+    }
+
+    // still owing: it weighs on the debtor and wears on the creditor
+    const age = sim.time - debt.since
+    debtor.emotions.guilt = clamp01(debtor.emotions.guilt + 0.01)
+    debtor.chem.purpose = clamp01(debtor.chem.purpose - 0.004)
+    if (age > 900) {
+      applySocialEvent(creditor.social, debtor.id, 'reject', 0.3)
+      creditor.emotions.resentment = clamp01(creditor.emotions.resentment + 0.02)
+    }
+  }
+}
+
+/**
+ * Notice when a shelf has run dry and say who is missing. A shortage the
+ * player cannot trace to a person is just a number going down.
+ */
+function reportShortages(sim: Sim): void {
+  for (const goodId of ['bread', 'medicine', 'grain', 'brew'] as const) {
+    const good = sim.economy.goods[goodId]
+    if (!good || good.stock > 0) continue
+    const job = producerOf(goodId)
+    if (!job) continue
+    const holderId = sim.jobs.holders[job.id]
+    const holder = holderId !== undefined ? sim.creatureById(holderId) : undefined
+    const cause = !holder
+      ? `nobody is working as ${job.title}`
+      : `the ${job.title}, ${holder.name}, cannot keep up`
+    recordStory(sim.stories, {
+      kind: 'shortage',
+      tick: sim.time,
+      actor: holder,
+      text: `Haven has run out of ${goodId}`,
+      because: cause,
+    })
+  }
 }
 
 /** Claim vacant institutional roles so shops, clinics, and bars are staffed. */
@@ -1354,7 +1684,34 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         const healer = healerId !== undefined ? sim.creatureById(healerId) : undefined
         const staffed = !!healer && healer.alive && healer.id !== c.id
         const fee = staffed ? 5 : 2
-        if (c.wallet >= fee && (c.illness > 0.05 || c.injury > 0.05 || c.chem.health < 0.7)) {
+        const needsCare = c.illness > 0.05 || c.injury > 0.05 || c.chem.health < 0.7
+        // Nobody is turned away bleeding: a healer who can afford to will treat
+        // on credit, and the patient owes them for it afterwards.
+        const onCredit = needsCare && c.wallet < fee && staffed && !!healer
+          && (c.chem.health < 0.5 || c.injury > 0.3)
+          && healer.genome.loyalty > 0.35
+        if (onCredit && healer) {
+          addDebt(sim.ledger, c.id, healer.id, fee, sim.time)
+          c.chem.health = clamp01(c.chem.health + 0.4)
+          c.illness = 0
+          c.injury = 0
+          applySocialEvent(c.social, healer.id, 'help', 1.2)
+          c.emotions.gratitude = clamp01(c.emotions.gratitude + 0.25)
+          applyPurpose(healer.chem, 0.06)
+          recordStory(sim.stories, {
+            kind: 'debt',
+            tick: sim.time,
+            actor: healer,
+            target: c,
+            text: `${healer.name} treated ${c.name} on credit — ${c.name} owes ${fee} coins`,
+            because: 'they could not pay',
+          })
+          emit(sim, 'heal', c, undefined, c.pos.x, c.pos.z)
+          c.action = 'treated'
+          c.intention = null
+          return
+        }
+        if (c.wallet >= fee && needsCare) {
           c.wallet -= fee
           if (healer && staffed) healer.wallet += fee // the healer earns the fee
           c.chem.health = clamp01(c.chem.health + (staffed ? 0.45 : 0.15))
@@ -1466,6 +1823,13 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
           if (outcome === 'partnered') {
             ensureCoupleHousehold(sim.society, c, near, sim.time)
             chronicle(sim.culture, sim.time, `${c.name} and ${near.name} became partners.`)
+            recordStory(sim.stories, {
+              kind: 'partnership',
+              tick: sim.time,
+              actor: c,
+              target: near,
+              text: `${c.name} and ${near.name} became partners`,
+            })
             emit(sim, 'love', c, near, c.pos.x, c.pos.z)
           }
         } else if (c.partnerId === near.id) {
@@ -1506,6 +1870,14 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         forgiveGift(near, c.id)
         observeEvent(near, 'share', c.id)
         witness(sim, c, 'share', c.id)
+        recordStory(sim.stories, {
+          kind: 'generosity',
+          tick: sim.time,
+          actor: c,
+          target: near,
+          text: `${c.name} gave ${gift} coins to ${near.name}, who had nothing`,
+          because: explain(c, 'share'),
+        })
         emit(sim, 'gift', c, near, c.pos.x, c.pos.z)
         c.action = 'share'
         return
@@ -1803,6 +2175,16 @@ function tradeNearby(sim: Sim): void {
       if (offer.reason === 'refused-thief') {
         buyer.emotions.shame = clamp01(buyer.emotions.shame + 0.08)
         buyer.action = 'refused'
+        if (sim.time % 60 === 0) {
+          recordStory(sim.stories, {
+            kind: 'refusal',
+            tick: sim.time,
+            actor: seller,
+            target: buyer,
+            text: `${seller.name} refused to sell to ${buyer.name}`,
+            because: 'believes they are a thief',
+          })
+        }
       }
       continue
     }
@@ -2055,6 +2437,17 @@ function steal(sim: Sim, thief: Creature, victim: Creature): void {
   witness(sim, victim, 'steal', thief.id)
   applySocialEvent(victim.social, thief.id, bonded ? 'betray' : 'steal', 1)
   applySocialEvent(thief.social, victim.id, 'meet', 0.3)
+  recordStory(sim.stories, {
+    kind: bonded ? 'betrayal' : 'theft',
+    tick: sim.time,
+    actor: thief,
+    target: victim,
+    text: bonded
+      ? `${thief.name} stole ${amount} coins from ${victim.name}, who trusted them`
+      : `${thief.name} stole ${amount} coins from ${victim.name}`,
+    because: explain(thief, 'steal'),
+    weight: 1 + Math.min(0.4, amount / 12),
+  })
   emit(sim, 'steal', thief, victim, victim.pos.x, victim.pos.z)
   thief.action = 'steal'
 }
@@ -2094,6 +2487,17 @@ function fight(sim: Sim, a: Creature, b: Creature): void {
   witness(sim, a, defending ? 'protect' : 'aggress', a.id)
   applySocialEvent(b.social, a.id, 'hurt', 1)
   applySocialEvent(a.social, b.id, defending ? 'help' : 'hurt', 0.6)
+  recordStory(sim.stories, {
+    kind: 'violence',
+    tick: sim.time,
+    actor: a,
+    target: b,
+    text: defending
+      ? `${a.name} fought ${b.name} to protect a friend`
+      : `${a.name} attacked ${b.name}`,
+    because: explain(a, 'fight'),
+    weight: a.weapon === 'stick' ? 1.2 : 1,
+  })
   emit(sim, 'fight', a, b, (a.pos.x + b.pos.x) / 2, (a.pos.z + b.pos.z) / 2)
   a.action = 'fight'
   b.action = 'fight'
@@ -2133,6 +2537,13 @@ function procreate(sim: Sim, a: Creature, b: Creature): void {
   transmitCulture(a, child)
   transmitCulture(b, child)
   chronicle(sim.culture, sim.time, `${child.name} was born to ${a.name} and ${b.name}.`)
+  recordStory(sim.stories, {
+    kind: 'birth',
+    tick: sim.time,
+    actor: a,
+    target: child,
+    text: `${child.name} was born to ${a.name} and ${b.name}`,
+  })
   // parents grow multidimensional attachment
   applySocialEvent(a.social, b.id, 'flirt', 0.5)
   applySocialEvent(b.social, a.id, 'flirt', 0.5)
@@ -2146,9 +2557,32 @@ function procreate(sim: Sim, a: Creature, b: Creature): void {
   b.action = 'birth'
 }
 
+/** What actually killed this creature, as far as its own state shows. */
+function causeOfDeath(dead: Creature): string {
+  if (dead.injury > 0.4) return 'wounds from a fight'
+  if (dead.illness > 0.3) return 'untreated illness'
+  if (dead.chem.hunger < 0.1) return 'starvation'
+  if (dead.age > dead.ageLimit) return 'old age'
+  return 'failing health'
+}
+
+function deathText(sim: Sim, dead: Creature): string {
+  const kin = sim.creatures.filter((c) => c.alive && (c.partnerId === dead.id || c.parentIds.includes(dead.id)))
+  const role = dead.job ? ` the ${dead.job}` : ''
+  const survivors = kin.length > 0 ? `, leaving ${kin.map((k) => k.name).join(' and ')}` : ''
+  return `${dead.name}${role} died${survivors}`
+}
+
 /** A creature died — partners and close bonds mourn (grief + sadness). */
 function grieve(sim: Sim, dead: Creature): void {
   chronicle(sim.culture, sim.time, `${dead.name} died at age ${dead.age}.`)
+  recordStory(sim.stories, {
+    kind: 'death',
+    tick: sim.time,
+    actor: dead,
+    text: deathText(sim, dead),
+    because: causeOfDeath(dead),
+  })
   for (const c of sim.creatures) {
     if (c.id === dead.id || !c.alive) continue
     const isPartner = c.partnerId === dead.id

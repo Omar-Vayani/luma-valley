@@ -15,7 +15,9 @@ import { DRIVE_KEYS } from './drives'
 import { EMOTION_KEYS } from './emotions'
 import { promisesTo } from './chatter'
 import { currentLeader } from './norms'
-import { wealthInequality, totalOwedBy } from './economy'
+import { producerOf } from './jobs'
+import { wealthInequality, totalOwedBy, totalOwedTo } from './economy'
+import { lifeStory, topStories, storiesSince, formatStory } from './story'
 
 export interface InspectReport {
   id: number
@@ -57,6 +59,11 @@ export interface InspectReport {
   /** health detail */
   illness: number
   injury: number
+  /** the events that shaped this individual */
+  life: { tick: number; text: string; because?: string }[]
+  /** coins owed to and by this creature */
+  owes: number
+  owed: number
 }
 
 export function inspectCreature(sim: Sim, c: Creature): InspectReport {
@@ -190,6 +197,13 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     role: c.job,
     illness: c.illness,
     injury: c.injury,
+    life: lifeStory(sim.stories, c.id).map((e) => ({
+      tick: e.tick,
+      text: e.text,
+      because: e.because,
+    })),
+    owes: Math.round(totalOwedBy(sim.ledger, c.id)),
+    owed: Math.round(totalOwedTo(sim.ledger, c.id)),
   }
 }
 
@@ -252,6 +266,12 @@ export interface SocietyReport {
   chronicle: string[]
   debts: number
   overheard: string[]
+  /** the settlement's most notable moments, with the reason behind each */
+  stories: { tick: number; kind: string; text: string; because?: string }[]
+  /** what changed since the player last opened this panel */
+  sinceLastVisit: string[]
+  /** goods with an empty shelf and the reason why */
+  shortages: { good: string; cause: string }[]
 }
 
 /** A settlement-level readout: what kind of place has this become? */
@@ -269,6 +289,23 @@ export function inspectSociety(sim: Sim): SocietyReport {
   for (const jobId of ['shopkeep', 'healer', 'bartender', 'farmer', 'porter', 'teacher']) {
     if (sim.jobs.holders[jobId as keyof typeof sim.jobs.holders] === undefined) vacancies.push(jobId)
   }
+  // an empty shelf always has somebody behind it
+  const shortages: { good: string; cause: string }[] = []
+  for (const [goodId, good] of Object.entries(sim.economy.goods)) {
+    if (good.stock > 0) continue
+    const job = producerOf(goodId)
+    if (!job) {
+      shortages.push({ good: goodId, cause: 'nothing has come in on the road' })
+      continue
+    }
+    const holderId = sim.jobs.holders[job.id]
+    const holder = holderId !== undefined ? sim.creatureById(holderId) : undefined
+    shortages.push({
+      good: goodId,
+      cause: holder ? `${holder.name} cannot keep up as ${job.title}` : `no ${job.title} in Haven`,
+    })
+  }
+
   return {
     population: living.length,
     norms: Object.entries(sim.culture.norms).map(([key, value]) => ({ key, value })),
@@ -281,6 +318,14 @@ export function inspectSociety(sim: Sim): SocietyReport {
     chronicle: sim.culture.chronicle.slice(-6).map((e) => e.text),
     debts: sim.ledger.debts.length,
     overheard: sim.overheard.slice(-5),
+    stories: topStories(sim.stories, sim.time, 7).map((e) => ({
+      tick: e.tick,
+      kind: e.kind,
+      text: e.text,
+      because: e.because,
+    })),
+    sinceLastVisit: storiesSince(sim.stories, sim.stories.lastSeenTick, 5).map(formatStory),
+    shortages,
   }
 }
 

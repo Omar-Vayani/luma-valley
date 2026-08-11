@@ -195,12 +195,16 @@ export function keepPromise(state: ChatterState, id: number, promiser: Creature,
   promisee.emotions.gratitude = clamp01(promisee.emotions.gratitude + 0.2)
 }
 
-/** Overdue promises break themselves; the promisee remembers. */
+/**
+ * Overdue promises break themselves; the promisee remembers.
+ * Returns the broken ones so the caller can tell that story.
+ */
 export function tickPromises(
   state: ChatterState,
   tick: number,
   byId: (id: number) => Creature | undefined,
-): void {
+): { promise: Promise_; promiser?: Creature; promisee?: Creature }[] {
+  const broken: { promise: Promise_; promiser?: Creature; promisee?: Creature }[] = []
   for (const p of state.promises) {
     if (p.kept !== null || tick < p.dueTick) continue
     p.kept = false
@@ -211,11 +215,13 @@ export function tickPromises(
       promisee.emotions.resentment = clamp01(promisee.emotions.resentment + 0.2)
       promiser.emotions.guilt = clamp01(promiser.emotions.guilt + 0.25)
     }
+    broken.push({ promise: p, promiser, promisee })
   }
   // keep the ledger small: drop resolved promises older than a while
   if (state.promises.length > 40) {
     state.promises = state.promises.filter((p) => p.kept === null || tick - p.madeTick < 800).slice(-40)
   }
+  return broken
 }
 
 /** Open promises made TO this creature (used by the inspector). */

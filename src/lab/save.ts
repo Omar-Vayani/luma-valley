@@ -27,6 +27,7 @@ import { createChatter, type ChatterState } from './chatter'
 import { createCulture, type Culture } from './norms'
 import { createJobBoard, type JobBoard } from './jobs'
 import { createLedger, type Ledger } from './economy'
+import { createStoryLog, type StoryLog } from './story'
 import { lifeStageFor } from './lifecycle'
 import { completeGenome } from './genetics'
 
@@ -50,6 +51,8 @@ export interface LabSave {
   ledger?: Ledger
   /** container contents keyed by fixture id (the furniture itself is rebuilt) */
   containers?: Record<string, { items: Record<string, number>; owners?: Record<string, number> }>
+  /** the notable moments and why they happened */
+  stories?: StoryLog
 }
 
 interface SavedCreature {
@@ -209,6 +212,7 @@ export function saveSim(sim: Sim): LabSave {
     culture: JSON.parse(JSON.stringify(sim.culture)),
     jobs: JSON.parse(JSON.stringify(sim.jobs)),
     ledger: JSON.parse(JSON.stringify(sim.ledger)),
+    stories: JSON.parse(JSON.stringify(sim.stories)),
     containers: Object.fromEntries(
       sim.fixtures
         .filter((f) => f.storage && Object.keys(f.storage.items).length > 0)
@@ -237,6 +241,7 @@ export function loadSim(data: LabSave): Sim {
     : createCulture()
   sim.jobs = data.jobs ? JSON.parse(JSON.stringify(data.jobs)) : createJobBoard()
   sim.ledger = data.ledger ? JSON.parse(JSON.stringify(data.ledger)) : createLedger()
+  sim.stories = data.stories ? JSON.parse(JSON.stringify(data.stories)) : createStoryLog()
   if (data.containers) {
     for (const f of sim.fixtures) {
       const saved = data.containers[f.id]

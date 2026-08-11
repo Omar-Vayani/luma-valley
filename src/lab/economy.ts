@@ -28,11 +28,12 @@ export interface Economy {
 }
 
 /** The goods the economy knows about. */
-export const GOODS = ['bread', 'medicine', 'brew', 'weapon', 'herb', 'spark', 'tonic'] as const
+export const GOODS = ['bread', 'grain', 'medicine', 'brew', 'weapon', 'herb', 'spark', 'tonic'] as const
 
 /** How much the market absorbs per day at the fair price, per good. */
 export const DEMAND_QUOTA: Record<string, number> = {
   bread: 10,
+  grain: 8,
   medicine: 6,
   brew: 8,
   weapon: 2,
@@ -47,6 +48,7 @@ export function createEconomy(): Economy {
   return {
     goods: {
       bread: { id: 'bread', basePrice: 3, stock: 12, maxStock: 12, restockEvery: 6, restockTimer: 0, priceFactor: 1 },
+      grain: { id: 'grain', basePrice: 2, stock: 10, maxStock: 14, restockEvery: 10, restockTimer: 0, priceFactor: 1 },
       medicine: { id: 'medicine', basePrice: 7, stock: 8, maxStock: 8, restockEvery: 10, restockTimer: 0, priceFactor: 1 },
       brew: { id: 'brew', basePrice: 4, stock: 10, maxStock: 10, restockEvery: 8, restockTimer: 0, priceFactor: 1 },
       weapon: { id: 'weapon', basePrice: 15, stock: 4, maxStock: 4, restockEvery: 30, restockTimer: 0, priceFactor: 1 },
@@ -85,9 +87,17 @@ export function salesSinceDay(e: Economy, id: string, day: number): number {
   return 0 // specific day outside the tracked window = no sales that day
 }
 
-/** Advance the economy. Returns true when a market day rolled over. */
-export function tickEconomy(e: Economy): boolean {
+/**
+ * Advance the economy.
+ *
+ * Goods that somebody's job produces do NOT refill on their own — they arrive
+ * only when that person works a shift. Pass `isStaffed` so the shelves reflect
+ * who is actually doing the work; without it everything trickles in as before.
+ */
+export function tickEconomy(e: Economy, isStaffed?: (goodId: string) => boolean): boolean {
   for (const g of Object.values(e.goods)) {
+    // an unstaffed trade stops delivering entirely: that is the shortage
+    if (isStaffed && !isStaffed(g.id)) continue
     g.restockTimer++
     if (g.restockTimer >= g.restockEvery && g.stock < g.maxStock) {
       g.stock++

@@ -1190,3 +1190,27 @@ button { font: inherit; cursor: pointer; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* ── story feed ── */
+.society-stories .story-line,
+.society-since div,
+.society-shortages div,
+.inspector-life div,
+.inspector-debts div {
+  font-size: 0.82rem;
+  margin-bottom: 5px;
+  line-height: 1.35;
+  opacity: 0.92;
+}
+.story-because {
+  opacity: 0.62;
+  font-style: italic;
+}
+.society-since {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.society-shortages div {
+  color: #e8a06a;
+}

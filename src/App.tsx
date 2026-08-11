@@ -30,6 +30,8 @@ import { applySocialEvent } from './lab/socialbond'
 import { ensureCoupleHousehold, adoptChild } from './lab/household'
 import { transmitCulture } from './lab/norms'
 import { fixtureAt } from './lab/interact'
+import { markSeen } from './lab/story'
+import { createCloudProvider, polishTurn } from './lab/dialogue-provider'
 import { saveWorldBlob, loadWorldBlob, loadWorldBackup, hasWorldSlot } from './lab/creature-storage'
 
 import './lab.css'
@@ -148,6 +150,36 @@ function SocietyPanel({ report, onClose }: { report: SocietyReport; onClose: () 
       <p className="society-line">
         {report.leader ? `Most respected: ${report.leader}` : 'No one stands out yet'}
       </p>
+      {report.sinceLastVisit.length > 0 && (
+        <>
+          <h3>since you last looked</h3>
+          <div className="society-since" data-society-since>
+            {report.sinceLastVisit.map((line, i) => (
+              <div key={`${line}-${i}`}>{line}</div>
+            ))}
+          </div>
+        </>
+      )}
+      <h3>what people are talking about</h3>
+      <div className="society-stories" data-society-stories>
+        {report.stories.length === 0 && <span className="society-empty">nothing much has happened yet</span>}
+        {report.stories.map((s) => (
+          <div key={`${s.tick}-${s.text}`} className="story-line" data-story-kind={s.kind}>
+            <span className="story-text">{s.text}</span>
+            {s.because && <span className="story-because"> — {s.because}</span>}
+          </div>
+        ))}
+      </div>
+      {report.shortages.length > 0 && (
+        <>
+          <h3>shortages</h3>
+          <div className="society-shortages" data-society-shortages>
+            {report.shortages.map((s) => (
+              <div key={s.good}>no {s.good}: {s.cause}</div>
+            ))}
+          </div>
+        </>
+      )}
       <h3>norms</h3>
       <div className="society-norms" data-society-norms>
         {report.norms.map((n) => (
@@ -276,6 +308,24 @@ function InspectorPanel({ report, onClose }: { report: InspectReport; onClose: (
           {report.promises.map((p) => (
             <div key={p}>{p}</div>
           ))}
+        </div>
+      )}
+      {report.life.length > 0 && (
+        <div className="inspector-life" data-inspector-life>
+          <h3>life so far</h3>
+          {report.life.map((e) => (
+            <div key={`${e.tick}-${e.text}`}>
+              {e.text}
+              {e.because && <span className="story-because"> — {e.because}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {(report.owes > 0 || report.owed > 0) && (
+        <div className="inspector-debts" data-inspector-debts>
+          <h3>obligations</h3>
+          {report.owes > 0 && <div>owes {report.owes} coins</div>}
+          {report.owed > 0 && <div>is owed {report.owed} coins</div>}
         </div>
       )}
       {report.memories.length > 0 && (
@@ -643,7 +693,18 @@ export default function App() {
     setChatReply(turn?.text ?? 'No one nearby to hear you.')
     setChatText('')
     setTick((t) => t + 1)
-  }, [chatText, selectedId])
+
+    // Optional: if the player has pointed the game at their own dialogue
+    // service, let it rephrase the line. The local reply is already on screen,
+    // so a slow or broken service simply never changes anything.
+    if (!turn || !settings.optionalCloudAi || !settings.cloudEndpoint) return
+    const speaker = sim.creatureById(turn.speakerId)
+    if (!speaker) return
+    const provider = createCloudProvider({ endpoint: settings.cloudEndpoint })
+    void polishTurn(provider, turn, speaker.name, speaker.psyche?.mood ?? 'calm').then((polished) => {
+      if (polished.text !== turn.text) setChatReply(polished.text)
+    })
+  }, [chatText, selectedId, settings.optionalCloudAi, settings.cloudEndpoint])
 
   const updateSettings = useCallback((patch: Partial<GameSettings>): void => {
     setSettings((prev) => {
@@ -1205,7 +1266,13 @@ export default function App() {
 
       {/* society pulse */}
       {societyOpen && sim && (
-        <SocietyPanel report={inspectSociety(sim)} onClose={() => setSocietyOpen(false)} />
+        <SocietyPanel
+          report={inspectSociety(sim)}
+          onClose={() => {
+            markSeen(sim.stories, sim.time)
+            setSocietyOpen(false)
+          }}
+        />
       )}
 
       {/* performance overlay (F3) */}
@@ -1279,15 +1346,28 @@ export default function App() {
             />
           </label>
           <label className="settings-row">
-            <span>cloud voice (optional)</span>
+            <span>own dialogue service</span>
             <input
               type="checkbox"
               checked={settings.optionalCloudAi}
               data-cloud-ai
               onChange={(e) => updateSettings({ optionalCloudAi: e.target.checked })}
             />
-            <span className="settings-hint">offline always works</span>
+            <span className="settings-hint">off = the game's own voice</span>
           </label>
+          {settings.optionalCloudAi && (
+            <label className="settings-row">
+              <span>endpoint</span>
+              <input
+                type="text"
+                className="talk-input"
+                data-cloud-endpoint
+                placeholder="http://localhost:11434/haven"
+                value={settings.cloudEndpoint}
+                onChange={(e) => updateSettings({ cloudEndpoint: e.target.value.trim() })}
+              />
+            </label>
+          )}
           <div className="settings-row" data-perf>
             <span>frame cost</span>
             <b>{perfMs.toFixed(1)} ms</b>

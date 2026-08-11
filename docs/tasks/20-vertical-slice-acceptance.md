@@ -1,49 +1,54 @@
 # Task 20 — Vertical slice acceptance
 
-**Status:** `todo`  
+**Status:** `partial`  
 **Vision sections:** Development priorities (1–14); Quality requirements
 
 ## Goal
 
-A checklist to declare the **first complete version** done: playable, tested, documented, performant enough — not a mock-up.
+Declare the first complete version done only when the game is genuinely
+playable — and specifically when it passes the vision's own success test:
+
+> The player regularly wonders "why did that creature do that?" **and can
+> discover a believable answer.**
 
 ## Acceptance checklist
 
-Copy this into a PR when claiming the slice is complete:
+### The success test
+
+- [ ] A 20-minute session produces a social story the player noticed
+- [ ] That story can be traced to causes in the inspector or society panel
+- [ ] Two creatures in the same situation visibly choose differently
 
 ### Playable loop
 
-- [ ] Small 3D settlement navigable in first person
-- [ ] Modest population with distinct individuals
-- [ ] Player can talk, teach, help/harm, trade/observe consequences
-- [ ] Creatures pursue needs, relationships, work without scripts
-- [ ] At least one emergent story observable in a 20-minute session
+- [x] Small 3D settlement navigable in first person
+- [x] Modest population with distinct individuals
+- [x] Player can talk, teach, help/harm, and observe consequences
+- [x] Creatures pursue needs, relationships, and work without scripts
+- [ ] Player can trade with creatures directly
 
 ### Systems present
 
-- [ ] Communication (player + creature)
-- [ ] Needs / emotions / psyche / memory
-- [ ] Genetics / aging / love / reproduction
-- [ ] Families / multidimensional relationships
-- [ ] Inventories / ownership / key items & substances
-- [ ] Homes, shop, clinic, pharmacy, bank, bar (+ work/farm)
-- [ ] Economy with scarcity and labor
-- [ ] Trust / theft / jealousy / forgiveness loops
-- [ ] Save/load resilient
-- [ ] Inspector + performance settings
+- [x] Communication (player + creature)
+- [x] Needs / emotions / psyche / memory / beliefs
+- [x] Genetics / aging / love / reproduction
+- [x] Families / multidimensional relationships
+- [x] Inventories / ownership / items & substances
+- [x] Homes, market, clinic, pharmacy, bank, bar (+ work/farm)
+- [x] Economy with scarcity and labour
+- [ ] Economy with obligations between individuals
+- [x] Trust / theft / jealousy / forgiveness loops
+- [x] Save/load resilient
+- [x] Inspector + performance settings
 
 ### Quality gates
 
-- [ ] Automated tests green for critical sim rules
-- [ ] Offline play works
-- [ ] Setup is `npm install && npm run dev` (or documented equivalent)
-- [ ] Limitations documented honestly
-- [ ] Comfortable on target laptop at medium defaults (task 14 evidence)
-
-## Current state
-
-Many items `partial`; use this file as the release gate, not as parallel implementation work.
+- [x] Automated tests green for critical simulation rules
+- [x] Offline play works
+- [x] Setup is `npm install && npm run dev`
+- [x] Limitations documented honestly
+- [ ] Measured performance evidence (task 14)
 
 ## Notes
 
-Update checkboxes only when playable evidence exists (tests + short play notes).
+Update checkboxes only when playable evidence exists (tests + play notes).

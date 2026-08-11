@@ -1,36 +1,34 @@
-# Task 02 — First-person controls and interaction
+# Task 02 — First-person presence
 
 **Status:** `partial`  
 **Vision sections:** Player and creature movement (player half)
 
+## Why this task changed
+
+Jump and crouch were on the list out of habit; Haven is flat and they would add
+buttons without adding meaning (moved to task 17's out-of-scope). What the
+player actually lacks is **knowing what they can do** — the controls are
+undiscoverable, so most of the interaction surface goes unused.
+
 ## Goal
 
-Responsive first-person presence in the same world as the creatures: move, look, select, use tools, talk, inventory.
+A player who has never read the README can work out how to move, talk, and
+handle things within a minute.
 
 ## Acceptance
 
-- [x] WASD + pointer lock / touch split zones
-- [x] Look pitch/yaw, joystick on touch
-- [x] Tap/select creature; social / teach / talk HUD
-- [x] Player inventory strip + equip/use basics
-- [ ] Jump / crouch where appropriate
-- [x] Contextual fixture buttons appear when furniture is in reach
-- [ ] Clear, discoverable control help overlay
-
-## Current state
-
-`App.tsx` + `LabView` first-person mode default. Dock tools for benevolence/malice and drops.
+- [x] WASD + pointer lock; touch split zones; look pitch/yaw
+- [x] Select a creature; talk, teach, tools; inventory strip
+- [x] Contextual buttons when furniture is in reach
+- [ ] **A controls card** the player can open (and that appears on first run)
+- [ ] A focus indicator naming what is in front of you and what it does
+- [ ] Every action reachable by keyboard on desktop
 
 ## Out of scope
 
-Full shared physics parity with creatures (task 17).
+Jump, crouch, vehicles.
 
-## Next steps
+## Test
 
-1. In-game controls card.
-2. Jump/crouch if navigation needs them.
-3. Focus reticle showing nearest interactable Luma/building.
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+A first-time player finds and uses talk, the inspector, and a bed without being
+told they exist.

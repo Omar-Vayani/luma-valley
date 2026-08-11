@@ -65,6 +65,45 @@ export interface ParseResult {
   topic?: string
   concept?: string
   word?: string
+  /** the good the player named, when they asked to trade */
+  item?: string
+  /** whether the player wants to buy from or sell to the creature */
+  direction?: 'buy' | 'sell'
+}
+
+/** Goods a player can name in conversation. */
+const TRADE_WORDS: Record<string, string> = {
+  bread: 'bread',
+  loaf: 'bread',
+  food: 'bread',
+  water: 'water',
+  medicine: 'medicine',
+  remedy: 'medicine',
+  brew: 'brew',
+  drink: 'brew',
+  beer: 'brew',
+  herb: 'herb',
+  tonic: 'tonic',
+  stick: 'stick',
+  gem: 'gem',
+  trinket: 'trinket',
+  cloak: 'cloak',
+  grain: 'grain',
+}
+
+export function extractItem(text: string): string | undefined {
+  const lower = text.toLowerCase()
+  for (const [word, id] of Object.entries(TRADE_WORDS)) {
+    if (new RegExp(`\\b${word}\\b`).test(lower)) return id
+  }
+  return undefined
+}
+
+function extractDirection(text: string): 'buy' | 'sell' | undefined {
+  const lower = text.toLowerCase()
+  if (/\b(sell me|buy from you|can i (buy|have)|i want to buy|how much)\b/.test(lower)) return 'buy'
+  if (/\b(i'?ll sell|buy this|want to sell|take this off)\b/.test(lower)) return 'sell'
+  return undefined
 }
 
 const PATTERNS: { kind: IntentKind; re: RegExp; topic?: (m: RegExpMatchArray) => string | undefined }[] = [
@@ -115,6 +154,8 @@ export function parsePlayerText(text: string): ParseResult {
         topic: p.topic?.(m),
         concept: p.kind === 'teach' ? guessConcept(trimmed) : undefined,
         word: p.kind === 'teach' ? guessTaughtWord(trimmed) : undefined,
+        item: p.kind === 'request_trade' ? extractItem(trimmed) : undefined,
+        direction: p.kind === 'request_trade' ? extractDirection(trimmed) ?? 'buy' : undefined,
       }
     }
   }
@@ -179,7 +220,7 @@ export function respondToPlayer(ctx: DialogueContext, parsed: ParseResult, fromI
     tick: ctx.tick,
   }
 
-  const text = craftReply(ctx, parsed, { believed, obeyed, mood, trust, edge })
+  const text = inVoiceOf(c, craftReply(ctx, parsed, { believed, obeyed, mood, trust, edge }))
 
   return {
     speakerId: c.id,
@@ -190,6 +231,28 @@ export function respondToPlayer(ctx: DialogueContext, parsed: ParseResult, fromI
     obeyed,
     tick: ctx.tick,
   }
+}
+
+/**
+ * The same thought sounds different depending on who is saying it. A child has
+ * few words and says them plainly; an elder speaks with the weight of having
+ * seen it before. A creature with a rich vocabulary drops its own words in.
+ */
+export function inVoiceOf(c: Creature, line: string): string {
+  const vocabulary = c.language.vocab.size
+  if (c.stage === 'child') {
+    // children keep it short: first clause only, and simpler punctuation
+    const shortened = line.replace(/,\s+(and|but|then)\b[^."]*/g, '')
+    return shortened.replace(/\b(honestly|actually|carefully|seriously|evenly)\b\s*/g, '')
+  }
+  if (c.stage === 'elder' && vocabulary > 2) {
+    return `${line} They have seen it before.`
+  }
+  if (vocabulary >= 5 && c.genome.sociability > 0.6) {
+    const own = [...c.language.vocab.values()][0]
+    if (own) return `${line} "${own.word}," they add, in their own words.`
+  }
+  return line
 }
 
 function moodWord(c: Creature): string {
