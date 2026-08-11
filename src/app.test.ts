@@ -119,7 +119,8 @@ describe('App Luma Haven UI', () => {
     expect(app).toContain('data-inspector-family')
     expect(app).toContain('data-inspector-promises')
     expect(app).toContain('data-perf-overlay')
-    expect(app).toContain("e.key === 'F3'")
+    expect(app).toContain('data-perf-phases')
+    expect(app).toContain("case 'F3'")
     expect(css).toContain('.perf')
   })
 
@@ -155,6 +156,17 @@ describe('App Luma Haven UI', () => {
     expect(app).toContain('data-cloud-endpoint')
     expect(app).toContain('createCloudProvider')
     expect(app).toContain('polishTurn')
+    // and says out loud which voice is speaking
+    expect(app).toContain('data-talk-voice')
+    expect(app).toContain("Haven's own")
+  })
+
+  it('reaches every panel from the keyboard', () => {
+    for (const key of ["case 't'", "case 'i'", "case 'h'", "case 'g'", "case 'm'", "case '?'"]) {
+      expect(app).toContain(key)
+    }
+    expect(app).toContain("case 'Escape'")
+    expect(app).toContain('help-keys')
   })
 
   it('seeds a starter society with households and children', () => {

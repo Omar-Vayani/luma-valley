@@ -11,6 +11,11 @@ import { dist } from './util'
 
 export type LodBand = 'near' | 'mid' | 'far' | 'sleep'
 
+/** The parts of a tick worth measuring separately. */
+export type SimPhase = 'minds' | 'bodies' | 'social' | 'economy' | 'world'
+
+export const SIM_PHASES: SimPhase[] = ['minds', 'bodies', 'social', 'economy', 'world']
+
 export interface LodState {
   /** Round-robin cursor into the creature list for AI batches. */
   aiCursor: number
@@ -19,10 +24,61 @@ export interface LodState {
   /** Accumulated frame-time samples (ms) for the perf HUD. */
   samples: number[]
   lastCpuMs: number
+  /** Milliseconds spent in each phase of the most recent ticks. */
+  phaseMs: Record<SimPhase, number>
+  /** Rolling average per phase, so the overlay does not flicker. */
+  phaseAvg: Record<SimPhase, number>
+}
+
+function zeroPhases(): Record<SimPhase, number> {
+  return { minds: 0, bodies: 0, social: 0, economy: 0, world: 0 }
 }
 
 export function createLodState(): LodState {
-  return { aiCursor: 0, lastDecide: {}, samples: [], lastCpuMs: 0 }
+  return {
+    aiCursor: 0,
+    lastDecide: {},
+    samples: [],
+    lastCpuMs: 0,
+    phaseMs: zeroPhases(),
+    phaseAvg: zeroPhases(),
+  }
+}
+
+/**
+ * Time one phase of the tick. Uses performance.now when it exists and falls
+ * back to Date.now, so the same code runs in the browser and in the benchmark.
+ */
+const now = (): number =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+
+export function timePhase<T>(lod: LodState, phase: SimPhase, run: () => T): T {
+  const started = now()
+  const result = run()
+  lod.phaseMs[phase] += now() - started
+  return result
+}
+
+/** Fold this tick's phase timings into the rolling average and reset. */
+export function rollPhases(lod: LodState): void {
+  for (const phase of SIM_PHASES) {
+    lod.phaseAvg[phase] = lod.phaseAvg[phase] * 0.9 + lod.phaseMs[phase] * 0.1
+    lod.phaseMs[phase] = 0
+  }
+}
+
+/** The phases, most expensive first, for the performance overlay. */
+export function phaseBreakdown(lod: LodState): { phase: SimPhase; ms: number; share: number }[] {
+  const total = SIM_PHASES.reduce((sum, p) => sum + lod.phaseAvg[p], 0)
+  return SIM_PHASES
+    .map((phase) => ({
+      phase,
+      ms: lod.phaseAvg[phase],
+      share: total > 0 ? lod.phaseAvg[phase] / total : 0,
+    }))
+    .sort((a, b) => b.ms - a.ms)
 }
 
 export function bandFor(

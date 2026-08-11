@@ -10,7 +10,7 @@ import { tickChem, applyPlay, applySocial } from './chem'
 import { randomGenome, crossover, mutate, type Genome } from './genetics'
 import { TOWERS, findTower, towerAt, WORLD_HALF, type TowerId } from './world'
 import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
-import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
+import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, recordSale, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
 import { think, reward } from './brain'
@@ -27,7 +27,10 @@ import { observeEvent, gossipSpread, trustTowards, getReputation } from './reput
 import { mulberry32 } from './rng'
 import { dist, clamp01 } from './util'
 import { DEFAULT_SETTINGS, type GameSettings } from './settings'
-import { createLodState, pickAiBatch, markDecided, bandFor, chemStride, type LodState } from './lod'
+import {
+  createLodState, pickAiBatch, markDecided, bandFor, chemStride, timePhase, rollPhases,
+  type LodState,
+} from './lod'
 import {
   createSociety, ensureCoupleHousehold, adoptChild, tickHouseholdCare, pruneHouseholds,
   householdOf, homeTowerOf, type HavenSociety,
@@ -62,6 +65,11 @@ import {
   createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, giveItem, type Fixture,
 } from './interact'
 import { createStoryLog, recordStory, explain, type StoryLog } from './story'
+import {
+  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight,
+  type Institutions,
+} from './institutions'
+import { standingOf, priceMultiplierFor, willingToHelp } from './status'
 import {
   mentorScore, mentor, mediateScore, mediate, flatterScore, flatter, alliedPair, formAlliance,
 } from './socialacts'
@@ -156,6 +164,8 @@ export interface Sim {
   stories: StoryLog
   /** beds, doors, counters, and containers the world is furnished with */
   fixtures: Fixture[]
+  /** each building's own till and opening hours */
+  institutions: Institutions
   /** Use the nearest fixture as the player: sleep, open, take, or store. */
   playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
 }
@@ -211,6 +221,7 @@ export function createSim(seed = 1): Sim {
     overheard: [],
     stories: createStoryLog(),
     fixtures: createFixtures(),
+    institutions: createInstitutions(),
     playerUseFixture(action, itemId): string | null {
       const p = sim.player
       if (!isPlayerAlive(p)) return null
@@ -226,7 +237,9 @@ export function createSim(seed = 1): Sim {
       }
       if (action === 'toggle') {
         const res = toggleDoor(actor, f)
-        return res.ok ? `door ${res.effect}` : null
+        if (!res.ok) return null
+        const shut = !isOpen(sim.institutions, f.tower, sim.time)
+        return shut ? `door ${res.effect} — the ${f.tower} is closed at this hour` : `door ${res.effect}`
       }
       if (action === 'store' && itemId) {
         const res = storeItem(actor, f, itemId)
@@ -264,8 +277,9 @@ export function createSim(seed = 1): Sim {
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
       const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz)
       c.wallet = 6 + Math.floor(sim.rng() * 8) // enough for a few meals — room to experiment
-      // founders arrive grown: only creatures BORN here start as children
-      c.age = 650 + Math.floor(sim.rng() * 400)
+      // Founders arrive grown, and not all the same age: a settlement where
+      // everybody is the same vintage loses everybody in the same season.
+      c.age = 650 + Math.floor(sim.rng() * 3200)
       c.stage = lifeStageFor(c.age)
       sim.creatures.push(c)
       return c
@@ -646,6 +660,7 @@ export function createSim(seed = 1): Sim {
       // Time-sliced AI: only a batch of due creatures get a full decide()
       const batch = new Set(pickAiBatch(sim.creatures, focusX, focusZ, sim.settings, sim.lod, sim.time).map((c) => c.id))
 
+      timePhase(sim.lod, 'minds', () => {
       for (const c of sim.creatures) {
         if (!c.alive) continue
         // INTERACTION HOLD: a creature mid-chat stands still facing the player.
@@ -722,9 +737,11 @@ export function createSim(seed = 1): Sim {
         c.pos.x = clampCoord(c.pos.x)
         c.pos.z = clampCoord(c.pos.z)
       }
+      })
       // COLLISION: alive creatures push apart (no two balls in the same spot)
       // and the player is a solid body too. Dead bodies stay where they fell —
       // a path blocked by a corpse is a REAL obstacle.
+      timePhase(sim.lod, 'bodies', () => {
       resolveCreatureCollisions(sim)
       // drops: creatures eat food piles / collect money piles they reach
       for (const c of sim.creatures) {
@@ -791,8 +808,11 @@ export function createSim(seed = 1): Sim {
           }
         }
       }
+      })
       // shelves only refill where somebody is doing the work
+      timePhase(sim.lod, 'economy', () => {
       tickEconomy(sim.economy, (goodId) => isProducedGoodStaffed(sim.jobs, goodId))
+      tickInstitutions(sim.institutions, sim.time)
       if (sim.time % 20 === 0 || sim.time === 1) assignJobs(sim)
       if (sim.time % 200 === 0) reportShortages(sim)
       tickDebts(sim)
@@ -801,6 +821,8 @@ export function createSim(seed = 1): Sim {
       if (sim.time % sim.economy.DAY_TICKS === 0) {
         tickMarketDay(sim.economy, Math.floor(sim.time / sim.economy.DAY_TICKS))
       }
+      })
+      timePhase(sim.lod, 'social', () => {
       tickRelationships(sim)
       tickPartnerships(sim)
       tickFamilyPlans(sim)
@@ -817,6 +839,8 @@ export function createSim(seed = 1): Sim {
         updateInfluence(sim.culture, sim.creatures)
         updateSharedWords(sim.culture, sim.creatures)
       }
+      })
+      timePhase(sim.lod, 'world', () => {
       chatterNearby(sim, focusX, focusZ)
       for (const broken of tickPromises(sim.chatter, sim.time, (id) => sim.creatureById(id))) {
         if (!broken.promiser || !broken.promisee) continue
@@ -842,6 +866,8 @@ export function createSim(seed = 1): Sim {
       tradeNearby(sim)
       if (sim.events.length > 40) sim.events.splice(0, sim.events.length - 40)
       if (sim.drops.length > 60) sim.drops.splice(0, sim.drops.length - 60)
+      })
+      rollPhases(sim.lod)
     },
   }
   return sim
@@ -945,6 +971,24 @@ function playerAsCreature(sim: Sim): Creature {
     social: {},
     emotions: createEmotions(),
   } as unknown as Creature
+}
+
+/**
+ * Buy at a counter. The price is what this seller would ask of this buyer —
+ * standing and reputation move it — and the coins stay in the building's till,
+ * where wages come from.
+ */
+function payAtTower(sim: Sim, c: Creature, tower: string, goodId: string): boolean {
+  const good = sim.economy.goods[goodId]
+  if (!good || good.stock <= 0) return false
+  const standing = standingOf(c, sim.culture, sim.creatures)
+  const price = Math.max(1, Math.round(marketPrice(sim.economy, goodId) * priceMultiplierFor(standing)))
+  if (c.wallet < price) return false
+  c.wallet -= price
+  good.stock -= 1
+  recordSale(sim.economy, goodId, 1)
+  takePayment(sim.institutions, tower, price)
+  return true
 }
 
 /** Push a renderer-visible event. */
@@ -1228,6 +1272,7 @@ function careForChildren(sim: Sim): void {
       a.alive && a.id !== kid.id && isMature(a.stage) &&
       (house?.memberIds.includes(a.id) || dist(a.pos.x, a.pos.z, kid.pos.x, kid.pos.z) < 6),
     )
+    const kidStanding = standingOf(kid, sim.culture, sim.creatures)
     for (const adult of carers) {
       const kin = house?.memberIds.includes(adult.id) ?? false
       const neglectful = adult.genome.greed > 0.7 && adult.genome.loyalty < 0.35
@@ -1235,7 +1280,8 @@ function careForChildren(sim: Sim): void {
         kid.emotions.shame = clamp01(kid.emotions.shame + 0.02)
         continue
       }
-      if (!kin && adult.genome.sociability < 0.4) continue
+      // a stranger's child gets helped according to how the family is regarded
+      if (!kin && willingToHelp(adult, kid, kidStanding) < 0.3) continue
 
       if (countItem(adult.inventory, 'bread') > 0 && useItem(adult.inventory, 'bread')) {
         kid.eat()
@@ -1296,11 +1342,14 @@ function tickFamilyPlans(sim: Sim): void {
     handled.add(partner.id)
 
     // Both home together and still willing? Then a child is born here, in the
-    // household that will raise it.
-    const home = findTower('homes')
+    // household that will raise it. Quiet hours make it likelier.
+    if (!isNight(sim.time) && sim.rng() < 0.25) continue
+    // their own house if the household claimed one, otherwise the lodgings
+    const ownHome = homeTowerFor(sim, c)
+    const home = findTower(ownHome ?? 'homes') ?? findTower('homes')
     const bothHome = home
-      && dist(c.pos.x, c.pos.z, home.x, home.z) <= home.radius + 1
-      && dist(partner.pos.x, partner.pos.z, home.x, home.z) <= home.radius + 1
+      && dist(c.pos.x, c.pos.z, home.x, home.z) <= home.radius + 2
+      && dist(partner.pos.x, partner.pos.z, home.x, home.z) <= home.radius + 2
     if (bothHome && canProcreate(c.chem.energy, partner.chem.energy, c.age)
       && sim.rng() < 0.5 * fertilityFactor(c.genome) * fertilityFactor(partner.genome)) {
       c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
@@ -1596,7 +1645,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
   switch (action) {
     case 'food': {
       if (at?.id === 'food') {
-        if (c.chem.hunger < 0.85 && buyFromTower(sim.economy, 'food', c)) {
+        if (c.chem.hunger < 0.85 && payAtTower(sim, c, 'food', 'bread')) {
           // keep the bread — eat now if hungry, else store for later
           addItem(c.inventory, 'bread', 1)
           if (c.chem.hunger < 0.6 && useItem(c.inventory, 'bread')) {
@@ -1637,9 +1686,28 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         const result = workShiftAt(sim.jobs, sim.economy, c, role)
         c.action = 'work'
         if (result.paid > 0) {
+          // wages come out of this building's takings, not out of nowhere
+          const actual = payFromTill(sim.institutions, JOB_TOWER[role], result.paid)
+          c.wallet += actual - result.paid
           emit(sim, 'work', c, undefined, c.pos.x, c.pos.z)
-          c.action = 'work done'
-          appraise(c.emotions, 0.5, 0.3, 0.8)
+          if (actual <= 0) {
+            c.action = 'unpaid'
+            appraise(c.emotions, -0.4, 0.4, 0.2)
+            c.chem.purpose = clamp01(c.chem.purpose - 0.06)
+            if (sim.rng() < 0.25) {
+              recordStory(sim.stories, {
+                kind: 'work',
+                tick: sim.time,
+                actor: c,
+                text: `${c.name} worked a shift the ${JOB_TOWER[role]} could not pay for`,
+                because: 'the till is empty',
+                weight: 2.5,
+              })
+            }
+          } else {
+            c.action = 'work done'
+            appraise(c.emotions, 0.5, 0.3, 0.8)
+          }
         }
         return
       }
@@ -1722,7 +1790,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'heal': {
-      if (at?.id === 'pharmacy' && buyFromTower(sim.economy, 'pharmacy', c)) {
+      if (at?.id === 'pharmacy' && payAtTower(sim, c, 'pharmacy', 'medicine')) {
         const dose = 0.1 + c.genome.addictionProne * 0.25
         c.chem.health = clamp01(c.chem.health + 0.3)
         c.chem.addiction.medicine = clamp01((c.chem.addiction.medicine ?? 0) + dose)
@@ -1736,7 +1804,9 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'nest': {
-      if (at?.id === 'homes') {
+      // home means their own house when the household has one
+      const ownHome = homeTowerFor(sim, c)
+      if (at?.id === 'homes' || (ownHome !== null && at?.id === ownHome)) {
         // home with someone you love: rest, warmth, and time together
         c.action = 'home'
         applyComfort(c.chem, 0.02)
@@ -1748,7 +1818,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
         }
         return
       }
-      goTo(sim, c, 'homes')
+      goTo(sim, c, (ownHome ?? 'homes') as TowerId)
       return
     }
     case 'clinic': {
@@ -1809,7 +1879,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'drink': {
-      const good = at?.id === 'tavern' ? buyFromTower(sim.economy, 'tavern', c) : null
+      const good = at?.id === 'tavern' ? payAtTower(sim, c, 'tavern', 'brew') : null
       if (good) {
         c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
         c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
@@ -1839,7 +1909,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       return
     }
     case 'buyWeapon': {
-      if (at?.id === 'tools' && !c.weapon && buyFromTower(sim.economy, 'tools', c)) {
+      if (at?.id === 'tools' && !c.weapon && payAtTower(sim, c, 'tools', 'weapon')) {
         c.weapon = 'stick'
         c.action = 'buy'
         return

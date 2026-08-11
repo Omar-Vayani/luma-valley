@@ -1345,3 +1345,26 @@ button { font: inherit; cursor: pointer; }
 .society {
   z-index: 17;
 }
+.perf-split {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(232, 220, 192, 0.25);
+  opacity: 0.85;
+}
+.talk-voice {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+.talk-voice b {
+  color: var(--amber);
+}
+.help-keys {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+.help-keys b {
+  color: var(--amber);
+}

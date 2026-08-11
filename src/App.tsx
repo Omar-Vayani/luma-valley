@@ -32,6 +32,7 @@ import { transmitCulture } from './lab/norms'
 import { fixtureAt } from './lab/interact'
 import { addItem } from './lab/inventory'
 import { markSeen } from './lab/story'
+import { phaseBreakdown } from './lab/lod'
 import { createCloudProvider, polishTurn } from './lab/dialogue-provider'
 import { saveWorldBlob, loadWorldBlob, loadWorldBackup, hasWorldSlot } from './lab/creature-storage'
 
@@ -608,17 +609,6 @@ export default function App() {
     return () => document.removeEventListener('pointerlockchange', onChange)
   }, [])
 
-  // F3 toggles the performance overlay, the way a debug build should.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'F3') {
-        e.preventDefault()
-        setPerfOverlay((v) => !v)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   const setToolMode = useCallback((mode: ToolMode): void => {
     toolRef.current = mode
@@ -665,6 +655,74 @@ export default function App() {
     viewRef.current?.setPaused(false)
     viewRef.current?.setSpeed(s)
   }, [])
+
+  /**
+   * Keyboard access. Every panel has a key, so nothing is mouse-only, and Esc
+   * closes whatever is open. Typing in a text field is left alone.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+      if (typing) {
+        if (e.key === 'Escape') target?.blur()
+        return
+      }
+      const closeAll = (): void => {
+        setChatOpen(false)
+        setInspectOpen(false)
+        setSocietyOpen(false)
+        setSettingsOpen(false)
+        setMarketOpen(false)
+        setTeachOpen(false)
+        setHelpOpen(false)
+      }
+      switch (e.key) {
+        case 'F3':
+          e.preventDefault()
+          setPerfOverlay((v) => !v)
+          break
+        case 'Escape':
+          closeAll()
+          break
+        case 't': case 'T':
+          setChatOpen((o) => !o)
+          break
+        case 'i': case 'I':
+          setInspectOpen((o) => !o)
+          break
+        case 'h': case 'H':
+          setSocietyOpen((o) => !o)
+          break
+        case 'g': case 'G':
+          setSettingsOpen((o) => !o)
+          break
+        case 'm': case 'M':
+          setMarketOpen((o) => !o)
+          break
+        case '?': case '/':
+          setHelpOpen((o) => !o)
+          break
+        case ' ':
+          e.preventDefault()
+          togglePause()
+          break
+        case '1':
+          applySpeed(1)
+          break
+        case '2':
+          applySpeed(2)
+          break
+        case '3':
+          applySpeed(10)
+          break
+        default:
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [applySpeed, togglePause])
 
   // ── player mode (a distinct character — never a creature) ──
   const toggleViewMode = useCallback((): void => {
@@ -939,6 +997,13 @@ export default function App() {
       }
     }
   }
+
+  // which voice is speaking for the Luma right now
+  const voiceLabel = !settings.optionalCloudAi
+    ? "Haven's own"
+    : settings.cloudEndpoint
+      ? `your service (${new URL(settings.cloudEndpoint, 'http://x').host || 'configured'})`
+      : "Haven's own — no endpoint set"
 
   // what furniture is within arm's reach right now (contextual prompts)
   const nearFixture = sim && playerC?.alive
@@ -1280,7 +1345,12 @@ export default function App() {
             <h2>🗨️ talk{selected ? ` · ${selected.name}` : ''}</h2>
             <button type="button" className="talk-close" data-talk-close aria-label="Close talk" onClick={() => setChatOpen(false)}>✕</button>
           </header>
-          <p className="talk-hint">Type naturally — greet, ask how they feel, request help, flirt, apologize…</p>
+          <p className="talk-hint">
+            Type naturally — greet, ask how they feel, ask to buy bread, ask for help, warn them about someone.
+          </p>
+          <p className="talk-voice" data-talk-voice>
+            voice: <b>{voiceLabel}</b>
+          </p>
           <div className="talk-row">
             <input
               className="talk-input"
@@ -1330,6 +1400,13 @@ export default function App() {
           <div>luma {sim.creatures.filter((c) => c.alive).length}/{settings.populationCap}</div>
           <div>ai batch {settings.aiBatchSize} · {settings.quality}</div>
           <div>tick {sim.time}</div>
+          <div className="perf-split" data-perf-phases>
+            {phaseBreakdown(sim.lod).map((p) => (
+              <div key={p.phase}>
+                {p.phase.padEnd(8, '\u00a0')} {p.ms.toFixed(2)} ms {Math.round(p.share * 100)}%
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -1373,6 +1450,11 @@ export default function App() {
             <dt>😴 🚪 🫳</dt><dd>appear when a bed, door, or chest is within reach</dd>
             <dt>⚙️ · F3</dt><dd>settings and saves · performance overlay</dd>
           </dl>
+          <p className="help-keys">
+            Keys: <b>T</b> talk · <b>I</b> inspect · <b>H</b> Haven · <b>M</b> market ·
+            <b> G</b> settings · <b>?</b> this card · <b>Space</b> pause · <b>1 2 3</b> speed ·
+            <b> Esc</b> close
+          </p>
         </section>
       )}
 

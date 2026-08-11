@@ -16,6 +16,8 @@ import { EMOTION_KEYS } from './emotions'
 import { promisesTo } from './chatter'
 import { currentLeader } from './norms'
 import { producerOf } from './jobs'
+import { standingOf, describeStanding } from './status'
+import { closedNow, timeOfDay, tillOf } from './institutions'
 import { wealthInequality, totalOwedBy, totalOwedTo } from './economy'
 import { lifeStory, topStories, storiesSince, formatStory } from './story'
 
@@ -64,6 +66,9 @@ export interface InspectReport {
   /** coins owed to and by this creature */
   owes: number
   owed: number
+  /** how the settlement regards them, in words */
+  standing: string
+  standingScore: number
 }
 
 export function inspectCreature(sim: Sim, c: Creature): InspectReport {
@@ -133,6 +138,7 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     .filter(([, n]) => n > 0)
     .map(([id, n]) => `${id}×${n}`)
 
+  const standing = standingOf(c, sim.culture, sim.creatures)
   const parents = c.parentIds.map((id) => sim.creatureById(id)?.name ?? `#${id}`)
   const children = sim.creatures
     .filter((o) => o.parentIds.includes(c.id))
@@ -204,6 +210,8 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     })),
     owes: Math.round(totalOwedBy(sim.ledger, c.id)),
     owed: Math.round(totalOwedTo(sim.ledger, c.id)),
+    standing: describeStanding(standing),
+    standingScore: Math.round(standing.score * 100) / 100,
   }
 }
 
@@ -272,6 +280,12 @@ export interface SocietyReport {
   sinceLastVisit: string[]
   /** goods with an empty shelf and the reason why */
   shortages: { good: string; cause: string }[]
+  /** where we are in the day, 0 dawn → 1 end of night */
+  timeOfDay: number
+  /** buildings whose doors are shut right now */
+  closed: string[]
+  /** how much money each institution is holding */
+  tills: { tower: string; till: number }[]
 }
 
 /** A settlement-level readout: what kind of place has this become? */
@@ -326,6 +340,12 @@ export function inspectSociety(sim: Sim): SocietyReport {
     })),
     sinceLastVisit: storiesSince(sim.stories, sim.stories.lastSeenTick, 5).map(formatStory),
     shortages,
+    timeOfDay: Math.round(timeOfDay(sim.time) * 100) / 100,
+    closed: closedNow(sim.institutions, sim.time),
+    tills: Object.keys(sim.institutions).map((tower) => ({
+      tower,
+      till: tillOf(sim.institutions, tower),
+    })),
   }
 }
 

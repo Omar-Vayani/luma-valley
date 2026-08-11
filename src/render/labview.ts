@@ -15,6 +15,19 @@ import { SoundEngine } from '../lab/audio'
 import { refreshBrain, clampCoord } from '../lab/sim'
 import { ITEM_IDS, type ItemId } from '../lab/inventory'
 import { recordFrameTime } from '../lab/lod'
+import { bodyScale } from '../lab/genetics'
+import { isOpen } from '../lab/institutions'
+import { producerOf } from '../lab/jobs'
+
+/** Which good each counter sells, for the "sold out" sign. */
+const TOWER_GOODS: Record<string, string | undefined> = {
+  food: 'bread',
+  pharmacy: 'medicine',
+  tavern: 'brew',
+  tools: 'weapon',
+  farm: 'grain',
+  den: 'herb',
+}
 
 export interface LabViewCallbacks {
   onTapCreature: (id: number, x: number, z: number) => void
@@ -42,6 +55,17 @@ interface CreatureRig {
   hair: THREE.Group
   emotionBadge: THREE.Mesh
   emotionBadgeGroup: THREE.Group
+  /** a worker's tool of trade, shown only while they hold the role */
+  roleMark: THREE.Sprite
+  roleShown: string | null
+  /** household colour band — the same on everyone who lives together */
+  householdBand: THREE.Mesh
+  householdShown: number | null
+  /** how this creature feels about whoever is beside them, right now */
+  feelingMark: THREE.Sprite
+  feelingShown: string | null
+  /** body scale from age and genes, so children read as children */
+  baseScale: number
   phase: number
   targetX: number
   targetZ: number
@@ -211,6 +235,61 @@ function buildItemMesh(id: ItemId): THREE.Object3D {
       return sheaf
     }
   }
+}
+
+/** What each trade carries, so you can tell the healer from the farmer. */
+const ROLE_MARKS: Record<string, string> = {
+  shopkeep: '🍞',
+  healer: '✚',
+  bartender: '🍺',
+  farmer: '🌾',
+  porter: '⚒️',
+  teacher: '🎓',
+}
+
+/** Redraw a text sprite in place, reusing its material and texture slot. */
+function replaceSpriteText(
+  sprite: THREE.Sprite,
+  text: string,
+  opts: { size?: number; color?: string; bg?: string; radius?: number } = {},
+): void {
+  const fresh = makeTextSprite(text, opts)
+  const material = sprite.material as THREE.SpriteMaterial
+  const old = material.map
+  material.map = (fresh.material as THREE.SpriteMaterial).map
+  material.needsUpdate = true
+  old?.dispose()
+  sprite.scale.copy(fresh.scale)
+}
+
+/**
+ * The strongest thing this creature feels about somebody within sight of it.
+ * Only real intensity shows — otherwise everyone would be wearing a face.
+ */
+function strongestFeelingNearby(sim: Sim, c: Creature): string | null {
+  let best: string | null = null
+  let bestWeight = 0.45
+  for (const other of sim.creatures) {
+    if (other.id === c.id || !other.alive) continue
+    const d = Math.hypot(other.pos.x - c.pos.x, other.pos.z - c.pos.z)
+    if (d > 7) continue
+    const edge = c.social[other.id]
+    if (!edge) continue
+    const candidates: [string, number][] = [
+      ['💗', other.id === c.partnerId ? edge.affection + 0.2 : edge.attraction],
+      ['😠', edge.resentment],
+      ['😨', edge.fear],
+      ['🙏', edge.gratitude],
+      ['🤨', edge.suspicion],
+    ]
+    for (const [mark, weight] of candidates) {
+      if (weight > bestWeight) {
+        bestWeight = weight
+        best = mark
+      }
+    }
+  }
+  return best
 }
 
 /** One shared model per good; rigs clone() these. */
@@ -622,9 +701,25 @@ export class LabView {
     label.position.set(0, labelY, 0)
     group.add(label)
 
+    // a lamp by the door: lit when the place is open and someone is working,
+    // dim when it is shut, so the settlement's state reads from a distance
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.34, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0x3a3428, emissive: 0x000000 }),
+    )
+    lamp.position.set(1.9, 3.5, 3.4)
+    group.add(lamp)
+
+    // a small sign under the label saying whether there is anything to buy
+    const stateSign = makeTextSprite('', { size: 26, color: '#1c1a14', bg: '#f0e2bc', radius: 10 })
+    stateSign.position.set(0, labelY - 1, 0)
+    stateSign.visible = false
+    group.add(stateSign)
+
     group.position.set(t.x, 0, t.z)
     this.scene.add(group)
     this.towerMeshes.push(group)
+    this.towerStates.push({ tower: t, lamp, stateSign, shown: '' })
   }
 
   /** The standard tower: gabled house with overhanging roof, chimney, framed windows, door + step. */
@@ -1202,6 +1297,28 @@ export class LabView {
     emotionBadgeGroup.position.set(0, 5.2, 0)
     group.add(emotionBadgeGroup)
 
+    // what they do for a living, worn where you can see it
+    const roleMark = makeTextSprite('', { size: 30, color: '#1c1a14', bg: '#e8dcc0', radius: 14 })
+    roleMark.position.set(0, 3.5, 0)
+    roleMark.visible = false
+    group.add(roleMark)
+
+    // a coloured band shared by everyone in the same household
+    const householdBand = new THREE.Mesh(
+      new THREE.TorusGeometry(1.2, 0.12, 8, 20),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }),
+    )
+    householdBand.rotation.x = Math.PI / 2
+    householdBand.position.y = 0.85
+    householdBand.visible = false
+    group.add(householdBand)
+
+    // how they feel about the creature they are standing next to
+    const feelingMark = makeTextSprite('', { size: 34 })
+    feelingMark.position.set(0.9, 4.7, 0)
+    feelingMark.visible = false
+    group.add(feelingMark)
+
     group.position.set(c.pos.x, GROUND_Y, c.pos.z)
     this.scene.add(group)
 
@@ -1226,11 +1343,112 @@ export class LabView {
       hair,
       emotionBadge,
       emotionBadgeGroup,
+      roleMark,
+      roleShown: null,
+      householdBand,
+      householdShown: null,
+      feelingMark,
+      feelingShown: null,
+      baseScale: 1,
       phase: Math.random() * Math.PI * 2,
       targetX: c.pos.x,
       targetZ: c.pos.z,
       swing: 0,
     })
+  }
+
+  private socialTick = 0
+  private towerStates: {
+    tower: Tower
+    lamp: THREE.Mesh
+    stateSign: THREE.Sprite
+    shown: string
+  }[] = []
+
+  /**
+   * Buildings say what state they are in: lit and stocked, lit but empty, or
+   * dark because the door is shut at this hour.
+   */
+  private syncTowerStates(): void {
+    for (const entry of this.towerStates) {
+      const id = entry.tower.id
+      const open = isOpen(this.sim.institutions, id, this.sim.time)
+      const goodId = TOWER_GOODS[id]
+      const stock = goodId ? (this.sim.economy.goods[goodId]?.stock ?? 0) : null
+      const job = producerOf(goodId ?? '')
+      const staffed = job ? this.sim.jobs.holders[job.id] !== undefined : true
+
+      const state = !open ? 'closed' : stock === 0 ? 'empty' : !staffed ? 'unstaffed' : 'open'
+      if (state === entry.shown) continue
+      entry.shown = state
+
+      const lampMat = entry.lamp.material as THREE.MeshStandardMaterial
+      const lit = state === 'open' || state === 'unstaffed'
+      lampMat.emissive.setHex(lit ? 0xffcf7a : 0x000000)
+      lampMat.emissiveIntensity = lit ? 1.4 : 0
+      lampMat.color.setHex(lit ? 0xffe6b0 : 0x3a3428)
+
+      const caption = state === 'closed' ? 'closed'
+        : state === 'empty' ? 'sold out'
+          : state === 'unstaffed' ? 'no one here'
+            : ''
+      entry.stateSign.visible = caption.length > 0 && this.showLabels
+      if (caption) {
+        replaceSpriteText(entry.stateSign, caption, { size: 26, color: '#1c1a14', bg: '#f0e2bc', radius: 10 })
+      }
+    }
+  }
+
+  /**
+   * Make social state legible without opening a panel: what someone does for
+   * a living, who they live with, how old they are, and how they feel about
+   * whoever is standing next to them.
+   */
+  private syncSocialMarks(rig: CreatureRig): void {
+    const c = rig.creature
+
+    // age and genes decide how big they are; a child is visibly a child
+    const stageScale = c.stage === 'child' ? 0.6 : c.stage === 'adolescent' ? 0.82 : c.stage === 'elder' ? 0.94 : 1
+    const wanted = bodyScale(c.genome) * stageScale
+    if (Math.abs(rig.baseScale - wanted) > 0.01) {
+      rig.baseScale = wanted
+      rig.group.scale.setScalar(wanted)
+    }
+    // elders stoop a little; it reads instantly at a distance
+    rig.group.rotation.x = c.stage === 'elder' ? 0.1 : 0
+
+    // the tool of the trade, only while they hold the role
+    const role = c.alive ? c.job : null
+    if (role !== rig.roleShown) {
+      rig.roleShown = role
+      if (role) {
+        rig.roleMark.visible = this.showLabels
+        replaceSpriteText(rig.roleMark, ROLE_MARKS[role] ?? '•', {
+          size: 30, color: '#1c1a14', bg: '#e8dcc0', radius: 14,
+        })
+      } else {
+        rig.roleMark.visible = false
+      }
+    }
+
+    // the household band: everyone under one roof wears the same colour
+    const household = c.alive ? c.householdId : null
+    if (household !== rig.householdShown) {
+      rig.householdShown = household
+      rig.householdBand.visible = household != null
+      if (household != null) {
+        const mat = rig.householdBand.material as THREE.MeshStandardMaterial
+        mat.color.setStyle(`hsl(${(household * 67) % 360} 70% 60%)`)
+      }
+    }
+
+    // and how they feel about whoever is beside them right now
+    const feeling = c.alive ? strongestFeelingNearby(this.sim, c) : null
+    if (feeling !== rig.feelingShown) {
+      rig.feelingShown = feeling
+      rig.feelingMark.visible = !!feeling && this.showLabels
+      if (feeling) replaceSpriteText(rig.feelingMark, feeling, { size: 34 })
+    }
   }
 
   /** Simple genetic hair: spiky cones, a tuft, curls, long strands, buzz, or bald. */
@@ -1658,6 +1876,7 @@ export class LabView {
     this.syncGraves()
     this.syncRigs(dt)
     this.syncPlayer(dt)
+    this.syncTowerStates()
     this.updateParticles(dt)
     this.updateCamera(dt)
 
@@ -1667,11 +1886,14 @@ export class LabView {
 
   private syncRigs(dt: number): void {
     const t = performance.now() / 1000
+    // social state changes slowly; reading it every frame would be waste
+    const readSocial = this.socialTick++ % 12 === 0
     for (const rig of this.rigs) {
       const c = rig.creature
       const emo = deriveEmotion(c.chem, c.genome)
       const body = rig.body.material as THREE.MeshStandardMaterial
       body.color.lerp(new THREE.Color(emo.color), 1 - Math.pow(0.001, dt))
+      if (readSocial) this.syncSocialMarks(rig)
 
       // position — slower follow while hauling a corpse
       rig.targetX = c.pos.x
