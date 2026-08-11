@@ -423,6 +423,14 @@ export default function App() {
   const [perfMs, setPerfMs] = useState(0)
   const [perfOverlay, setPerfOverlay] = useState(false)
   const [saveNote, setSaveNote] = useState<string | null>(null)
+  // the controls card opens itself the first time somebody plays
+  const [helpOpen, setHelpOpen] = useState(() => {
+    try {
+      return localStorage.getItem('luma-haven-seen-help') !== '1'
+    } catch {
+      return true
+    }
+  })
 
   // view mode: first-person (you ARE the visitor) or top view (watch the world)
   const [viewMode, setViewMode] = useState<'observer' | 'first-person'>('first-person')
@@ -790,6 +798,25 @@ export default function App() {
     setTick((t) => t + 1)
   }, [])
 
+  const giveItemToNearby = useCallback((id: ItemId): void => {
+    const s = simRef.current
+    if (!s) return
+    const note = s.playerGive(id, selectedId ?? undefined)
+    setSaveNote(note ?? 'nobody close enough to hand it to')
+    window.setTimeout(() => setSaveNote(null), 2200)
+    setTick((t) => t + 1)
+  }, [selectedId])
+
+  const dropPlayerItem = useCallback((id: ItemId): void => {
+    const s = simRef.current
+    if (!s) return
+    if (s.playerDrop(id)) {
+      setSaveNote(`dropped the ${id}`)
+      window.setTimeout(() => setSaveNote(null), 1800)
+    }
+    setTick((t) => t + 1)
+  }, [])
+
   const useFixture = useCallback((action: 'rest' | 'toggle' | 'take' | 'store'): void => {
     const s = simRef.current
     if (!s) return
@@ -1081,6 +1108,17 @@ export default function App() {
           >
             🧠
           </button>
+          {/* controls card */}
+          <button
+            type="button"
+            className="speed-btn help-btn"
+            data-help-btn
+            aria-pressed={helpOpen}
+            aria-label={helpOpen ? 'Close controls' : 'Show controls'}
+            onClick={() => setHelpOpen((o) => !o)}
+          >
+            ❔
+          </button>
           {/* society pulse */}
           <button
             type="button"
@@ -1290,6 +1328,45 @@ export default function App() {
         <div className="save-note" data-save-note role="status">{saveNote}</div>
       )}
 
+      {/* controls card — shown on a first visit, and from the ? button after */}
+      {helpOpen && (
+        <section className="help" data-help aria-label="controls">
+          <header className="help-head">
+            <h2>Luma Haven</h2>
+            <button
+              type="button"
+              className="help-close"
+              data-help-close
+              aria-label="Close controls"
+              onClick={() => {
+                setHelpOpen(false)
+                try {
+                  localStorage.setItem('luma-haven-seen-help', '1')
+                } catch {
+                  /* private mode — the card just shows again next time */
+                }
+              }}
+            >
+              ✕
+            </button>
+          </header>
+          <p className="help-intro">
+            You live here too. The Luma around you have their own needs, families, and
+            opinions — including about you.
+          </p>
+          <dl className="help-list">
+            <dt>W A S D</dt><dd>walk · click 🔒 to capture the mouse for looking</dd>
+            <dt>click a Luma</dt><dd>select them and open a conversation</dd>
+            <dt>🗨️</dt><dd>say anything: greet, ask how they are, ask to buy bread, ask for help</dd>
+            <dt>🧠</dt><dd>why did they do that — needs, beliefs, bonds, their life so far</dd>
+            <dt>🏘️</dt><dd>what the settlement is talking about, and what changed while you were away</dd>
+            <dt>🤝 ⤵️</dt><dd>hand an item over, or drop it</dd>
+            <dt>😴 🚪 🫳</dt><dd>appear when a bed, door, or chest is within reach</dd>
+            <dt>⚙️ · F3</dt><dd>settings and saves · performance overlay</dd>
+          </dl>
+        </section>
+      )}
+
       {/* settings + performance */}
       {settingsOpen && (
         <section className="settings" data-settings aria-label="settings">
@@ -1456,18 +1533,39 @@ export default function App() {
               🪙 {Math.round(playerC.wallet)}
             </span>
             {Object.entries(playerC.inventory.items).map(([id, n]) => (
-              <button
-                key={id}
-                type="button"
-                className={`player-inv-item ${playerC.weapon === id ? 'player-inv-equipped' : ''}`}
-                data-player-item={id}
-                aria-label={`use ${id}`}
-                title={playerC.weapon === id ? `${id} (equipped)` : `use ${id}`}
-                onClick={() => usePlayerItem(id as ItemId)}
-              >
-                <span className="player-inv-emoji">{ITEM_EMOJI[id as ItemId] ?? '📦'}</span>
-                <span className="player-inv-count">×{n}</span>
-              </button>
+              <span key={id} className="player-inv-slot">
+                <button
+                  type="button"
+                  className={`player-inv-item ${playerC.weapon === id ? 'player-inv-equipped' : ''}`}
+                  data-player-item={id}
+                  aria-label={`use ${id}`}
+                  title={playerC.weapon === id ? `${id} (equipped)` : `use ${id}`}
+                  onClick={() => usePlayerItem(id as ItemId)}
+                >
+                  <span className="player-inv-emoji">{ITEM_EMOJI[id as ItemId] ?? '📦'}</span>
+                  <span className="player-inv-count">×{n}</span>
+                </button>
+                <button
+                  type="button"
+                  className="player-inv-mini"
+                  data-player-give={id}
+                  aria-label={`give ${id} to the creature in front of you`}
+                  title="give"
+                  onClick={() => giveItemToNearby(id as ItemId)}
+                >
+                  🤝
+                </button>
+                <button
+                  type="button"
+                  className="player-inv-mini"
+                  data-player-drop={id}
+                  aria-label={`drop ${id}`}
+                  title="drop"
+                  onClick={() => dropPlayerItem(id as ItemId)}
+                >
+                  ⤵️
+                </button>
+              </span>
             ))}
             {fightTarget !== null && (
               <button

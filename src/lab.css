@@ -1214,3 +1214,81 @@ button { font: inherit; cursor: pointer; }
 .society-shortages div {
   color: #e8a06a;
 }
+
+/* ── controls card ── */
+.help {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  padding: 16px 18px 18px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid rgba(224, 180, 106, 0.35);
+  color: var(--ink);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 16px 48px rgba(20, 16, 10, 0.5);
+}
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.help-head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.help-close {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+.help-intro {
+  margin: 0 0 12px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+.help-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.88rem;
+}
+.help-list dt {
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--amber);
+}
+.help-list dd {
+  margin: 0;
+  opacity: 0.9;
+}
+.player-inv-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.player-inv-mini {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px;
+  min-width: 26px;
+  min-height: 26px;
+  opacity: 0.75;
+}
+.player-inv-mini:hover {
+  opacity: 1;
+}

@@ -131,6 +131,32 @@ describe('App Luma Haven UI', () => {
     expect(app).toContain('hasWorldSlot')
   })
 
+  it('surfaces stories: feed, since-last-visit, shortages, and a life story', () => {
+    expect(app).toContain('data-society-stories')
+    expect(app).toContain('data-society-since')
+    expect(app).toContain('data-society-shortages')
+    expect(app).toContain('data-inspector-life')
+    expect(app).toContain('markSeen')
+    expect(css).toContain('.story-because')
+  })
+
+  it('lets the player hand things over, drop them, and read the controls', () => {
+    expect(app).toContain('data-player-give')
+    expect(app).toContain('data-player-drop')
+    expect(app).toContain('playerGive')
+    expect(app).toContain('playerDrop')
+    expect(app).toContain('data-help')
+    expect(app).toContain('data-help-btn')
+    expect(css).toContain('.help-list')
+  })
+
+  it('keeps the optional dialogue service opt-in with its own endpoint', () => {
+    expect(app).toContain('data-cloud-ai')
+    expect(app).toContain('data-cloud-endpoint')
+    expect(app).toContain('createCloudProvider')
+    expect(app).toContain('polishTurn')
+  })
+
   it('seeds a starter society with households and children', () => {
     expect(app).toContain('seedStarterSociety')
     expect(app).toContain('ensureCoupleHousehold')

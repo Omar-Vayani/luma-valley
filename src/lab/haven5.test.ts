@@ -121,7 +121,7 @@ describe('supply chains — shortages have a name', () => {
     claimJob(board, baker, 'shopkeep')
     economy.goods.bread.stock = 0
     economy.goods.grain.stock = 0
-    let result = { paid: 0, produced: null as string | null, blockedFor: undefined as string | undefined }
+    let result = workShiftAt(board, economy, baker, 'shopkeep')
     for (let i = 0; i < 30; i++) {
       const r = workShiftAt(board, economy, baker, 'shopkeep')
       if (r.paid > 0) result = r

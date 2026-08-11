@@ -17,7 +17,7 @@ import { think, reward } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
-import { addItem, useItem, hasItem, tradeItem, countItem, type ItemId } from './inventory'
+import { addItem, useItem, hasItem, tradeItem, countItem, ownerOf, type ItemId } from './inventory'
 import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
@@ -59,7 +59,7 @@ import { applyCrowding, applyPurpose, applyComfort } from './chem'
 import { courtStep, partnershipStep, reconcileStep } from './courtship'
 import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './genetics'
 import {
-  createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, type Fixture,
+  createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, giveItem, type Fixture,
 } from './interact'
 import { createStoryLog, recordStory, explain, type StoryLog } from './story'
 import {
@@ -131,6 +131,10 @@ export interface Sim {
   playerPickUp(): void
   playerUseItem(id: ItemId): void
   playerEquip(id: ItemId): boolean
+  /** Put an item down in the world in front of you. */
+  playerDrop(id: ItemId): boolean
+  /** Hand an item to a creature; returns what happened, or null if nobody is near. */
+  playerGive(id: ItemId, targetId?: number): string | null
   creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean
   /** Typed natural-language talk with the nearest (or selected) creature. */
   playerTalk(text: string, targetId?: number): DialogueTurn | null
@@ -540,6 +544,70 @@ export function createSim(seed = 1): Sim {
     /** Equip an item from the player's inventory (e.g. the stick). */
     playerEquip(id: ItemId): boolean {
       return equipItem(sim.player, id)
+    },
+    /** Put something down in the world where it can be seen and picked up. */
+    playerDrop(id: ItemId): boolean {
+      const p = sim.player
+      if (!isPlayerAlive(p) || !useItem(p.inventory, id)) return false
+      sim.drops.push({
+        kind: id === 'bread' ? 'food' : 'money',
+        x: clampCoord(p.pos.x + Math.sin(p.facing) * 1.2),
+        z: clampCoord(p.pos.z + Math.cos(p.facing) * 1.2),
+        amount: 1,
+      })
+      emit(sim, 'drop', undefined, undefined, p.pos.x, p.pos.z)
+      return true
+    },
+    /**
+     * Hand something to the creature in front of you. They read the gesture
+     * through what they already think of you — and, if the goods are marked as
+     * someone else's, so does anyone watching.
+     */
+    playerGive(id: ItemId, targetId?: number): string | null {
+      const p = sim.player
+      if (!isPlayerAlive(p)) return null
+      const target = (targetId != null ? sim.creatureById(targetId) : null)
+        ?? nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE)
+      if (!target || !target.alive) return null
+      const owner = ownerOf(p.inventory, id)
+      const stolen = owner !== undefined && owner !== 0
+      const actor = { pos: p.pos, inventory: p.inventory, id: 0 }
+      const result = giveItem(actor, { pos: target.pos, inventory: target.inventory, id: target.id }, id)
+      if (!result.ok) return null
+
+      if (stolen && owner !== target.id) {
+        // handing over someone else's property is its own kind of statement
+        applySocialEvent(target.social, 0, 'gift', 0.4)
+        bumpEdge(target.social, 0, 'suspicion', 0.2)
+        const victim = sim.creatureById(owner)
+        witness(sim, target, 'steal', 0)
+        recordStory(sim.stories, {
+          kind: 'theft',
+          tick: sim.time,
+          target,
+          text: `You gave ${target.name} something that belonged to ${victim?.name ?? 'someone else'}`,
+        })
+        return `${target.name} takes it, then looks at it more closely.`
+      }
+
+      applySocialEvent(target.social, 0, 'gift', 1)
+      target.gratitude[0] = clamp01((target.gratitude[0] ?? 0) + 0.3)
+      target.emotions.gratitude = clamp01(target.emotions.gratitude + 0.2)
+      if (id === 'bread' && target.chem.hunger < 0.6) {
+        useItem(target.inventory, 'bread')
+        target.eat()
+        emit(sim, 'eat', target, undefined, target.pos.x, target.pos.z)
+        recordStory(sim.stories, {
+          kind: 'generosity',
+          tick: sim.time,
+          target,
+          text: `You fed ${target.name}`,
+          because: explain(target),
+        })
+        return `${target.name} eats it right there. "Thank you."`
+      }
+      emit(sim, 'gift', target, undefined, target.pos.x, target.pos.z)
+      return `${target.name} accepts the ${id}.`
     },
     /**
      * Barter: a stocked creature sells one loaf to a hungry peer for coins.
@@ -1433,7 +1501,7 @@ function tickSocialActs(sim: Sim): void {
  */
 function tickDebts(sim: Sim): void {
   if (sim.time % 50 !== 0) return
-  for (const debt of [...sim.ledger.debts]) {
+  for (const debt of sim.ledger.debts.slice()) {
     const debtor = sim.creatureById(debt.fromId)
     const creditor = sim.creatureById(debt.toId)
     if (!debtor?.alive || !creditor?.alive) continue
