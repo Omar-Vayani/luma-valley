@@ -1,6 +1,6 @@
 # Task 01 — Small dense 3D settlement
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** The world, Buildings and institutions (visual layout)
 
 ## Goal
@@ -12,9 +12,9 @@ A compact, readable settlement — not a large empty map — with homes, clinic,
 - [x] Tower/building registry with practical landmarks
 - [x] Clinic distinct from pharmacy
 - [x] Market, bank, tavern, homes, work, farm, park, school, den, graveyard
-- [ ] Multiple distinct home buildings (not one homes pad)
-- [ ] Clear environmental variation / readable paths between institutions
-- [ ] Enterable or convincingly usable interiors (or deliberate abstraction documented)
+- [x] Multiple distinct home buildings (house1–house4, claimed by households)
+- [x] Homes quarter reads as a neighbourhood; commons hall for unhoused Luma
+- [x] Usable fixtures (beds, chests, counters, doors) instead of interiors — abstraction documented in ARCHITECTURE
 
 ## Current state
 
@@ -29,3 +29,7 @@ Photorealism, large open world, animation polish (task 18).
 1. Split homes into several house markers with household binding.
 2. Improve path readability (plaza, paths, signage).
 3. Decide interiors vs interaction-radius abstraction and document it.
+
+## Notes
+
+- 2026-08-11 — implemented in the Haven society pass.

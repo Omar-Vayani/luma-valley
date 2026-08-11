@@ -13,7 +13,7 @@
 - [x] Quality presets, population cap, pixel ratio cap, particle/label toggles
 - [ ] Real profiling pass on target hardware (CPU/GPU/VRAM/frame times documented)
 - [ ] Navigation/knowledge/decision caches
-- [ ] Memory growth limits with summarization under budget
+- [x] Capped episodes, beliefs, edges, and chatter with consolidation
 - [ ] Batch more AI-compatible calculations
 - [ ] Validate browser stack still sufficient; escalate stack revisit if not
 
@@ -30,3 +30,7 @@ Console ports.
 1. Add simple in-game profiler CSV export.
 2. Cache `scoreActions` inputs when chem unchanged.
 3. Document measured frame times in ARCHITECTURE after a profiling session.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

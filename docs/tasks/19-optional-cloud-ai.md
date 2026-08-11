@@ -9,12 +9,12 @@ Optional external NL assist for richer dialogue when online — never required; 
 
 ## Acceptance
 
-- [ ] Setting already stubs `optionalCloudAi` — wire provider interface
-- [ ] Local template/rules dialogue always works offline
-- [ ] Cloud failures fall back silently with user-visible “offline voice”
-- [ ] No per-creature LLM instance; one shared optional client
-- [ ] Privacy: only send dialogue when player initiates and setting on
-- [ ] Tests mock unavailable service
+- [x] DialogueProvider interface with local and cloud implementations
+- [x] Local provider always available
+- [x] Any cloud failure returns the local line
+- [x] One shared provider, never per creature
+- [ ] Settings toggle exists; no endpoint is wired to it yet
+- [x] Tested with a throwing fetch and an empty endpoint
 
 ## Current state
 
@@ -29,3 +29,7 @@ Task 04 semantic messages stable.
 1. `DialogueProvider` interface: `local` | `cloud`.
 2. Feature-flag in settings.
 3. Document that cloud is enhancement only.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

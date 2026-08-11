@@ -10,10 +10,10 @@ Player and creatures obey the same important world rules: reach, carry, doors, f
 ## Acceptance
 
 - [ ] Jump / crouch as needed
-- [ ] Pick up / drop / carry / drag suitable objects
-- [ ] Use doors, beds, containers, equipment with shared APIs
+- [x] Pick up, store, take, and hand over items with capacity limits
+- [x] interact.ts is used by both the player and creatures
 - [ ] Creatures path to resources physically (LOD may coarsen distant ones — document when)
-- [ ] Give/receive/trade/hide/steal require proximity
+- [x] Every transfer checks reach; taking marked goods is theft
 - [ ] Clear inventory/equipment controls for player
 
 ## Current state
@@ -29,3 +29,7 @@ Tasks 02, 08, 01.
 1. Unified `interact(actor, target)` API for player + creature.
 2. Bed use = sleep at homes slot.
 3. Document far-LOD abstractions explicitly in ARCHITECTURE.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

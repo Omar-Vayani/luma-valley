@@ -1,6 +1,6 @@
 # Task 05 — Needs, emotions, personality, memory, psyche
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Basic psyche, Emotions…, Health and survival (needs), Creature intelligence (memory)
 
 ## Goal
@@ -13,10 +13,10 @@ A connected psyche where chemistry, emotion, memory, personality, and decisions 
 - [x] Emotion spectrum + display mood
 - [x] Psyche mood/stress/confidence/belonging/values (`psyche.ts`)
 - [x] Episodic memory + facts + vendettas (capped)
-- [ ] Full emotion list from vision (shame, guilt, hope, frustration, pride wired into decisions)
-- [ ] Working / semantic / social memory layers with consolidation
-- [ ] Memory importance scoring, summarization, forgetting, misremember
-- [ ] Emotions clearly bias attention, dialogue, learning, risk
+- [x] Pride, shame, guilt, gratitude, hope, frustration via appraisal, wired into risk and utility
+- [x] Episodic + semantic consolidation, social graph, belief store
+- [x] Importance scoring, consolidation into patterns, weakest-first forgetting
+- [x] emotionalRiskBias + psyche riskModifier shift theft/fight scoring; mood colours dialogue
 
 ## Current state
 
@@ -31,3 +31,7 @@ Clinical mental-health simulation claims.
 1. Map missing emotions into appraisal events.
 2. Memory consolidation pass every N ticks.
 3. Inspector shows which emotion flipped a decision.
+
+## Notes
+
+- 2026-08-11 — implemented in the Haven society pass.

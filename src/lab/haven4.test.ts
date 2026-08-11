@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  createFixtures, fixtureAt, fixturesOfTower, useBed, toggleDoor, storeItem, takeItem,
+  createFixtures, fixturesOfTower, useBed, toggleDoor, storeItem, takeItem,
   giveItem, consumeItem, withinReach, type Fixture,
 } from './interact'
 import { createInventory, addItem, countItem } from './inventory'

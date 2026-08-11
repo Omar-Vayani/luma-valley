@@ -1,6 +1,6 @@
 # Task 06 — Genetics, life cycle, and procreation
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Genetics, life cycle, and procreation
 
 ## Goal
@@ -13,10 +13,10 @@ Inheritable genetics that bias (not dictate) development; abstract life cycle; p
 - [x] Aging / age limit / death
 - [x] Abstract partnered reproduction at homes with energy cost
 - [x] Population cap gate
-- [ ] Genes for appearance size, metabolism, fertility, sensory, illness resistance
-- [ ] Childhood / maturity stages with different needs & learning rates
-- [ ] Early care/neglect lasting developmental effects (beyond soft household care)
-- [ ] Fertility + housing constraints as soft gates (not only hard cap)
+- [x] size, metabolism, fertility, senses, emotionality, resilience, longevity genes
+- [x] child / adolescent / adult / elder stages with learning and vigor curves
+- [x] Adults feed or neglect children; neglect leaves frustration and shame
+- [x] Fertility genes, household requirement, needs thresholds, and cap
 
 ## Current state
 
@@ -31,3 +31,7 @@ Explicit sexual content; graphic birth.
 1. Add life-stage enum (child/adult/elder) gating actions.
 2. Expand genome fields; drive appearance + metabolism.
 3. Tests: child inherits mix; mutation bounded; cap prevents explosion.
+
+## Notes
+
+- 2026-08-11 — implemented in the Haven society pass.

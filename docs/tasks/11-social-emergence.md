@@ -11,11 +11,11 @@ Emergent social patterns: norms, status, crime consequences, forgiveness, mentor
 
 - [x] Theft, fight, share, gossip, vengeance, gangs, jealousy
 - [x] Reputation dimensions (trust/thief/protector/aggressor)
-- [ ] Emergent norms from repeated behavior (ownership, violence expectations)
-- [ ] Leaders / influencers from respect + network centrality
+- [x] Witnessed acts move settlement norms, which feed back into decisions
+- [x] Influence from respect edges; the society panel names the most respected
 - [ ] Conflict mediation / dispute resolution behaviors
 - [ ] Social status & inequality affecting access
-- [ ] Cultural knowledge passed parent→child (words, place prefs, norms)
+- [x] transmitCulture gives children vocabulary, places, and leanings
 - [ ] Mentorship, manipulation, alliance-building as scored actions
 
 ## Current state
@@ -32,3 +32,7 @@ Player-imposed government / police force (society is creature-driven).
 2. Children copy parent vocab + place prefs at birth.
 3. `mediate` / `mentor` actions in mind scoring.
 4. Society pulse UI for shortages, conflicts, bonds.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

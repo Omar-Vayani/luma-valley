@@ -14,7 +14,7 @@ Responsive first-person presence in the same world as the creatures: move, look,
 - [x] Tap/select creature; social / teach / talk HUD
 - [x] Player inventory strip + equip/use basics
 - [ ] Jump / crouch where appropriate
-- [ ] Contextual prompts for doors, beds, containers
+- [x] Contextual fixture buttons appear when furniture is in reach
 - [ ] Clear, discoverable control help overlay
 
 ## Current state
@@ -30,3 +30,7 @@ Full shared physics parity with creatures (task 17).
 1. In-game controls card.
 2. Jump/crouch if navigation needs them.
 3. Focus reticle showing nearest interactable Luma/building.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

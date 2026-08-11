@@ -12,11 +12,11 @@ Typed NL with the player; meaningful creature↔creature communication via compa
 - [x] Typed player talk → intent parse → trust-gated reply (`dialogue.ts`)
 - [x] Concept↔word teaching (`language.ts`)
 - [x] Gossip / reputation channel
-- [ ] Creature↔creature semantic message bus (promises, plans, lies, trade offers)
-- [ ] Full NL render for nearby overheard conversations
-- [ ] Deception + lie detection
-- [ ] Speech reflects age, vocab, mood, relationship more richly
-- [ ] Negotiation / trade dialogue loops
+- [x] Semantic message bus (chatter.ts) with promises, warnings, gossip, lies
+- [x] Overheard exchanges render to natural language for the player
+- [x] Lies are generated from need/spite and caught by suspicion + familiarity
+- [ ] Speech still reflects mood/trust more than age and vocabulary depth
+- [ ] Negotiation happens in the economy, not yet as a dialogue the player joins
 
 ## Current state
 
@@ -32,3 +32,7 @@ Mandatory cloud LLM (task 19).
 2. Earshot NL renderer for player.
 3. Promise memory + breach consequences.
 4. Tests for believe/obey gates.
+
+## Notes
+
+- 2026-08-11 — advanced in the Haven society pass.

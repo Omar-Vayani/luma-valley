@@ -242,7 +242,7 @@ export function loadSim(data: LabSave): Sim {
       const saved = data.containers[f.id]
       if (f.storage && saved) {
         f.storage.items = { ...saved.items } as typeof f.storage.items
-        f.storage.owners = { ...(saved.owners ?? {}) } as typeof f.storage.owners
+        f.storage.owners = { ...saved.owners } as typeof f.storage.owners
       }
     }
   }

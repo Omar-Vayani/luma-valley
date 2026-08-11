@@ -1,6 +1,6 @@
 # Task 07 — Families and multidimensional relationships
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Emotions, love, and relationships; Society (families)
 
 ## Goal
@@ -12,11 +12,11 @@ Persistent asymmetric relationship graphs; courtship → partnership → family;
 - [x] Multidimensional edges (`socialbond.ts`)
 - [x] Partners, jealousy, grief/burial
 - [x] Households with home slots + child membership
-- [ ] Courtship rituals / rejection / breakup / reconciliation loops
-- [ ] Family tree UI or inspector view
-- [ ] Friend groups & rival groups beyond gangs
-- [ ] Relationship effects on trade, work, conflict consistently
-- [ ] Shared history summaries on edges
+- [x] courtship.ts: mutual interest, rejection, strain, separation, reconciliation, widowhood
+- [x] Inspector shows partner, parents, and children
+- [ ] Friend groups & rival groups beyond gangs (still gang-based)
+- [x] Trust and suspicion set haggled prices and refusal of service
+- [x] Familiarity protects feelings from decay; semantic memory summarizes history
 
 ## Current state
 
@@ -31,3 +31,7 @@ Scripted romance cutscenes.
 1. Unify legacy `bonds` score with social graph (or derive one from the other).
 2. Breakup when resentment/trust thresholds crossed.
 3. Inspector family tree section.
+
+## Notes
+
+- 2026-08-11 — implemented in the Haven society pass.
