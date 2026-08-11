@@ -23,6 +23,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "play": "vite build && vite preview --host --port 4173",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
     "bench": "vite-node scripts/bench.mjs",

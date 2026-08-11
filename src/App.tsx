@@ -641,6 +641,23 @@ export default function App() {
     })
   }, [setToolMode])
 
+  /** The Luma closest to the player, for keyboard-driven inspection. */
+  const nearestCreatureId = useCallback((): number | null => {
+    const s = simRef.current
+    if (!s) return null
+    let best: number | null = null
+    let bestD = Infinity
+    for (const c of s.creatures) {
+      if (!c.alive) continue
+      const d = dist(c.pos.x, c.pos.z, s.player.pos.x, s.player.pos.z)
+      if (d < bestD) {
+        bestD = d
+        best = c.id
+      }
+    }
+    return best
+  }, [])
+
   const togglePause = useCallback((): void => {
     const next = !pausedRef.current
     pausedRef.current = next
@@ -689,6 +706,8 @@ export default function App() {
           setChatOpen((o) => !o)
           break
         case 'i': case 'I':
+          // inspecting nobody is useless: grab whoever is closest
+          setSelectedId((current) => current ?? nearestCreatureId())
           setInspectOpen((o) => !o)
           break
         case 'h': case 'H':
@@ -722,7 +741,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [applySpeed, togglePause])
+  }, [applySpeed, togglePause, nearestCreatureId])
 
   // ── player mode (a distinct character — never a creature) ──
   const toggleViewMode = useCallback((): void => {

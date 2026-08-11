@@ -86,9 +86,45 @@ const reply = await page.locator('[data-talk-reply]').first().textContent().catc
 if (!reply || reply.trim().length < 3) failures.push('talk: no reply rendered')
 else notes.push(`talk reply: ${reply.trim().slice(0, 70)}`)
 
+// every panel must be reachable from the keyboard, and Esc must close them
+const keyPanels = [
+  ['t', '[data-talk]', 'T opens talk'],
+  ['i', '[data-inspector]', 'I opens the inspector'],
+  ['h', '[data-society]', 'H opens Haven'],
+  ['g', '[data-settings]', 'G opens settings'],
+  ['m', '[data-market]', 'M opens the market'],
+  ['?', '[data-help]', '? opens the controls card'],
+]
+// the inspector needs somebody selected first
+await page.evaluate(() => {
+  const lab = window.__lab
+  if (lab?.sim?.creatures?.length) lab.view.callbacks?.onTapCreature?.(lab.sim.creatures[0].id, 0, 0)
+})
+await page.keyboard.press('Escape')
+for (const [key, selector, label] of keyPanels) {
+  await page.keyboard.press(key)
+  await page.waitForTimeout(250)
+  const shown = await page.locator(selector).first().count()
+  if (shown === 0) failures.push(`${label}: nothing appeared`)
+  else notes.push(label)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  if (await page.locator(selector).first().count()) failures.push(`${label}: Escape did not close it`)
+}
+
+// F3 shows the per-subsystem breakdown
+await page.keyboard.press('F3')
+await page.waitForTimeout(300)
+if (await page.locator('[data-perf-phases]').first().count() === 0) {
+  failures.push('F3: no per-phase breakdown')
+} else {
+  notes.push('F3 shows the phase breakdown')
+}
+await page.keyboard.press('F3')
+
 // let the simulation run a while and make sure nothing throws
 await page.locator('[data-speed="10"]').first().click({ force: true })
-await page.waitForTimeout(6000)
+await page.waitForTimeout(8000)
 
 await browser.close()
 

@@ -4,11 +4,19 @@ A first-person artificial-life game — a spiritual successor to the *idea* of *
 
 **Offline-first.** Runs in any modern browser. No account, no mandatory cloud AI.
 
-## Quick start
+## Play it
 
 ```bash
 npm install
-npm run dev         # open the local URL (Vite)
+npm run play        # builds, then serves at http://localhost:4173
+```
+
+That is the whole setup. [`PLAY.md`](PLAY.md) covers the other ways in
+(hot-reloading dev server, publishing to GitHub Pages, installing it on a
+phone) and walks through a first session.
+
+```bash
+npm run dev         # same game, hot reload, http://localhost:5173
 npm test            # simulation + UI contract tests
 npm run bench       # measure simulation cost on your machine
 npm run verify:hud  # headless check that the HUD is usable (needs the dev server)
