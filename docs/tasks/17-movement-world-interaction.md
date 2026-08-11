@@ -1,35 +1,39 @@
-# Task 17 — Shared movement and world interaction
+# Task 17 — Being physically present in the world
 
-**Status:** `todo`  
+**Status:** `partial`  
 **Vision sections:** Player and creature movement; Inventory (physical reach)
+
+## Why this task changed
+
+Jump and crouch were listed first, but Haven is a flat settlement with no
+verticality — they would add controls without adding meaning. What actually
+supports the fantasy is **handling things in front of other people**: picking
+something up, carrying it visibly, handing it over, dropping it, taking it.
+Those acts are social, because ownership is social.
 
 ## Goal
 
-Player and creatures obey the same important world rules: reach, carry, doors, furniture, no magical teleports (except documented LOD abstractions).
+The player and creatures manipulate the same objects under the same rules, and
+other creatures can see them doing it.
 
 ## Acceptance
 
-- [ ] Jump / crouch as needed
-- [x] Pick up, store, take, and hand over items with capacity limits
-- [x] interact.ts is used by both the player and creatures
-- [ ] Creatures path to resources physically (LOD may coarsen distant ones — document when)
-- [x] Every transfer checks reach; taking marked goods is theft
-- [ ] Clear inventory/equipment controls for player
+- [x] Pick up, store, take, hand over — all with capacity and reach checks
+- [x] One interaction API shared by player and creatures
+- [x] Taking marked goods is theft that witnesses notice
+- [ ] **Drop and carry**: the player can drop an item into the world and pick
+      it back up; carried items are visible
+- [ ] **Giving to a creature** is a first-class action with a social response
+      (gratitude, suspicion if it is stolen goods)
+- [ ] Clear inventory and equipment controls for the player
+- [ ] Far-LOD abstractions documented where creatures skip physical steps
 
-## Current state
+## Out of scope
 
-Flat ground movement, collision separation, tower radii, drop pickup.
+Jump, crouch, and climbing — no verticality exists to justify them. Revisit if
+the world gains levels.
 
-## Depends on
+## Test
 
-Tasks 02, 08, 01.
-
-## Next steps
-
-1. Unified `interact(actor, target)` API for player + creature.
-2. Bed use = sleep at homes slot.
-3. Document far-LOD abstractions explicitly in ARCHITECTURE.
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+Hand a loaf to a hungry Luma and it should thank you; hand it one you stole
+from its neighbour and someone should hold it against you.

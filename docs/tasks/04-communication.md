@@ -1,38 +1,40 @@
-# Task 04 — Creature communication
+# Task 04 — Communication the player is part of
 
 **Status:** `partial`  
-**Vision sections:** Creature communication, Performance (semantic vs NL)
+**Vision sections:** Creature communication
+
+## Why this task changed
+
+Talking to a Luma currently produces a reply and very little else. The vision
+asks for conversation that **does something**: negotiation, promises, asking
+for help, warnings that change behaviour. Conversation should be a way to act
+on the society, not a flavour panel.
 
 ## Goal
 
-Typed NL with the player; meaningful creature↔creature communication via compact semantics, with NL only when heard/inspected.
+The player's words should be able to change what a creature does, and the
+creature's words should reveal what it knows and wants — filtered through
+trust, mood, age, and vocabulary.
 
 ## Acceptance
 
-- [x] Typed player talk → intent parse → trust-gated reply (`dialogue.ts`)
-- [x] Concept↔word teaching (`language.ts`)
-- [x] Gossip / reputation channel
-- [x] Semantic message bus (chatter.ts) with promises, warnings, gossip, lies
-- [x] Overheard exchanges render to natural language for the player
-- [x] Lies are generated from need/spite and caught by suspicion + familiarity
-- [ ] Speech still reflects mood/trust more than age and vocabulary depth
-- [ ] Negotiation happens in the economy, not yet as a dialogue the player joins
-
-## Current state
-
-Player talk panel + teach words; creature words are coined concepts; events emit short bubbles.
+- [x] Typed intent parsing; trust-gated belief and obedience
+- [x] Word teaching; gossip; overheard creature talk; lies and detection
+- [ ] **Trade with the player**: ask to buy or sell, get a price shaped by the
+      creature's need, wealth, and opinion of you, and complete the exchange
+- [ ] **Requests that stick**: asking for help creates a promise the creature
+      may keep or break, with consequences either way
+- [ ] **Warnings and accusations land**: telling a creature about a thief
+      changes its beliefs about that individual, weighted by your credibility
+- [ ] Speech reflects age and vocabulary — a child speaks differently from an
+      elder, and a creature uses words it actually knows
+- [ ] The reply says something the creature could plausibly know (no omniscience)
 
 ## Out of scope
 
-Mandatory cloud LLM (task 19).
+A mandatory language model (see task 19).
 
-## Next steps
+## Test
 
-1. `SemanticMessage` queue between nearby creatures each social tick.
-2. Earshot NL renderer for player.
-3. Promise memory + breach consequences.
-4. Tests for believe/obey gates.
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+The player should be able to talk a hungry stranger into selling their last
+loaf, and be turned down flat by someone who does not trust them.

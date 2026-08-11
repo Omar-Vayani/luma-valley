@@ -1,38 +1,42 @@
-# Task 11 — Social emergence (norms, crime, culture)
+# Task 11 — Social behaviours that create stories
 
 **Status:** `partial`  
-**Vision sections:** Society; Primary goal (stories)
+**Vision sections:** Society; Primary goal (emergent social stories)
+
+## Why this task changed
+
+Norms, reputation, and influence are implemented as *state*. What is missing
+are the **actions that produce interesting social outcomes**: nobody currently
+teaches anyone, steps between two fighters, buys loyalty, or builds a faction.
+Those verbs are where the surprising-but-understandable stories come from.
 
 ## Goal
 
-Emergent social patterns: norms, status, crime consequences, forgiveness, mentorship, cultural knowledge across generations.
+Add the small set of social actions that generate the behaviour the vision
+names — mentorship, mediation, manipulation, alliance-building — as scored
+choices, not scripted scenes.
 
 ## Acceptance
 
-- [x] Theft, fight, share, gossip, vengeance, gangs, jealousy
-- [x] Reputation dimensions (trust/thief/protector/aggressor)
-- [x] Witnessed acts move settlement norms, which feed back into decisions
-- [x] Influence from respect edges; the society panel names the most respected
-- [ ] Conflict mediation / dispute resolution behaviors
-- [ ] Social status & inequality affecting access
-- [x] transmitCulture gives children vocabulary, places, and leanings
-- [ ] Mentorship, manipulation, alliance-building as scored actions
-
-## Current state
-
-Strong pairwise social reactivity; limited group-level norm model.
+- [x] Theft, fights, sharing, gossip, revenge, jealousy, forgiveness
+- [x] Norms shift with witnessed acts and feed back into decisions
+- [x] Influence earned through respect; culture inherited by children
+- [ ] **Mentor**: an experienced creature teaches a younger one — words,
+      places, and a lasting bond
+- [ ] **Mediate**: a respected creature steps between two in conflict, at some
+      personal risk, and cools the grudge
+- [ ] **Flatter / manipulate**: a low-honesty creature buys trust it has not
+      earned, which can later collapse
+- [ ] **Ally**: creatures who benefit each other form a durable mutual bond
+      that shows up in defence, trade terms, and gossip
+- [ ] Social status changes access — the disrespected get worse treatment
 
 ## Out of scope
 
-Player-imposed government / police force (society is creature-driven).
+Formal government, elections, police.
 
-## Next steps
+## Test
 
-1. Settlement `norms` vector updated by witnessed events.
-2. Children copy parent vocab + place prefs at birth.
-3. `mediate` / `mentor` actions in mind scoring.
-4. Society pulse UI for shortages, conflicts, bonds.
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+Over a long run the settlement should produce at least one mentor relationship,
+one mediated conflict, and one manipulator whose reputation eventually catches
+up with them.

@@ -1,30 +1,38 @@
-# Task 18 — Presentation pass (after sim is fun)
+# Task 18 — Social readability (not fidelity)
 
 **Status:** `todo`  
-**Vision sections:** The world (later development); Quality requirements
+**Vision sections:** The world; Quality requirements (clear cause and effect)
+
+## Why this task changed
+
+The old brief was a graphics polish sprint. That is the wrong next step: the
+vision explicitly ranks creature depth above visuals, and says atmosphere and
+**readability** matter more than graphical complexity.
+
+The real presentation problem is not that the art is simple — it is that you
+cannot tell, by looking, that this Luma is the healer, that those two are
+partners, or that this one is furious with the creature beside it.
 
 ## Goal
 
-Improve atmosphere, animation, lighting, and audio **only after** the creature simulation is engaging. Keep visuals simple but coherent.
+Make social state visible in the world itself, so the player can read the
+society without opening panels.
 
 ## Acceptance
 
-- [ ] Creature idle/walk/emote animations readable at a glance
-- [ ] Lighting/day-night or atmospheric pass without harming perf targets
-- [ ] Ambient + interaction audio polish
-- [ ] Distinct visual identity for Luma Haven (not generic AI purple/cream clichés)
-- [ ] Still readable on medium laptop settings
+- [ ] A creature's **role** is visible at a glance (the healer looks like the healer)
+- [ ] **Family and partnership** are perceivable — who lives with whom
+- [ ] Strong feelings between two nearby creatures are visible in the moment
+- [ ] Children look like children; elders look like elders
+- [ ] Buildings communicate their state (stocked vs empty, staffed vs closed)
+- [ ] All of it holds the medium-quality frame budget
 
-## Current state
+## Out of scope
 
-Procedural low-poly buildings, ball Luma with faces, warm palette, procedural SFX.
+Photorealism, skeletal animation, day/night rendering — until the above reads
+clearly.
 
-## Depends on
+## Test
 
-Wave 1 minds enjoyable in playtests; task 14 budgets respected.
-
-## Next steps
-
-1. Playtest checklist: do players care about individuals?
-2. If yes, schedule animation + lighting sprint.
-3. If no, invest in tasks 04–11 instead.
+A new player, without opening any panel, can point at a creature and say what
+it does and who it cares about.

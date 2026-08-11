@@ -1,36 +1,39 @@
-# Task 09 — Buildings and institutions
+# Task 09 — Institutions with real supply chains
 
 **Status:** `partial`  
-**Vision sections:** Buildings and institutions
+**Vision sections:** Buildings and institutions; Economy (production and consumption)
+
+## Why this task changed
+
+The old brief asked for "stock, staff, schedules" as separate boxes. That
+undersells the point. An institution matters when **its failure is traceable to
+a person**: the shelves are empty because the farmer died, the clinic cannot
+treat you because nobody restocked medicine. That is a story the player can
+follow, and it is what makes buildings feel operated rather than decorative.
 
 ## Goal
 
-Institutions with real functions, ideally operated by creatures (stock, staff, schedules).
+Goods should exist because somebody made or moved them, and run out because
+somebody stopped. Every shortage should have a name attached to it.
 
 ## Acceptance
 
-- [x] Functional towers: market, bank, pharmacy, clinic, tavern, homes, work, farm, …
-- [x] Stocked goods + prices; bank wallet/banked; clinic treatment
-- [x] Shopkeeper, healer, bartender, farmer, porter, teacher roles are claimed and worked
-- [x] Staffed clinics treat properly and pay the healer; unstaffed ones offer only a cot
-- [ ] Production refills shelves per shift, but there is no goods flow between institutions yet
-- [ ] Schedules / opening hours affecting access
-- [ ] Institutional storage exists as fixtures; no ledger yet
-
-## Current state
-
-Economy restocks abstractly; towers are interaction points with themed meshes.
+- [x] Functional buildings: market, bank, pharmacy, clinic, tavern, homes, work, farm
+- [x] Roles claimed and worked by creatures; shifts pay wages
+- [x] Staffed clinic treats properly and pays the healer; unstaffed offers only a cot
+- [ ] **Supply chains**: farm produces grain → market turns grain into bread;
+      pharmacy stocks medicine → clinic consumes it when treating
+- [ ] Production consumes inputs, so a broken link causes a real shortage
+- [ ] An unstaffed institution stops restocking (not just "restocks slower")
+- [ ] The society panel names the cause of a shortage ("no farmer since …")
+- [ ] Institutions hold their own till/stores rather than abstract global stock
 
 ## Out of scope
 
-Full interior architecture (can follow task 01 / 17).
+Opening hours and interiors — schedules add bookkeeping without adding a story
+the player can follow. Revisit only if idle institutions become a problem.
 
-## Next steps
+## Test
 
-1. Job role `shopkeep` / `healer` / `bartender` claimed by creatures.
-2. Stock depletes only when produced/delivered.
-3. Closed institutions when no operator (with workaround for player).
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+Kill or remove the farmer and the market's bread supply should visibly dry up,
+prices should rise, and the society panel should say why.

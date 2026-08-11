@@ -1,39 +1,36 @@
-# Task 10 — Economy
+# Task 10 — Economy with consequences
 
 **Status:** `partial`  
 **Vision sections:** Economy
 
+## Why this task changed
+
+Pricing, haggling, and refusal already work as functions. What is missing is
+that **the economy rarely changes anyone's life**. Debt exists as a data
+structure nothing creates. Specialization exists as a wage bonus nobody
+notices. The remaining work is about consequences, not more formulas.
+
 ## Goal
 
-Local economy driven by scarcity, labor, ownership, and subjective value — not fixed vending prices alone.
+Money should create obligations between individuals, and poverty should push
+creatures into choices they would not otherwise make.
 
 ## Acceptance
 
-- [x] Goods with stock, restock, scarcity + demand price drift
-- [x] Work shifts + pay; farm alternative; bank deposit/withdraw
-- [x] Creature↔creature barter of bread
-- [x] valueTo() prices by hunger, health, dependence, and wealth
-- [x] negotiate() applies trust discounts and suspicion markups
-- [x] Ledger tracks informal debts (not yet created by gameplay events)
-- [ ] Specialization / division of labor beyond education bonus
-- [x] Sellers refuse known thieves outright
-- [x] Gini-style inequality shown in the society panel
-
-## Current state
-
-`economy.ts` + market HUD; reputation can gate social steal/share already.
+- [x] Scarcity + demand pricing; subjective value; haggling; thief refusal
+- [x] Wage work, banking, inequality readout
+- [ ] **Debt created by play**: treatment or drinks you cannot afford become an
+      obligation to the creature who covered it
+- [ ] Debtors feel it — obligation biases sharing, work, and avoidance
+- [ ] Creditors remember, and can resent or forgive
+- [ ] Specialization pays visibly: a skilled worker earns more and is sought out
+- [ ] Charity is a real choice: the well-off can cover someone else's cost
 
 ## Out of scope
 
-Global stock market simulation.
+Markets with speculation, interest rates, or a global economy.
 
-## Next steps
+## Test
 
-1. `valueTo(creature, item)` function used in buy/trade.
-2. Shop refuse if `reputation.thief` high.
-3. Debt IOUs as semantic social facts.
-4. Tests for scarcity price rise and thief refusal.
-
-## Notes
-
-- 2026-08-11 — advanced in the Haven society pass.
+A creature who cannot pay for treatment should end up owing a specific
+individual, and that debt should change how both of them behave afterwards.
