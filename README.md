@@ -46,6 +46,8 @@ Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio c
 
 ## Docs
 
+- [`docs/VISION.md`](docs/VISION.md) — full product vision prompt
+- [`docs/tasks/README.md`](docs/tasks/README.md) — task board (one system per file)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack choice, systems, limits
 - [`DESIGN.md`](DESIGN.md) — visual direction
 

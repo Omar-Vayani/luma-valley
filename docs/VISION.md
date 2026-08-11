@@ -4,6 +4,8 @@ This document is the authoritative product vision for Luma Haven: an original sp
 
 Work is broken into discrete tasks under [`docs/tasks/`](./tasks/README.md). No single session is expected to finish everything; use the task files to continue incrementally.
 
+**Quick links:** [Task board](./tasks/README.md) · [Architecture](./ARCHITECTURE.md) · [README](../README.md)
+
 ---
 
 Build a fully functional 3D artificial-life game inspired by the spirit of the 1996 game *Creatures*, reimagined with modern technology, deeper intelligence, and a functioning society. This must be an original spiritual successor—not a direct copy—with its own world, creatures, visual identity, terminology, and systems.
