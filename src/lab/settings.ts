@@ -27,6 +27,8 @@ export interface GameSettings {
   showParticles: boolean
   /** Gentle mode: no starvation / violent permadeath. */
   gentleMode: boolean
+  /** Travellers occasionally settle in Haven when the population thins. */
+  allowNewcomers: boolean
   /** Optional cloud NL assist (never required). */
   optionalCloudAi: boolean
 }
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   showLabels: true,
   showParticles: true,
   gentleMode: false,
+  allowNewcomers: true,
   optionalCloudAi: false,
 }
 

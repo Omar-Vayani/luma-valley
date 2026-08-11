@@ -141,7 +141,7 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     language: createLanguage(id),
     brainPrefs: null,
     playerBond: 0,
-    ageLimit: ageLimitFor(Math.random()),
+    ageLimit: ageLimitFor(Math.random(), genome.longevity ?? 0.5),
     inventory: createInventory(),
     vengeance: createVengeance(),
     talkingTo: null,
@@ -201,17 +201,14 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
       applyFood(c.chem)
     },
     socialize(other: Creature): void {
+      // Time together builds familiarity and warmth. Becoming partners is a
+      // separate, mutual decision (see courtship.ts) — closeness alone is
+      // never enough, so friendship and love stay distinguishable.
       applySocial(c.chem)
       applySocial(other.chem)
       const gain = 0.06 + c.genome.sociability * 0.06 + other.genome.sociability * 0.04
       c.bonds[other.id] = clamp01((c.bonds[other.id] ?? 0) + gain)
       other.bonds[c.id] = clamp01((other.bonds[c.id] ?? 0) + gain)
-      if (c.partnerId === null && c.bonds[other.id] > 0.6 && other.partnerId === null) {
-        c.partnerId = other.id
-        other.partnerId = c.id
-        c.chem.bond = clamp01(c.chem.bond + 0.3)
-        other.chem.bond = clamp01(other.chem.bond + 0.3)
-      }
     },
     tryPair(other: Creature): void {
       if (c.partnerId === null && other.partnerId === null && c.bonds[other.id] > 0.5) {

@@ -84,12 +84,17 @@ export function bumpEdge(graph: SocialGraph, targetId: number, dim: BondDim, amo
   if (dim !== 'familiarity') e.familiarity = clamp01(e.familiarity + Math.abs(amount) * 0.25)
 }
 
-/** Slow decay of volatile dimensions each tick. */
+/**
+ * Slow decay of volatile dimensions each tick. Familiarity protects feelings:
+ * you do not cool on someone you see every day, but a stranger's impression
+ * fades quickly.
+ */
 export function tickSocialGraph(graph: SocialGraph): void {
   for (const id of Object.keys(graph)) {
     const e = graph[Number(id)]
+    const persistence = 1 - e.familiarity * 0.85
     for (const [dim, rate] of Object.entries(DECAY) as [BondDim, number][]) {
-      e[dim] = clamp01(e[dim] - rate)
+      e[dim] = clamp01(e[dim] - rate * persistence)
     }
   }
 }
@@ -150,10 +155,15 @@ export function applySocialEvent(
     case 'meet':
       bumpEdge(graph, targetId, 'familiarity', 0.15 * i)
       break
-    case 'talk':
+    case 'talk': {
+      // time spent together compounds: the better you know someone, the more
+      // an ordinary conversation moves the needle
+      const known = 1 + (graph[targetId]?.familiarity ?? 0)
       bumpEdge(graph, targetId, 'familiarity', 0.08 * i)
-      bumpEdge(graph, targetId, 'affection', 0.04 * i)
+      bumpEdge(graph, targetId, 'affection', 0.05 * i * known)
+      bumpEdge(graph, targetId, 'trust', 0.02 * i * known)
       break
+    }
     case 'gift':
       bumpEdge(graph, targetId, 'gratitude', 0.25 * i)
       bumpEdge(graph, targetId, 'affection', 0.12 * i)

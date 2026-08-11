@@ -19,6 +19,7 @@ import { findTower, towerAt } from './world'
 import { trustTowards, reputationOf } from './reputation'
 import { revengeScore } from './vengeance'
 import { normPressure } from './norms'
+import { romanticInterest } from './socialbond'
 import { emotionalRiskBias } from './emotions'
 import { riskModifier } from './psyche'
 import { vigorFor, isMature } from './lifecycle'
@@ -28,6 +29,7 @@ export type ActionName =
   | 'food'      // go to food tower and buy bread
   | 'work'     // go to work tower, stay for a shift
   | 'sleep'    // go home and sleep
+  | 'nest'     // go home with a partner, hoping to start a family
   | 'heal'     // go to pharmacy and buy medicine
   | 'clinic'   // go to clinic for illness / serious treatment
   | 'drink'    // go to tavern and buy brew
@@ -154,6 +156,9 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
       * (isMature(c.stage) ? 1 : 0.05),
     // sleep: tired or at home
     sleep: press.tired * (at?.id === 'homes' ? 1.2 : 0.8) + collapsing,
+    // nest: a settled, well-fed couple with a home wants time together there.
+    // This is what actually brings two partners to the same doorway.
+    nest: nestDrive(sim, c) * (at?.id === 'homes' ? 1.6 : 1.1),
     // heal: wounded, only if affordable
     heal: (wounded * (canAffordMed(c, medPrice) ? 1.2 : 0.15) + bleedingOut) * (c.knowsTower('pharmacy') ? 1 : 0.2),
     // clinic: illness or a real wound — more effective than pharmacy alone
@@ -181,7 +186,11 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
     play: (press.bored * 0.55 + press.weak * 1.0) * (at?.id === 'play' ? 1.6 : 0.7),
     // social: lonely + sociable + opportunity — but reputation gates who we
     // approach: known thieves/aggressors are shunned, protectors are sought.
-    social: press.lonely * (0.3 + g.sociability * 1.4 + c.emotions.joy * 0.3) * (near ? 1.3 : 0.2)
+    // Company is not only a cure for loneliness: an unattached creature with
+    // a romantic streak actively seeks people out, and that is how couples
+    // ever meet in the first place.
+    social: (press.lonely + (c.partnerId === null && isMature(c.stage) ? 0.25 + g.lovePropensity * 0.5 : 0))
+      * (0.3 + g.sociability * 1.4 + c.emotions.joy * 0.3) * (near ? 1.3 : 0.2)
       * (near
         ? (knownThief || knownAggressor ? 0.25 : knownProtector || trustNear > 0.3 ? 1.6 : 0.7 + Math.max(0, trustNear) * 0.8)
         : 1),
@@ -366,11 +375,37 @@ export function actionValid(sim: Sim, c: Creature, action: ActionName): boolean 
   }
 }
 
+/**
+ * How strongly a partnered creature is drawn home right now. Contentment
+ * matters as much as affection: nobody starts a family while starving,
+ * frightened, or grieving.
+ */
+export function nestDrive(sim: Sim, c: Creature): number {
+  if (c.partnerId === null || !isMature(c.stage) || c.stage === 'elder') return 0
+  if (!c.knowsTower('homes')) return 0
+  const partner = sim.creatureById(c.partnerId)
+  if (!partner || !partner.alive) return 0
+  const edge = c.social[c.partnerId]
+  const attachment = Math.max(c.chem.bond, edge ? romanticInterest(edge, c.genome.lovePropensity) : 0)
+  if (attachment < 0.5) return 0
+  const settled =
+    Math.min(1, c.chem.hunger / 0.45) *
+    Math.min(1, c.chem.energy / 0.45) *
+    Math.min(1, c.chem.health / 0.7) *
+    (1 - c.chem.fear) *
+    (1 - c.chem.grief)
+  if (settled <= 0.2) return 0
+  const crowded = sim.creatures.filter((o) => o.alive).length >= sim.settings.populationCap
+  if (crowded) return 0
+  return attachment * settled * (0.7 + c.genome.lovePropensity * 0.6) * 1.7
+}
+
 export function towerIdForAction(action: ActionName): string | null {
   switch (action) {
     case 'food': return 'food'
     case 'work': return 'work'
     case 'sleep': return 'homes'
+    case 'nest': return 'homes'
     case 'heal': return 'pharmacy'
     case 'clinic': return 'clinic'
     case 'drink': return 'tavern'

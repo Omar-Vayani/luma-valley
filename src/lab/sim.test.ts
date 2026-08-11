@@ -182,7 +182,8 @@ describe('sim — love, procreation, sleep, addiction', () => {
     a.pos = { x: -36, z: 0 } // at homes
     b.pos = { x: -35, z: 0 }
     const before = s.creatures.length
-    s.tick()
+    // conception is not guaranteed on any single tick — fertility varies
+    for (let i = 0; i < 80 && s.creatures.length === before; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
     const child = s.creatures[s.creatures.length - 1]
     expect(child.alive).toBe(true)

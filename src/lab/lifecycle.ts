@@ -9,8 +9,10 @@
  *   learned state (brain weights, vocabulary, memories) — vast capacity.
  */
 
-export const AGE_LIMIT_BASE = 3000 // ticks until natural aging begins
-export const AGE_LIMIT_SPREAD = 1500 // genetic variation
+// A Luma lifetime is long enough to grow up, build a household, raise
+// children, and grow old — roughly 20 minutes of play at 6 ticks per second.
+export const AGE_LIMIT_BASE = 6000 // ticks until natural aging begins
+export const AGE_LIMIT_SPREAD = 2500 // genetic variation
 export const PLAYER_BOND_THRESHOLD = 0.55 // bonds above this shield from aging
 export const CREATURE_STORAGE_BYTES = 3 * 1024 * 1024 // 3MB per creature
 
@@ -19,7 +21,7 @@ export type LifeStage = 'child' | 'adolescent' | 'adult' | 'elder'
 
 export const CHILD_UNTIL = 400
 export const ADOLESCENT_UNTIL = 600
-export const ELDER_FROM = 2600
+export const ELDER_FROM = 5200
 
 export function lifeStageFor(age: number): LifeStage {
   if (age < CHILD_UNTIL) return 'child'
@@ -80,6 +82,7 @@ export function canProcreate(energyA: number, energyB: number, age: number): boo
 }
 
 /** The genetic age limit for a creature (some live longer than others). */
-export function ageLimitFor(rand: number): number {
-  return AGE_LIMIT_BASE + Math.floor(rand * AGE_LIMIT_SPREAD)
+export function ageLimitFor(rand: number, longevity = 0.5): number {
+  const genetic = (longevity - 0.5) * AGE_LIMIT_SPREAD
+  return Math.max(1200, Math.round(AGE_LIMIT_BASE + rand * AGE_LIMIT_SPREAD + genetic))
 }

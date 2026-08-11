@@ -159,7 +159,7 @@ describe('life stages and genetics', () => {
     expect(lifeStageFor(10)).toBe('child')
     expect(lifeStageFor(500)).toBe('adolescent')
     expect(lifeStageFor(1000)).toBe('adult')
-    expect(lifeStageFor(3000)).toBe('elder')
+    expect(lifeStageFor(6000)).toBe('elder')
     expect(isMature(lifeStageFor(10))).toBe(false)
     expect(isMature(lifeStageFor(1000))).toBe(true)
   })

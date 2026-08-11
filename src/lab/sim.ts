@@ -30,10 +30,10 @@ import { DEFAULT_SETTINGS, type GameSettings } from './settings'
 import { createLodState, pickAiBatch, markDecided, bandFor, chemStride, type LodState } from './lod'
 import {
   createSociety, ensureCoupleHousehold, adoptChild, tickHouseholdCare, pruneHouseholds,
-  type HavenSociety,
+  householdOf, type HavenSociety,
 } from './household'
 import {
-  applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge,
+  applySocialEvent, tickSocialGraph, geneticCompatibility, bumpEdge, romanticInterest,
 } from './socialbond'
 import { parsePlayerText, respondToPlayer, type DialogueTurn } from './dialogue'
 import { tickPsyche } from './psyche'
@@ -54,7 +54,8 @@ import { createLedger, pruneLedger, valueTo, negotiate, type Ledger } from './ec
 import { lifeStageFor, isMature, learningRateFor, vigorFor } from './lifecycle'
 import { appraise } from './emotions'
 import { applyCrowding, applyPurpose, applyComfort } from './chem'
-import { resilienceFactor, metabolicRate } from './genetics'
+import { courtStep, partnershipStep, reconcileStep } from './courtship'
+import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './genetics'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
 
@@ -657,12 +658,16 @@ export function createSim(seed = 1): Sim {
       }
       tickEconomy(sim.economy)
       if (sim.time % 20 === 0 || sim.time === 1) assignJobs(sim)
+      tickNewcomers(sim)
       // market day rollover: adjust prices by yesterday's demand (visible ▲▼)
       if (sim.time % sim.economy.DAY_TICKS === 0) {
         tickMarketDay(sim.economy, Math.floor(sim.time / sim.economy.DAY_TICKS))
       }
       tickRelationships(sim)
+      tickPartnerships(sim)
+      tickFamilyPlans(sim)
       tickHouseholdCare(sim.society, sim.creatures)
+      careForChildren(sim)
       if (sim.time % 30 === 0) {
         pruneHouseholds(sim.society, sim.creatures)
         pruneJobs(sim.jobs, sim.creatures)
@@ -843,18 +848,21 @@ function decide(sim: Sim, c: Creature): void {
     return
   }
 
-  // Emergent bonds: a partnered creature at home with a strong bond procreates —
-  // only if BOTH parents have the energy reserves to pay the cost (population control).
+  // A settled couple at home may decide the time is right. Conditions matter:
+  // both fed and rested, a household to raise a child in, room in the
+  // settlement, and fertility that varies from creature to creature.
   const at = towerAt(c.pos.x, c.pos.z)
-  if (at?.id === 'homes' && c.partnerId !== null && c.chem.bond > 0.7) {
+  if (at?.id === 'homes' && c.partnerId !== null && readyForChild(sim, c)) {
     const partner = sim.creatureById(c.partnerId)
     const lastBirth = c.memory.facts.partnerIsHere ?? -1000
     const alive = sim.creatures.filter((o) => o.alive).length
     if (
-      partner && partner.alive && partner.chem.bond > 0.7
+      partner && partner.alive && readyForChild(sim, partner)
+      && dist(c.pos.x, c.pos.z, partner.pos.x, partner.pos.z) < 6
       && sim.time - lastBirth > BIRTH_COOLDOWN
       && alive < sim.settings.populationCap
       && canProcreate(c.chem.energy, partner.chem.energy, c.age)
+      && sim.rng() < 0.35 * fertilityFactor(c.genome) * fertilityFactor(partner.genome)
     ) {
       // energy cost paid by both parents — life is not free
       c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
@@ -932,12 +940,183 @@ function chatterNearby(sim: Sim, focusX: number, focusZ: number): void {
     if (!other || other.sleeping) continue
     const kind = pickIntent(c, other)
     const msg = speak(sim.chatter, c, other, kind, sim.time)
+    shareDirections(c, other, trustTowards(other, c.id))
     if (inEarshot(focusX, focusZ, c, other)) {
       sim.overheard.push(renderOverheard(c, other, msg))
       if (sim.overheard.length > 12) sim.overheard.splice(0, sim.overheard.length - 12)
       emit(sim, 'say', c, other, c.pos.x, c.pos.z, { concept: kind })
     }
   }
+}
+
+/**
+ * Children cannot work or buy for themselves. Someone has to feed them:
+ * usually a parent, sometimes a kind neighbour. A greedy, disloyal adult
+ * under pressure may simply not bother — and the child pays for it.
+ */
+function careForChildren(sim: Sim): void {
+  if (sim.time % 15 !== 0) return
+  for (const kid of sim.creatures) {
+    if (!kid.alive || isMature(kid.stage)) continue
+    if (kid.chem.hunger > 0.55) continue
+
+    const house = householdOf(sim.society, kid.id)
+    const carers = sim.creatures.filter((a) =>
+      a.alive && a.id !== kid.id && isMature(a.stage) &&
+      (house?.memberIds.includes(a.id) || dist(a.pos.x, a.pos.z, kid.pos.x, kid.pos.z) < 6),
+    )
+    for (const adult of carers) {
+      const kin = house?.memberIds.includes(adult.id) ?? false
+      const neglectful = adult.genome.greed > 0.7 && adult.genome.loyalty < 0.35
+      if (neglectful && !(kid.chem.hunger < 0.15)) {
+        kid.emotions.shame = clamp01(kid.emotions.shame + 0.02)
+        continue
+      }
+      if (!kin && adult.genome.sociability < 0.4) continue
+
+      if (countItem(adult.inventory, 'bread') > 0 && useItem(adult.inventory, 'bread')) {
+        kid.eat()
+        applySocialEvent(kid.social, adult.id, 'help', 1)
+        applyPurpose(adult.chem, 0.05)
+        emit(sim, 'gift', adult, kid, kid.pos.x, kid.pos.z)
+        return
+      }
+      if (adult.wallet >= 4) {
+        adult.wallet -= 3
+        kid.wallet += 3
+        applySocialEvent(kid.social, adult.id, 'gift', 1)
+        applyPurpose(adult.chem, 0.03)
+        return
+      }
+    }
+    // nobody stepped in — hunger keeps biting, and the child remembers
+    if (kid.chem.hunger < 0.2) {
+      kid.emotions.frustration = clamp01(kid.emotions.frustration + 0.02)
+    }
+  }
+}
+
+/**
+ * Is this creature in a place — physically and emotionally — to raise a child?
+ * Attachment, health, and provision all have to line up.
+ */
+function readyForChild(sim: Sim, c: Creature): boolean {
+  if (c.partnerId === null || !isMature(c.stage) || c.stage === 'elder') return false
+  const edge = c.social[c.partnerId]
+  const attachment = Math.max(c.chem.bond, edge ? romanticInterest(edge, c.genome.lovePropensity) : 0)
+  if (attachment < 0.5) return false
+  if (c.chem.hunger < 0.35 || c.chem.energy < 0.3 || c.chem.health < 0.55) return false
+  if (c.chem.fear > 0.5 || c.chem.grief > 0.3) return false
+  // a home to bring a child back to: an established household, or standing
+  // in the homes quarter where one will be claimed
+  if (householdOf(sim.society, c.id) !== undefined) return true
+  return towerAt(c.pos.x, c.pos.z)?.id === 'homes'
+}
+
+/**
+ * Couples who are ready head home together. Without this they simply never
+ * happen to stand in the same doorway at the same moment.
+ */
+function tickFamilyPlans(sim: Sim): void {
+  if (sim.time % 40 !== 0) return
+  const alive = sim.creatures.filter((c) => c.alive).length
+  if (alive >= sim.settings.populationCap) return
+  const handled = new Set<number>()
+  for (const c of sim.creatures) {
+    if (!c.alive || handled.has(c.id) || c.partnerId === null) continue
+    const partner = sim.creatureById(c.partnerId)
+    if (!partner || !partner.alive) continue
+    if (!readyForChild(sim, c) || !readyForChild(sim, partner)) continue
+    const lastBirth = c.memory.facts.partnerIsHere ?? -1000
+    if (sim.time - lastBirth < BIRTH_COOLDOWN) continue
+    handled.add(c.id)
+    handled.add(partner.id)
+
+    // Both home together and still willing? Then a child is born here, in the
+    // household that will raise it.
+    const home = findTower('homes')
+    const bothHome = home
+      && dist(c.pos.x, c.pos.z, home.x, home.z) <= home.radius + 1
+      && dist(partner.pos.x, partner.pos.z, home.x, home.z) <= home.radius + 1
+    if (bothHome && canProcreate(c.chem.energy, partner.chem.energy, c.age)
+      && sim.rng() < 0.5 * fertilityFactor(c.genome) * fertilityFactor(partner.genome)) {
+      c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
+      partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
+      c.memory.facts.partnerIsHere = sim.time
+      partner.memory.facts.partnerIsHere = sim.time
+      c.sleeping = false
+      partner.sleeping = false
+      procreate(sim, c, partner)
+      continue
+    }
+
+  }
+}
+
+/**
+ * Partnerships are re-examined periodically: resentment and jealousy can end
+ * one, and a forgiving ex may later reconcile with someone they still like.
+ */
+function tickPartnerships(sim: Sim): void {
+  if (sim.time % 24 !== 0) return
+  const seen = new Set<number>()
+  for (const c of sim.creatures) {
+    if (!c.alive || c.partnerId === null || seen.has(c.id)) continue
+    const partner = sim.creatureById(c.partnerId)
+    // Widowhood: once the dead are buried and the worst of the grief has
+    // passed, the survivor is single again. Mourning ends; the memory doesn't.
+    if (!partner || !partner.alive) {
+      const buried = !partner || partner.buried
+      if (buried && c.chem.grief < 0.25) {
+        c.partnerId = null
+        c.emotions.hope = clamp01(c.emotions.hope + 0.1)
+      }
+      continue
+    }
+    seen.add(c.id)
+    seen.add(partner.id)
+    const state = partnershipStep(c, partner)
+    if (state === 'ended') {
+      chronicle(sim.culture, sim.time, `${c.name} and ${partner.name} separated.`)
+      emit(sim, 'jealous', c, partner, c.pos.x, c.pos.z)
+    }
+  }
+  // exes and estranged friends occasionally make peace
+  for (const c of sim.creatures) {
+    if (!c.alive || c.emotions.forgiveness < 0.3) continue
+    const near = nearestOther(sim, c, SOCIAL_RANGE)
+    if (!near) continue
+    const edge = c.social[near.id]
+    if (!edge || edge.resentment < 0.3) continue
+    if (reconcileStep(c, near)) {
+      emit(sim, 'comfort', c, near, c.pos.x, c.pos.z)
+    }
+  }
+}
+
+/**
+ * Haven sits on a road. When the settlement thins out, a traveller eventually
+ * arrives and stays — a slow trickle that keeps the society alive without
+ * inflating birth rates. Turn it off in settings for a closed population.
+ */
+function tickNewcomers(sim: Sim): void {
+  if (!sim.settings.allowNewcomers) return
+  if (sim.time % 300 !== 0) return
+  const alive = sim.creatures.filter((c) => c.alive).length
+  const target = Math.max(4, Math.floor(sim.settings.populationCap * 0.6))
+  if (alive >= target) return
+  if (sim.rng() > 0.5) return
+  const edge = WORLD_HALF - 12
+  const side = Math.floor(sim.rng() * 4)
+  const along = (sim.rng() - 0.5) * edge
+  const pos = side === 0 ? { x: along, z: -edge }
+    : side === 1 ? { x: along, z: edge }
+      : side === 2 ? { x: -edge, z: along }
+        : { x: edge, z: along }
+  const newcomer = sim.spawnCreature(undefined, pos.x, pos.z)
+  newcomer.wallet += 4
+  chronicle(sim.culture, sim.time, `${newcomer.name} arrived in Haven.`)
+  emit(sim, 'birth', newcomer, undefined, newcomer.pos.x, newcomer.pos.z)
 }
 
 /** Claim vacant institutional roles so shops, clinics, and bars are staffed. */
@@ -1096,6 +1275,22 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       goTo(sim, c, 'pharmacy')
       return
     }
+    case 'nest': {
+      if (at?.id === 'homes') {
+        // home with someone you love: rest, warmth, and time together
+        c.action = 'home'
+        applyComfort(c.chem, 0.02)
+        c.chem.privacy = clamp01(c.chem.privacy + 0.01)
+        const partner = c.partnerId !== null ? sim.creatureById(c.partnerId) : null
+        if (partner && partner.alive) {
+          applySocialEvent(c.social, partner.id, 'talk', 0.5)
+          c.chem.bond = clamp01(c.chem.bond + 0.01)
+        }
+        return
+      }
+      goTo(sim, c, 'homes')
+      return
+    }
     case 'clinic': {
       if (at?.id === 'clinic') {
         // A staffed clinic treats properly; an empty one only offers a cot.
@@ -1209,7 +1404,15 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
           bumpEdge(c.social, near.id, 'attraction', 0.06 * compat * c.genome.lovePropensity)
           bumpEdge(near.social, c.id, 'attraction', 0.06 * compat * near.genome.lovePropensity)
         }
-        if (c.partnerId === near.id) {
+        // courtship: mutual interest can turn a friendship into a partnership
+        if (c.partnerId === null && near.partnerId === null) {
+          const outcome = courtStep(c, near)
+          if (outcome === 'partnered') {
+            ensureCoupleHousehold(sim.society, c, near, sim.time)
+            chronicle(sim.culture, sim.time, `${c.name} and ${near.name} became partners.`)
+            emit(sim, 'love', c, near, c.pos.x, c.pos.z)
+          }
+        } else if (c.partnerId === near.id) {
           ensureCoupleHousehold(sim.society, c, near, sim.time)
         }
         emit(sim, 'love', c, near, c.pos.x, c.pos.z)
@@ -1423,11 +1626,34 @@ function flee(sim: Sim, c: Creature): void {
  * know where it is and must explore until it finds it. */
 function learnFromSight(sim: Sim): void {
   for (const c of sim.creatures) {
-    if (!c.alive) continue
+    if (!c.alive || c.sleeping) continue
+    // Buildings are large and signposted: a creature notices one from a
+    // distance, and sharp-eyed creatures notice from further away.
+    const sight = senseRange(c.genome, 10)
     for (const t of TOWERS) {
       const d = dist(c.pos.x, c.pos.z, t.x, t.z)
-      if (d <= t.radius + 0.5) c.learnTower(t.id)
+      if (d <= t.radius + sight) c.learnTower(t.id)
     }
+  }
+}
+
+/**
+ * Directions: creatures tell each other where things are. A hungry stranger
+ * who has never found the market can be pointed toward it — knowledge travels
+ * through the settlement instead of appearing by magic.
+ */
+export function shareDirections(speaker: Creature, listener: Creature, trust: number): void {
+  if (trust < -0.2) return
+  for (const t of TOWERS) {
+    if (!speaker.knowsTower(t.id) || listener.knowsTower(t.id)) continue
+    // you mention what the other plainly needs, or simply what you know well
+    const urgent =
+      (t.id === 'food' && listener.chem.hunger < 0.5) ||
+      (t.id === 'clinic' && listener.chem.health < 0.6) ||
+      (t.id === 'homes' && listener.chem.energy < 0.4)
+    if (!urgent && Math.random() > 0.25) continue
+    listener.knowledge[t.id] = Math.min(1, (listener.knowledge[t.id] ?? 0) + (urgent ? 0.8 : 0.45))
+    return // one useful direction per conversation
   }
 }
 
@@ -1487,8 +1713,10 @@ function tradeNearby(sim: Sim): void {
   for (const seller of sim.creatures) {
     if (!seller.alive || seller.sleeping) continue
     if (countItem(seller.inventory, 'bread') < 2) continue
-    if ((sim.time + seller.id) % 3 !== 0) continue
-    const buyer = nearestOther(sim, seller, SOCIAL_RANGE)
+    if ((sim.time + seller.id) % 2 !== 0) continue
+    // calling an offer across a few paces counts — you don't need to be
+    // shoulder to shoulder to hold up a loaf and name a price
+    const buyer = nearestOther(sim, seller, SOCIAL_RANGE + 2)
     if (!buyer || !buyer.alive || buyer.sleeping || buyer.chem.hunger > 0.5) continue
     // Haggle: the seller's view of the buyer sets the price, and the buyer's
     // hunger sets what they think a loaf is worth. Friends get a break; a
