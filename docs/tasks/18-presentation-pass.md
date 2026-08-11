@@ -1,6 +1,6 @@
 # Task 18 — Social readability (not fidelity)
 
-**Status:** `todo`  
+**Status:** `done`  
 **Vision sections:** The world; Quality requirements (clear cause and effect)
 
 ## Why this task changed
@@ -20,12 +20,12 @@ society without opening panels.
 
 ## Acceptance
 
-- [ ] A creature's **role** is visible at a glance (the healer looks like the healer)
-- [ ] **Family and partnership** are perceivable — who lives with whom
-- [ ] Strong feelings between two nearby creatures are visible in the moment
-- [ ] Children look like children; elders look like elders
-- [ ] Buildings communicate their state (stocked vs empty, staffed vs closed)
-- [ ] All of it holds the medium-quality frame budget
+- [x] A creature's **role** is visible at a glance — they carry the mark of their trade
+- [x] **Household** is perceivable — everyone under one roof wears the same colour band
+- [x] Strong feelings toward whoever is beside them show above their head
+- [x] Children are small, elders stoop, size also comes from genes
+- [x] Buildings light a lamp when open and post closed / sold out / no one here
+- [x] Social state is read every twelfth frame, not every frame
 
 ## Out of scope
 

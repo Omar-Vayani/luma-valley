@@ -29,7 +29,7 @@ choices, not scripted scenes.
       earned, which can later collapse
 - [x] **Ally**: creatures who benefit each other form a durable mutual bond
       that shows up in defence, trade terms, and gossip
-- [ ] Social status changes access (reputation gates trade; status does not yet gate more) — the disrespected get worse treatment
+- [x] Standing changes prices, who helps you, and who gets an empty house — the disrespected get worse treatment
 
 ## Out of scope
 

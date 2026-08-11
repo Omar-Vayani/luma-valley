@@ -223,7 +223,13 @@ function buildReasoning(
   const lines: string[] = []
   const top = ranked[0]
   if (top) {
-    lines.push(`Choosing "${top.action}" (score ${top.score}).`)
+    // Say plainly whether this is what they are doing or what they would
+    // switch to, so the panel never seems to contradict the creature.
+    lines.push(
+      c.intention && c.intention !== top.action
+        ? `Busy with "${c.intention}"; weighing "${top.action}" (${top.score}) next.`
+        : `Choosing "${top.action}" (score ${top.score}).`,
+    )
   }
   if (c.chem.hunger < 0.4) lines.push('Hunger is pressing — survival overrides softer goals.')
   if (c.chem.fear > 0.5) lines.push('Fear is high — risk tolerance is down.')

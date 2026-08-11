@@ -109,7 +109,12 @@ export interface MediationResult {
  * Mediation cools both grudges. If either party is furious enough, the
  * peacemaker takes a knock for the trouble — which is why it is not free.
  */
-export function mediate(peacemaker: Creature, a: Creature, b: Creature): MediationResult {
+export function mediate(
+  peacemaker: Creature,
+  a: Creature,
+  b: Creature,
+  rng: () => number = Math.random,
+): MediationResult {
   const fury = Math.max(a.emotions.spite, b.emotions.spite, a.emotions.resentment, b.emotions.resentment)
   for (const [x, y] of [[a, b], [b, a]] as const) {
     applySocialEvent(x.social, y.id, 'forgive', 0.7)
@@ -118,7 +123,7 @@ export function mediate(peacemaker: Creature, a: Creature, b: Creature): Mediati
     x.chem.fear = clamp01(x.chem.fear - 0.05)
     applySocialEvent(x.social, peacemaker.id, 'help', 0.8)
   }
-  const hurt = fury > 0.6 && Math.random() < fury - 0.4
+  const hurt = fury > 0.6 && rng() < fury - 0.4
   if (hurt) {
     peacemaker.hurt(0.06)
     peacemaker.injury = clamp01(peacemaker.injury + 0.08)

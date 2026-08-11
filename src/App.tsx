@@ -889,7 +889,7 @@ export default function App() {
     if (!s) return
     const note = s.playerGive(id, selectedId ?? undefined)
     setSaveNote(note ?? 'nobody close enough to hand it to')
-    window.setTimeout(() => setSaveNote(null), 2200)
+    window.setTimeout(() => setSaveNote(null), 3600)
     setTick((t) => t + 1)
   }, [selectedId])
 
@@ -898,7 +898,7 @@ export default function App() {
     if (!s) return
     if (s.playerDrop(id)) {
       setSaveNote(`dropped the ${id}`)
-      window.setTimeout(() => setSaveNote(null), 1800)
+      window.setTimeout(() => setSaveNote(null), 3000)
     }
     setTick((t) => t + 1)
   }, [])
@@ -1016,6 +1016,25 @@ export default function App() {
       }
     }
   }
+
+  // who would actually hear you if you spoke right now
+  const listener = (() => {
+    if (!sim || !playerC?.alive) return null
+    if (selected && dist(selected.pos.x, selected.pos.z, playerC.pos.x, playerC.pos.z) <= 14) {
+      return selected
+    }
+    let best: typeof selected = null
+    let bestD = 14
+    for (const c of sim.creatures) {
+      if (!c.alive) continue
+      const d = dist(c.pos.x, c.pos.z, playerC.pos.x, playerC.pos.z)
+      if (d < bestD) {
+        bestD = d
+        best = c
+      }
+    }
+    return best
+  })()
 
   // which voice is speaking for the Luma right now
   const voiceLabel = !settings.optionalCloudAi
@@ -1361,14 +1380,16 @@ export default function App() {
       {chatOpen && sim && (
         <section className="talk" data-talk aria-label="talk with luma">
           <header className="talk-head">
-            <h2>🗨️ talk{selected ? ` · ${selected.name}` : ''}</h2>
+            <h2>🗨️ talk{listener ? ` · ${listener.name}` : ''}</h2>
             <button type="button" className="talk-close" data-talk-close aria-label="Close talk" onClick={() => setChatOpen(false)}>✕</button>
           </header>
           <p className="talk-hint">
             Type naturally — greet, ask how they feel, ask to buy bread, ask for help, warn them about someone.
           </p>
           <p className="talk-voice" data-talk-voice>
-            voice: <b>{voiceLabel}</b>
+            {listener
+              ? <>talking to <b>{listener.name}</b> · voice: <b>{voiceLabel}</b></>
+              : <>nobody is close enough to hear you — walk nearer · voice: <b>{voiceLabel}</b></>}
           </p>
           <div className="talk-row">
             <input
@@ -1376,7 +1397,7 @@ export default function App() {
               data-talk-input
               type="text"
               maxLength={120}
-              placeholder={selected ? `say something to ${selected.name}…` : 'say something to the nearest Luma…'}
+              placeholder={listener ? `say something to ${listener.name}…` : 'walk closer to be heard…'}
               value={chatText}
               onChange={(e) => setChatText(e.target.value)}
               onKeyDown={(e) => {

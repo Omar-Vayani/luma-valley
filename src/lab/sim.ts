@@ -162,6 +162,8 @@ export interface Sim {
   overheard: string[]
   /** the moments worth noticing, with the reason behind each one */
   stories: StoryLog
+  /** who the player is currently in conversation with, if anyone */
+  talkingWith: number | null
   /** beds, doors, counters, and containers the world is furnished with */
   fixtures: Fixture[]
   /** each building's own till and opening hours */
@@ -220,6 +222,7 @@ export function createSim(seed = 1): Sim {
     ledger: createLedger(),
     overheard: [],
     stories: createStoryLog(),
+    talkingWith: null,
     fixtures: createFixtures(),
     institutions: createInstitutions(),
     playerUseFixture(action, itemId): string | null {
@@ -275,11 +278,11 @@ export function createSim(seed = 1): Sim {
       const g = genome ?? randomGenome(sim.rng)
       const cx = clampCoord(x ?? (sim.rng() - 0.5) * 40)
       const cz = clampCoord(z ?? (sim.rng() - 0.5) * 40)
-      const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz)
+      const c = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), g, cx, cz, sim.rng)
       c.wallet = 6 + Math.floor(sim.rng() * 8) // enough for a few meals — room to experiment
       // Founders arrive grown, and not all the same age: a settlement where
       // everybody is the same vintage loses everybody in the same season.
-      c.age = 650 + Math.floor(sim.rng() * 3200)
+      c.age = 650 + Math.floor(sim.rng() * 2400)
       c.stage = lifeStageFor(c.age)
       sim.creatures.push(c)
       return c
@@ -372,14 +375,19 @@ export function createSim(seed = 1): Sim {
     playerTalk(text: string, targetId?: number): DialogueTurn | null {
       const p = sim.player
       if (!isPlayerAlive(p)) return null
-      // You can call across a square to someone you are looking at; otherwise
-      // you are talking to whoever is actually beside you.
+      // A conversation stays with the person you are having it with. An
+      // explicit choice wins; otherwise you keep talking to whoever you were
+      // just talking to, as long as they are still in earshot; only then do
+      // you fall back to whoever happens to be nearest.
+      const inEarshotOf = (c: Creature | undefined | null): boolean =>
+        !!c && c.alive && dist(c.pos.x, c.pos.z, p.pos.x, p.pos.z) <= SHOUT_RANGE
       const chosen = targetId != null ? sim.creatureById(targetId) : null
-      const target = chosen && chosen.alive
-        && dist(chosen.pos.x, chosen.pos.z, p.pos.x, p.pos.z) <= SHOUT_RANGE
-        ? chosen
-        : nearestCreatureTo(sim, p.pos.x, p.pos.z, SHOUT_RANGE)
+      const continuing = sim.talkingWith != null ? sim.creatureById(sim.talkingWith) : null
+      const target = inEarshotOf(chosen) ? chosen
+        : inEarshotOf(continuing) ? continuing
+          : nearestCreatureTo(sim, p.pos.x, p.pos.z, SHOUT_RANGE)
       if (!target || !target.alive) return null
+      sim.talkingWith = target.id
 
       const parsed = parsePlayerText(text)
       // teaching via NL: "the word for food is wum"
@@ -433,7 +441,7 @@ export function createSim(seed = 1): Sim {
       }
 
       target.talkingTo = 0
-      target.busyTicks = Math.max(target.busyTicks, 24)
+      target.busyTicks = Math.max(target.busyTicks, 40)
       target.action = 'chat'
       target.facing = Math.atan2(p.pos.x - target.pos.x, p.pos.z - target.pos.z)
       target.recentDialogue.push(`You: ${text.trim().slice(0, 80)}`)
@@ -1114,7 +1122,7 @@ function decide(sim: Sim, c: Creature): void {
       // learns the settlement instead of starving in the middle of it.
       const helper = nearestOther(sim, c, SOCIAL_RANGE + 3)
       if (helper && !helper.sleeping) {
-        shareDirections(helper, c, trustTowards(helper, c.id))
+        shareDirections(helper, c, trustTowards(helper, c.id), sim.rng)
         speak(sim.chatter, c, helper, 'ask_where', sim.time, 'food')
         c.action = 'ask'
         if (knows(sim, c, 'food')) {
@@ -1247,7 +1255,7 @@ function chatterNearby(sim: Sim, focusX: number, focusZ: number): void {
     if (!other || other.sleeping) continue
     const kind = pickIntent(c, other)
     const msg = speak(sim.chatter, c, other, kind, sim.time)
-    shareDirections(c, other, trustTowards(other, c.id))
+    shareDirections(c, other, trustTowards(other, c.id), sim.rng)
     if (inEarshot(focusX, focusZ, c, other)) {
       sim.overheard.push(renderOverheard(c, other, msg))
       if (sim.overheard.length > 12) sim.overheard.splice(0, sim.overheard.length - 12)
@@ -1341,17 +1349,16 @@ function tickFamilyPlans(sim: Sim): void {
     handled.add(c.id)
     handled.add(partner.id)
 
-    // Both home together and still willing? Then a child is born here, in the
-    // household that will raise it. Quiet hours make it likelier.
-    if (!isNight(sim.time) && sim.rng() < 0.25) continue
     // their own house if the household claimed one, otherwise the lodgings
     const ownHome = homeTowerFor(sim, c)
     const home = findTower(ownHome ?? 'homes') ?? findTower('homes')
     const bothHome = home
       && dist(c.pos.x, c.pos.z, home.x, home.z) <= home.radius + 2
       && dist(partner.pos.x, partner.pos.z, home.x, home.z) <= home.radius + 2
+    // Quiet hours make conception likelier, but it is never guaranteed.
+    const hour = isNight(sim.time) ? 1 : 0.45
     if (bothHome && canProcreate(c.chem.energy, partner.chem.energy, c.age)
-      && sim.rng() < 0.5 * fertilityFactor(c.genome) * fertilityFactor(partner.genome)) {
+      && sim.rng() < 0.5 * hour * fertilityFactor(c.genome) * fertilityFactor(partner.genome)) {
       c.chem.energy = clamp01(c.chem.energy - procreationCost(c.chem.energy))
       partner.chem.energy = clamp01(partner.chem.energy - procreationCost(partner.chem.energy))
       c.memory.facts.partnerIsHere = sim.time
@@ -1362,6 +1369,17 @@ function tickFamilyPlans(sim: Sim): void {
       continue
     }
 
+    // Not home together yet: a couple who have decided go there together.
+    // Without this they each drift off on their own errands and never
+    // happen to be in the same doorway.
+    for (const person of [c, partner]) {
+      if (person.busyTicks > 0) continue
+      if (person.chem.hunger < 0.45 || person.chem.health < 0.5) continue // needs come first
+      person.sleeping = false
+      person.intention = 'nest'
+      person.intentionTicks = COMMITMENT_TICKS * 3
+      person.goalTowerId = ownHome ?? 'homes'
+    }
   }
 }
 
@@ -1530,7 +1548,7 @@ function tickSocialActs(sim: Sim): void {
       if (dist(peacemaker.pos.x, peacemaker.pos.z, a.pos.x, a.pos.z) > SOCIAL_RANGE + 3) continue
       const score = mediateScore(peacemaker, a, b, sim.culture.influence[peacemaker.id] ?? 0)
       if (score < 0.5 || sim.rng() > score * 0.5) continue
-      const result = mediate(peacemaker, a, b)
+      const result = mediate(peacemaker, a, b, sim.rng)
       peacemaker.action = 'mediate'
       emit(sim, 'comfort', peacemaker, a, peacemaker.pos.x, peacemaker.pos.z)
       recordStory(sim.stories, {
@@ -2214,7 +2232,12 @@ function learnFromSight(sim: Sim): void {
  * who has never found the market can be pointed toward it — knowledge travels
  * through the settlement instead of appearing by magic.
  */
-export function shareDirections(speaker: Creature, listener: Creature, trust: number): void {
+export function shareDirections(
+  speaker: Creature,
+  listener: Creature,
+  trust: number,
+  rng: () => number = Math.random,
+): void {
   if (trust < -0.2) return
   for (const t of TOWERS) {
     if (!speaker.knowsTower(t.id) || listener.knowsTower(t.id)) continue
@@ -2223,7 +2246,7 @@ export function shareDirections(speaker: Creature, listener: Creature, trust: nu
       (t.id === 'food' && listener.chem.hunger < 0.5) ||
       (t.id === 'clinic' && listener.chem.health < 0.6) ||
       (t.id === 'homes' && listener.chem.energy < 0.4)
-    if (!urgent && Math.random() > 0.25) continue
+    if (!urgent && rng() > 0.25) continue
     listener.knowledge[t.id] = Math.min(1, (listener.knowledge[t.id] ?? 0) + (urgent ? 0.8 : 0.45))
     return // one useful direction per conversation
   }
@@ -2670,7 +2693,7 @@ function procreate(sim: Sim, a: Creature, b: Creature): void {
     return
   }
   const childGenome = mutate(crossover(a.genome, b.genome, sim.rng), 0.15, sim.rng)
-  const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8)
+  const child = createCreature(sim.nextId++, pickName(sim.namePool, sim.rng()), childGenome, a.pos.x + 0.8, a.pos.z + 0.8, sim.rng)
   child.wallet = 1
   child.parentIds = [a.id, b.id]
   sim.creatures.push(child)

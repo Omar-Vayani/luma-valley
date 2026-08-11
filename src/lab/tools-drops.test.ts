@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSim } from './sim'
+import { WORLD_HALF } from './world'
 import { randomGenome, type Genome } from './genetics'
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
@@ -44,9 +45,12 @@ describe('sim — world drops (bread and money actually work)', () => {
     a.memory.vendettas[b.id] = 1
     b.memory.vendettas[a.id] = 1
     for (let i = 0; i < 300; i++) s.tick()
+    // the wall is the edge of the world, not an arbitrary inner circle:
+    // travellers arrive near the boundary and must still be inside it
+    const wall = WORLD_HALF - 1.5
     for (const c of s.creatures) {
-      expect(Math.abs(c.pos.x)).toBeLessThan(47)
-      expect(Math.abs(c.pos.z)).toBeLessThan(47)
+      expect(Math.abs(c.pos.x)).toBeLessThanOrEqual(wall)
+      expect(Math.abs(c.pos.z)).toBeLessThanOrEqual(wall)
     }
   })
 })

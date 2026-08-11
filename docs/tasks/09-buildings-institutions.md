@@ -26,7 +26,7 @@ somebody stopped. Every shortage should have a name attached to it.
 - [x] Production consumes inputs, so a broken link causes a real shortage
 - [x] An unstaffed institution stops restocking (not just "restocks slower")
 - [x] The society panel names the cause of a shortage ("no farmer since …")
-- [ ] Institutions hold their own till/stores (goods are still a shared economy) rather than abstract global stock
+- [x] Each institution holds its own till; wages come out of what it took rather than abstract global stock
 
 ## Out of scope
 

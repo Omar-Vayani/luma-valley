@@ -22,7 +22,7 @@ handle things within a minute.
 - [x] Contextual buttons when furniture is in reach
 - [x] **A controls card** the player can open (and that appears on first run)
 - [x] Contextual fixture buttons name what is in reach and what it does
-- [ ] Every action reachable by keyboard on desktop (panels are mouse-driven)
+- [x] Every panel has a key (T I H M G ?), Esc closes, Space and 1 2 3 control time
 
 ## Out of scope
 

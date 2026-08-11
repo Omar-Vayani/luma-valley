@@ -23,7 +23,7 @@ suit their machine, without guessing.
 - [x] **A benchmark command** (`npm run bench`) that reports simulation cost per tick at several
       population sizes and settings
 - [x] Measured numbers recorded in ARCHITECTURE, with the machine, with the machine they came from
-- [ ] Per-system cost breakdown (frame and sim totals only) (minds, social, economy) in the overlay
+- [x] Per-system cost breakdown in the F3 overlay (minds, social, economy) in the overlay
 - [x] Defaults justified by measurement: simulation uses <11% of the frame budget
 
 ## Out of scope

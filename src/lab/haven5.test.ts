@@ -350,6 +350,23 @@ describe('conversation that changes the world', () => {
     expect(listener.beliefs[`who:${suspect.id}:danger`]).toBeUndefined()
   })
 
+  it('a conversation stays with the person you are talking to', () => {
+    const s = createSim(30)
+    const talker = s.spawnCreature(GEN(), 2, 0)
+    const passerby = s.spawnCreature(GEN(), 1, 0)
+    s.player.pos = { x: 0, z: 0 }
+    const first = s.playerTalk('hello', talker.id)
+    expect(first!.speakerId).toBe(talker.id)
+    // the other one wanders closer, but you are mid-conversation
+    passerby.pos = { x: 0.2, z: 0 }
+    const second = s.playerTalk('how are you feeling?')
+    expect(second!.speakerId).toBe(talker.id)
+    // until they walk out of earshot, and then whoever is near picks it up
+    talker.pos = { x: 70, z: 70 }
+    const third = s.playerTalk('hello')
+    expect(third!.speakerId).toBe(passerby.id)
+  })
+
   it('children and elders do not sound the same', () => {
     const s = createSim(21)
     const kid = s.spawnCreature(GEN(), 0, 0)

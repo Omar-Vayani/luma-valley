@@ -49,6 +49,8 @@ farmer, because production is a chain (`jobs.ts`) rather than a spawn.
 
 - **Households** (`household.ts`) — couples claim one of the individual houses; children join; care or neglect has consequences
 - **Social acts** (`socialacts.ts`) — mentoring the young, mediating fights at personal risk, flattery that can be seen through, alliances recognised from mutual help
+- **Standing** (`status.ts`) — respect, contribution, wealth and disgrace decide prices, who helps you, and who gets an empty house
+- **Institutions** (`institutions.ts`) — each building keeps its own hours and its own till, so wages come from what the place actually took
 - **Culture** (`norms.ts`) — property, nonviolence, honesty, generosity, loyalty, sobriety norms shift with witnessed behaviour; influence and leadership are earned; children inherit vocabulary and place knowledge
 - **Jobs** (`jobs.ts`) — shopkeeper, healer, bartender, farmer, porter, teacher; a completed shift pays wages and pushes production onto the shelves
 - **Economy** (`economy.ts`) — scarcity pricing, subjective value, haggling, refusal of known thieves, debts, inequality
@@ -59,7 +61,7 @@ Population is bounded by fertility, needs, housing, lifespan, and a configurable
 
 ## Performance
 
-- Simulation LOD (`lod.ts`): near / mid / far / sleep bands
+- Simulation LOD (`lod.ts`): near / mid / far / sleep bands, with per-phase timing (minds, bodies, social, economy, world) shown by F3
 - Time-sliced AI batches (`settings.aiBatchSize`)
 - Render frame rate independent of `simHz` (default 6 Hz)
 - Particle and label toggles; pixel-ratio cap
@@ -101,11 +103,24 @@ missing, collapsed, or covered by another element.
 - Society panel: population, households, inequality, norms, who is respected, staffed and vacant roles, shared words, overheard lines, chronicle
 - F3 performance overlay: frame time, sim time, population, AI batch, tick
 
+## Reading the society without a panel
+
+A creature carries the mark of its trade, everyone in a household wears the
+same colour band, children are small and elders stoop, and strong feeling
+toward whoever is beside them shows above their head. Buildings light a lamp
+when open and post `closed`, `sold out`, or `no one here`. This is refreshed
+every twelfth frame, not every frame.
+
+## Determinism
+
+A world is reproducible from its seed: creature lifespan, facing, mediation
+outcomes and directions-giving all draw from the simulation's own generator
+rather than `Math.random`. The same seed grows the same settlement.
+
 ## Genuine limitations
 
 - Natural language is rule-based and offline; there is no language model per creature
 - Buildings are exterior shells with usable fixtures rather than full interiors
-- Institutions have no opening hours; an idle role holder still works whenever they are on site
 - The player cannot drag heavy objects, and there is no verticality to jump or crouch for
 - Violence and substances are abstract systems with social consequences, not graphic content
 - The optional dialogue endpoint is implemented and tested, but you must supply the service

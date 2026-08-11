@@ -105,7 +105,19 @@ export interface Creature {
 
 const NAMES = ['Bobo', 'Nana', 'Momo', 'Gigi', 'Kiko', 'Lulu', 'Tutu', 'Fifi', 'Roro', 'Dodo', 'Zizi', 'Pepi']
 
-export function createCreature(id: number, name: string, genome: Genome, x = 0, z = 0): Creature {
+/**
+ * Build a creature. Pass the simulation's own `rng` so a world is fully
+ * reproducible from its seed — otherwise lifespan and facing come from
+ * Math.random and the same seed grows a different settlement each time.
+ */
+export function createCreature(
+  id: number,
+  name: string,
+  genome: Genome,
+  x = 0,
+  z = 0,
+  rng: () => number = Math.random,
+): Creature {
   const c: Creature = {
     id,
     name,
@@ -113,7 +125,7 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     chem: createChem(),
     memory: createMemory(),
     pos: { x, z },
-    facing: Math.random() * Math.PI * 2,
+    facing: rng() * Math.PI * 2,
     wallet: 0,
     banked: 0,
     alive: true,
@@ -141,7 +153,7 @@ export function createCreature(id: number, name: string, genome: Genome, x = 0, 
     language: createLanguage(id),
     brainPrefs: null,
     playerBond: 0,
-    ageLimit: ageLimitFor(Math.random(), genome.longevity ?? 0.5),
+    ageLimit: ageLimitFor(rng(), genome.longevity ?? 0.5),
     inventory: createInventory(),
     vengeance: createVengeance(),
     talkingTo: null,

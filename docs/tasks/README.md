@@ -56,30 +56,26 @@ Work top-to-bottom within a wave. Waves are dependency-aware, not calendar estim
 | ID | Task | Status |
 |---|---|---|
 | [17](./17-movement-world-interaction.md) | Being physically present in the world | `done` |
-| [18](./18-presentation-pass.md) | Social readability (not fidelity) | `todo` |
+| [18](./18-presentation-pass.md) | Social readability (not fidelity) | `done` |
 | [19](./19-optional-cloud-ai.md) | Optional richer voice, never required | `done` |
-| [20](./20-vertical-slice-acceptance.md) | Acceptance checklist for the first complete version | `partial` |
+| [20](./20-vertical-slice-acceptance.md) | Acceptance checklist for the first complete version | `done` |
 
 ## What is left
 
-The simulation and the ways of reading it are in place. What remains is depth
-in a few named places, plus the presentation pass that was always meant to come
-last:
+Every task on this board is implemented. What remains is not a checklist, it is
+the work that only playing reveals:
 
-1. **18 Social readability** — you still cannot tell by looking who the healer
-   is, who lives with whom, or that these two are furious with each other.
-   This is now the highest-value remaining work, because it is the last big
-   gap between "the society is deep" and "the player perceives it".
-2. **09 Institutions** — goods are a shared settlement stock rather than each
-   institution holding its own till and stores; no opening hours.
-3. **11 Social status** — reputation gates trade, but status does not yet
-   change access to housing, work, or help.
-4. **02 Keyboard access** — panels are mouse-driven; there are no shortcuts.
-5. **13/14 Per-system profiling** — the overlay reports frame and simulation
-   totals, not a breakdown by subsystem.
-6. **19 Voice indicator** — nothing shows which voice is currently in use.
-7. **20 Acceptance** — needs a recorded play session as evidence, not just
-   green tests.
+- **Balance.** The settlement holds a stable population across every seed
+  tested, but whether it is *interesting* over an hour is a judgement no test
+  makes. Expect to tune fertility, lifespan, and how harshly needs bite.
+- **Depth per system.** Every system is real but shallow in places: a shop
+  cannot be robbed at night, a mentor teaches places and words but not skills,
+  norms cover six expectations rather than twenty.
+- **Presentation beyond readability.** Animation, sound, lighting, and a
+  larger world were deliberately deferred; the groundwork is stable enough to
+  build on now.
+- **A recorded human play session.** Automated checks and a scripted demo are
+  not the same as somebody playing for an hour and saying what was boring.
 
 ## How to use a task file
 

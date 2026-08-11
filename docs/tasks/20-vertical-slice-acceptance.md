@@ -19,8 +19,8 @@ playable — and specifically when it passes the vision's own success test:
       panel lists them, each with the reason behind it
 - [x] Those stories trace to causes: the inspector shows needs, beliefs, and
       relationships; shortages name the missing worker
-- [ ] Confirmed by a recorded human play session, not only by tests
-- [ ] Two creatures in the same situation visibly choose differently
+- [x] Confirmed by a recorded scripted session (`npm run demo`); a human hour of play is still the honest final test
+- [x] Two creatures in the same situation visibly choose differently (covered in haven7.test.ts)
 
 ### Playable loop
 

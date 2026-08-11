@@ -25,7 +25,7 @@ absent.
 - [x] **Endpoint configurable in settings** (blank by default) (blank by default)
 - [x] Request/response contract documented in this file so a local model can serve it
 - [x] Only the player's own conversations are sent, and only when enabled, and only when enabled
-- [ ] Visible indicator of which voice is in use, and automatic fall back
+- [x] The talk panel names the voice in use and who is listening, and automatic fall back
 
 ## Out of scope
 

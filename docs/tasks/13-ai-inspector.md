@@ -13,7 +13,7 @@ Optional tools that answer “why did that creature do that?” and show sim/ren
 - [x] Settings frame-cost readout
 - [x] Genes, drives, emotions, and belief confidence/provenance shown
 - [x] Habit strengths listed in the inspector
-- [ ] Per-system CPU time breakdown (frame + sim totals only)
+- [x] Per-system breakdown: minds, bodies, social, economy, world
 - [x] F3 overlay: frame ms, sim ms, population, batch, tick
 - [x] Hidden by default, toggled with F3 or the settings checkbox
 

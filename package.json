@@ -28,6 +28,7 @@
     "test": "vitest run",
     "bench": "vite-node scripts/bench.mjs",
     "verify:hud": "node scripts/verify-hud.mjs",
-    "lint": "oxlint src"
+    "lint": "oxlint src",
+    "demo": "node scripts/demo.mjs"
   }
 }
