@@ -16,7 +16,7 @@ import { refreshBrain, clampCoord } from '../lab/sim'
 import { ITEM_IDS, type ItemId } from '../lab/inventory'
 import { recordFrameTime } from '../lab/lod'
 import { bodyScale } from '../lab/genetics'
-import { isOpen } from '../lab/institutions'
+import { isOpen, timeOfDay } from '../lab/institutions'
 import { producerOf } from '../lab/jobs'
 
 /** Which good each counter sells, for the "sold out" sign. */
@@ -542,6 +542,8 @@ export class LabView {
     const sun = new THREE.DirectionalLight(0xfff2d8, 1.4)
     sun.position.set(20, 40, 10)
     this.scene.add(sun)
+    this.hemi = hemi
+    this.sun = sun
 
     // towers
     for (const t of TOWERS) this.buildTower(t)
@@ -1358,6 +1360,35 @@ export class LabView {
   }
 
   private socialTick = 0
+  private hemi!: THREE.HemisphereLight
+  private sun!: THREE.DirectionalLight
+
+  /**
+   * The sky follows the settlement's own clock: warm and high at midday, low
+   * and amber at dusk, cold and dim overnight. The shops close as the light
+   * goes, so the hour is something you feel rather than read off a panel.
+   */
+  private syncDaylight(): void {
+    const t = timeOfDay(this.sim.time)
+    // 0 dawn · 0.25 midday · 0.5 dusk · 0.75 deep night
+    const daylight = Math.max(0, Math.sin(t * Math.PI * 2 + Math.PI * 0.5) * 0.5 + 0.5)
+    const dusk = Math.max(0, 1 - Math.abs(t - 0.5) * 6) // brief amber band at sunset
+    const dawn = Math.max(0, 1 - Math.abs(t - 0.0) * 6)
+
+    const sky = new THREE.Color().setHSL(
+      0.58 - daylight * 0.45 + (dusk + dawn) * 0.02,
+      0.25 + (dusk + dawn) * 0.35,
+      0.06 + daylight * 0.62,
+    )
+    ;(this.scene.background as THREE.Color).lerp(sky, 0.05)
+
+    this.sun.intensity = 0.12 + daylight * 1.35
+    this.sun.color.setHSL(0.11 - dusk * 0.06, 0.25 + dusk * 0.45, 0.62 + daylight * 0.2)
+    // the sun tracks across the sky rather than hanging in one corner
+    const angle = t * Math.PI * 2 - Math.PI * 0.5
+    this.sun.position.set(Math.cos(angle) * 40, 12 + daylight * 45, Math.sin(angle) * 25)
+    this.hemi.intensity = 0.18 + daylight * 0.85
+  }
   private towerStates: {
     tower: Tower
     lamp: THREE.Mesh
@@ -1877,6 +1908,7 @@ export class LabView {
     this.syncRigs(dt)
     this.syncPlayer(dt)
     this.syncTowerStates()
+    this.syncDaylight()
     this.updateParticles(dt)
     this.updateCamera(dt)
 

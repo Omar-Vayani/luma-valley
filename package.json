@@ -29,6 +29,7 @@
     "bench": "vite-node scripts/bench.mjs",
     "verify:hud": "node scripts/verify-hud.mjs",
     "lint": "oxlint src",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "balance": "vite-node scripts/balance.mjs"
   }
 }

@@ -23,7 +23,8 @@ export function mentorScore(teacher: Creature, student: Creature): number {
   if (teacher.chem.hunger < 0.35 || teacher.chem.fear > 0.5) return 0
   const known = Object.keys(teacher.knowledge).length
   const studentKnows = Object.keys(student.knowledge).length
-  if (known < 4 || studentKnows >= known) return 0 // you cannot teach what you have not seen
+  const hasSomethingToTeach = known > studentKnows || teacher.education > student.education
+  if (known < 4 || !hasSomethingToTeach) return 0 // you cannot teach what you have not learnt
   const edge = teacher.social[student.id]
   const kin = teacher.parentIds.includes(student.id) || student.parentIds.includes(teacher.id)
   const young = !isMature(student.stage)
@@ -41,7 +42,12 @@ export function mentorScore(teacher: Creature, student: Creature): number {
 export interface MentorResult {
   taughtPlace: string | null
   taughtWord: string | null
+  /** true when the lesson was a trade skill rather than a fact */
+  taughtSkill: boolean
 }
+
+/** How long a teacher rests between lessons — teaching is an occasion. */
+export const TEACH_COOLDOWN = 600
 
 /**
  * Teaching: the student gains places and words the teacher knows, faster if
@@ -70,13 +76,21 @@ export function mentor(teacher: Creature, student: Creature): MentorResult {
     break
   }
 
+  // The lesson worth having: what the teacher knows how to do. A creature
+  // taught a trade earns more for the rest of its life.
+  let taughtSkill = false
+  if (!taughtPlace && !taughtWord && teacher.education > student.education) {
+    student.education = Math.min(5, student.education + 1)
+    taughtSkill = true
+  }
+
   applySocialEvent(student.social, teacher.id, 'teach', 1.2)
   applySocialEvent(teacher.social, student.id, 'help', 0.6)
   student.emotions.gratitude = clamp01(student.emotions.gratitude + 0.12)
   teacher.emotions.pride = clamp01(teacher.emotions.pride + 0.15)
   teacher.chem.purpose = clamp01(teacher.chem.purpose + 0.12)
   student.chem.social = clamp01(student.chem.social + 0.1)
-  return { taughtPlace, taughtWord }
+  return { taughtPlace, taughtWord, taughtSkill }
 }
 
 // ── mediation ─────────────────────────────────────────────────────────────

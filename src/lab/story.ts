@@ -48,6 +48,8 @@ export interface StoryEvent {
   because?: string
   /** 0..1 — how much this mattered to the settlement */
   significance: number
+  /** how many times this same thing has happened between these two */
+  repeats?: number
 }
 
 export interface StoryLog {
@@ -99,9 +101,35 @@ export interface StoryInput {
   weight?: number
 }
 
-/** Record a notable moment. Routine actions must not come through here. */
+/** How long the same pair doing the same thing counts as one running story. */
+const REPEAT_WINDOW = 2500
+
+/**
+ * Record a notable moment. Routine actions must not come through here.
+ *
+ * The fifth theft by the same creature from the same victim is not five
+ * pieces of news, it is one story getting worse — so repeats fold into the
+ * existing entry and make it weightier rather than flooding the feed.
+ */
 export function recordStory(log: StoryLog, input: StoryInput): StoryEvent {
   const base = BASE_SIGNIFICANCE[input.kind] ?? 0.3
+
+  if (input.actor && input.target) {
+    const existing = log.events.find((e) =>
+      e.kind === input.kind &&
+      e.actorId === input.actor?.id &&
+      e.targetId === input.target?.id &&
+      input.tick - e.tick < REPEAT_WINDOW)
+    if (existing) {
+      existing.repeats = (existing.repeats ?? 1) + 1
+      existing.tick = input.tick
+      existing.because = input.because ?? existing.because
+      existing.text = repeatedText(input, existing.repeats)
+      existing.significance = Math.min(1, existing.significance + 0.08)
+      return existing
+    }
+  }
+
   const event: StoryEvent = {
     id: log.nextId++,
     tick: input.tick,
@@ -124,11 +152,51 @@ export function recordStory(log: StoryLog, input: StoryInput): StoryEvent {
   return event
 }
 
-/** The best stories right now: significance, freshened by recency. */
+/** A running story, phrased as the pattern it has become. */
+function repeatedText(input: StoryInput, repeats: number): string {
+  const a = input.actor?.name ?? 'someone'
+  const b = input.target?.name ?? 'someone'
+  switch (input.kind) {
+    case 'theft':
+      return `${a} has now robbed ${b} ${repeats} times`
+    case 'betrayal':
+      return `${a} keeps betraying ${b} — ${repeats} times now`
+    case 'violence':
+      return `${a} has attacked ${b} ${repeats} times`
+    case 'generosity':
+      return `${a} keeps giving to ${b} (${repeats} times)`
+    case 'mentorship':
+      return `${a} has been teaching ${b} (${repeats} lessons)`
+    case 'manipulation':
+      return `${a} keeps working on ${b} with warm words`
+    default:
+      return `${input.text} (×${repeats})`
+  }
+}
+
+/**
+ * The best stories right now: significance, freshened by recency, and thinned
+ * so one kind of event cannot fill the whole feed. News is what is new.
+ */
 export function topStories(log: StoryLog, now: number, limit = 6): StoryEvent[] {
-  return [...log.events]
-    .sort((a, b) => scoreFor(b, now) - scoreFor(a, now))
-    .slice(0, limit)
+  const ranked = [...log.events].sort((a, b) => scoreFor(b, now) - scoreFor(a, now))
+  const chosen: StoryEvent[] = []
+  const seenKind = new Map<StoryKind, number>()
+  // first pass: at most two of any one kind, so the feed stays varied
+  for (const e of ranked) {
+    const used = seenKind.get(e.kind) ?? 0
+    if (used >= 2) continue
+    seenKind.set(e.kind, used + 1)
+    chosen.push(e)
+    if (chosen.length >= limit) return chosen
+  }
+  // second pass: fill any remaining space with whatever is left
+  for (const e of ranked) {
+    if (chosen.includes(e)) continue
+    chosen.push(e)
+    if (chosen.length >= limit) break
+  }
+  return chosen
 }
 
 function scoreFor(e: StoryEvent, now: number): number {

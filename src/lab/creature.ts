@@ -85,6 +85,8 @@ export interface Creature {
   job: string | null
   /** Cached life stage; recomputed as the creature ages. */
   stage: LifeStage
+  /** Tick of the last lesson they gave, so teaching stays an occasion. */
+  lastTaught: number
   /** Ticks spent pressed against an obstacle without progress. */
   stuckTicks: number
   /** Which way this creature prefers to walk around a wall (+1 / -1). */
@@ -170,6 +172,7 @@ export function createCreature(
     habits: createHabits(),
     job: null,
     stage: lifeStageFor(0),
+    lastTaught: 0,
     stuckTicks: 0,
     detourSign: id % 2 === 0 ? 1 : -1,
     knowsTower(towerId: string): boolean {

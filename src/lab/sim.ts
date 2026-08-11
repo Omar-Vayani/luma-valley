@@ -47,7 +47,7 @@ import {
 } from './chatter'
 import {
   createCulture, tickCulture, witnessedAct, updateInfluence, transmitCulture,
-  updateSharedWords, chronicle, type Culture,
+  updateSharedWords, chronicle, normPressure, type Culture,
 } from './norms'
 import {
   createJobBoard, openJobsFor, claimJob, pruneJobs, workShiftAt, isProducedGoodStaffed,
@@ -72,6 +72,7 @@ import {
 import { standingOf, priceMultiplierFor, willingToHelp } from './status'
 import {
   mentorScore, mentor, mediateScore, mediate, flatterScore, flatter, alliedPair, formAlliance,
+  TEACH_COOLDOWN,
 } from './socialacts'
 
 export type SimEventType = 'fight' | 'steal' | 'love' | 'birth' | 'sleep' | 'death' | 'eat' | 'work' | 'drink' | 'medicine' | 'flinch' | 'joinGang' | 'drop' | 'hit' | 'play' | 'school' | 'bury' | 'jealous' | 'say' | 'collect' | 'comfort' | 'heal' | 'gift' | 'scare' | 'rob'
@@ -824,6 +825,7 @@ export function createSim(seed = 1): Sim {
       if (sim.time % 20 === 0 || sim.time === 1) assignJobs(sim)
       if (sim.time % 200 === 0) reportShortages(sim)
       tickDebts(sim)
+      tickBurglary(sim)
       tickNewcomers(sim)
       // market day rollover: adjust prices by yesterday's demand (visible ▲▼)
       if (sim.time % sim.economy.DAY_TICKS === 0) {
@@ -1477,11 +1479,12 @@ function tickSocialActs(sim: Sim): void {
     const near = nearestOther(sim, c, SOCIAL_RANGE + 1)
     if (!near || near.sleeping) continue
 
-    // teaching a child what you know
+    // teaching a child what you know — an occasion, not a constant drip
     const teach = mentorScore(c, near)
-    if (teach > 0.5 && sim.rng() < teach * 0.5) {
+    if (teach > 0.5 && sim.time - c.lastTaught > TEACH_COOLDOWN && sim.rng() < teach * 0.5) {
       const taught = mentor(c, near)
-      if (taught.taughtPlace || taught.taughtWord) {
+      c.lastTaught = sim.time
+      if (taught.taughtPlace || taught.taughtWord || taught.taughtSkill) {
         c.action = 'teach'
         near.action = 'learn'
         emit(sim, 'school', c, near, c.pos.x, c.pos.z)
@@ -1490,9 +1493,11 @@ function tickSocialActs(sim: Sim): void {
           tick: sim.time,
           actor: c,
           target: near,
-          text: taught.taughtPlace
-            ? `${c.name} showed ${near.name} where the ${taught.taughtPlace} is`
-            : `${c.name} taught ${near.name} the word "${taught.taughtWord}"`,
+          text: taught.taughtSkill
+            ? `${c.name} taught ${near.name} their trade`
+            : taught.taughtPlace
+              ? `${c.name} showed ${near.name} where the ${taught.taughtPlace} is`
+              : `${c.name} taught ${near.name} the word "${taught.taughtWord}"`,
           because: c.parentIds.includes(near.id) || near.parentIds.includes(c.id)
             ? 'their own child'
             : explain(c),
@@ -1563,6 +1568,85 @@ function tickSocialActs(sim: Sim): void {
         weight: result.hurt ? 1.3 : 1,
       })
       break
+    }
+  }
+}
+
+/**
+ * Burglary. A shut door is an opportunity as well as an inconvenience: a
+ * creature with the nerve and the need can go through a closed institution's
+ * till at night. The money is real — it comes out of the takings that pay
+ * somebody's wages — so the theft lands on a person, not on an abstraction.
+ */
+function tickBurglary(sim: Sim): void {
+  if (sim.time % 30 !== 0 || !isNight(sim.time)) return
+  for (const c of sim.creatures) {
+    if (!c.alive || c.sleeping || !isMature(c.stage)) continue
+    const here = towerAt(c.pos.x, c.pos.z)
+    if (!here) continue
+    const inst = sim.institutions[here.id]
+    if (!inst || isOpen(sim.institutions, here.id, sim.time)) continue
+    if (inst.till < 3) continue
+
+    // nerve comes from character and need; the norm against it weighs back
+    const nerve =
+      c.genome.theft * 0.5 +
+      c.genome.courage * 0.2 +
+      (1 - c.chem.hunger) * 0.3 +
+      c.emotions.resentment * 0.2 -
+      normPressure(sim.culture, c, 'property') * 0.6
+    if (nerve < 0.25 || sim.rng() > nerve * 0.4) continue
+
+    const watchers = sim.creatures.filter((o) =>
+      o.alive && o.id !== c.id && !o.sleeping &&
+      dist(o.pos.x, o.pos.z, c.pos.x, c.pos.z) <= OBSERVE_RANGE)
+    const haul = Math.min(Math.floor(inst.till), 4 + Math.floor(c.genome.greed * 6))
+
+    if (watchers.length > 0 && sim.rng() < 0.55) {
+      // somebody was out late and saw the whole thing
+      c.emotions.shame = clamp01(c.emotions.shame + 0.25)
+      c.chem.fear = clamp01(c.chem.fear + 0.3)
+      for (const w of watchers) {
+        observeEvent(w, 'steal', c.id)
+        applySocialEvent(w.social, c.id, 'steal', 1)
+      }
+      witnessedAct(sim.culture, 'property', true, watchers.length)
+      recordStory(sim.stories, {
+        kind: 'theft',
+        tick: sim.time,
+        actor: c,
+        text: `${watchers[0].name} caught ${c.name} breaking into the ${here.label} after dark`,
+        because: explain(c, 'steal'),
+        weight: 1.4,
+      })
+      emit(sim, 'flinch', c, undefined, c.pos.x, c.pos.z)
+      continue
+    }
+
+    inst.till -= haul
+    c.wallet += haul
+    c.emotions.guilt = clamp01(c.emotions.guilt + 0.15)
+    observeEvidence(c.beliefs, `place:${here.id}:easyTake`, 1, 'seen', sim.time)
+    witnessedAct(sim.culture, 'property', true, 0)
+    recordStory(sim.stories, {
+      kind: 'theft',
+      tick: sim.time,
+      actor: c,
+      text: `${haul} coins went missing from the ${here.label} overnight`,
+      because: explain(c, 'steal'),
+      weight: 1.3,
+    })
+    emit(sim, 'steal', c, undefined, c.pos.x, c.pos.z)
+
+    // the worker finds out when the wages do not add up
+    const job = Object.entries(sim.jobs.holders)
+      .find(([id]) => JOB_TOWER[id as JobId] === here.id)
+    const keeperId = job?.[1]
+    const keeper = keeperId !== undefined ? sim.creatureById(keeperId) : undefined
+    if (keeper?.alive) {
+      keeper.emotions.resentment = clamp01(keeper.emotions.resentment + 0.15)
+      keeper.emotions.paranoia = clamp01(keeper.emotions.paranoia + 0.2)
+      observeEvidence(keeper.beliefs, `place:${here.id}:robbed`, 1, 'inferred', sim.time)
     }
   }
 }
@@ -2554,7 +2638,8 @@ function wakeNearbySleepers(sim: Sim): void {
  *  they block paths until someone carries them to the graveyard. */
 function resolveCreatureCollisions(sim: Sim): void {
   const bodies = sim.creatures.filter((c) => c.alive)
-  bodies.push({ pos: sim.player.pos } as Creature) // the player is solid too
+  const playerBody = { pos: sim.player.pos } as Creature
+  bodies.push(playerBody) // the player is solid too
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i]
@@ -2563,7 +2648,11 @@ function resolveCreatureCollisions(sim: Sim): void {
       const dx = b.pos.x - a.pos.x
       const dz = b.pos.z - a.pos.z
       const d = Math.hypot(dx, dz)
-      const min = 1.5 // ball radius * 2 + a little breathing room
+      // Creatures keep a little more distance from the player than from each
+      // other: standing eye-to-eye fills the whole first-person view with one
+      // face, which reads as a glitch rather than as company.
+      const involvesPlayer = a === playerBody || b === playerBody
+      const min = involvesPlayer ? 2.6 : 1.5 // ball radius * 2 + breathing room
       if (d > 0.0001 && d < min) {
         const push = (min - d) / 2
         const nx = dx / d
@@ -2583,6 +2672,37 @@ function resolveCreatureCollisions(sim: Sim): void {
 }
 
 function steal(sim: Sim, thief: Creature, victim: Creature): void {
+  // Getting away with it is not a given. An alert victim who already suspects
+  // you, with neighbours watching, is likely to catch you at it — which is
+  // what stops one creature quietly robbing the same person all afternoon.
+  const watchers = sim.creatures.filter((o) =>
+    o.alive && o.id !== thief.id && o.id !== victim.id && !o.sleeping &&
+    dist(o.pos.x, o.pos.z, thief.pos.x, thief.pos.z) <= OBSERVE_RANGE).length
+  const suspicion = victim.social[thief.id]?.suspicion ?? 0
+  const alertness = victim.sleeping ? 0.1 : 0.35 + victim.genome.senses * 0.3 + suspicion * 0.4
+  const stealth = 0.35 + thief.genome.theft * 0.4 - watchers * 0.08
+  if (sim.rng() > stealth - alertness * 0.5 + 0.5) {
+    // caught red-handed: no coins, and everybody saw
+    thief.action = 'caught'
+    thief.emotions.shame = clamp01(thief.emotions.shame + 0.3)
+    thief.chem.fear = clamp01(thief.chem.fear + 0.2)
+    victim.emotions.resentment = clamp01(victim.emotions.resentment + 0.25)
+    applySocialEvent(victim.social, thief.id, 'steal', 0.6)
+    observeEvent(victim, 'steal', thief.id)
+    witness(sim, victim, 'steal', thief.id)
+    recordStory(sim.stories, {
+      kind: 'theft',
+      tick: sim.time,
+      actor: thief,
+      target: victim,
+      text: `${victim.name} caught ${thief.name} going for their coins`,
+      because: explain(thief, 'steal'),
+      weight: 1.2,
+    })
+    emit(sim, 'flinch', thief, victim, thief.pos.x, thief.pos.z)
+    return
+  }
+
   const amount = Math.min(victim.wallet, 2 + Math.floor(thief.genome.greed * 4))
   victim.wallet -= amount
   thief.wallet += amount

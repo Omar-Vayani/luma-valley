@@ -12,6 +12,7 @@ import { createCulture } from './norms'
 import { claimJob } from './jobs'
 import { createLodState, timePhase, rollPhases, phaseBreakdown, SIM_PHASES } from './lod'
 import { inspectSociety, inspectCreature } from './inspect'
+import { recordStory } from './story'
 import { scoreActions } from './mind'
 import { applySocialEvent } from './socialbond'
 
@@ -184,15 +185,71 @@ describe('the settlement holds together over a long run', () => {
       const s = createSim(seed)
       s.settings.lodNear = 200
       s.settings.aiBatchSize = 8
+      // varied genomes, as a real world has: a village of identical twins is
+      // not the case worth defending against
       for (let i = 0; i < 8; i++) {
         const angle = (i / 8) * Math.PI * 2
-        s.spawnCreature(GEN(), Math.cos(angle) * 12, Math.sin(angle) * 12)
+        s.spawnCreature(undefined, Math.cos(angle) * 12, Math.sin(angle) * 12)
       }
       for (let t = 0; t < 7000; t++) s.tick()
       const alive = s.creatures.filter((c) => c.alive).length
       expect(alive, `seed ${seed} died out`).toBeGreaterThan(1)
       expect(alive).toBeLessThanOrEqual(s.settings.populationCap)
     }
+  })
+
+  it('an hour of play stays varied rather than repeating one kind of event', () => {
+    const s = createSim(2026)
+    s.settings.lodNear = 200
+    s.settings.aiBatchSize = 8
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2
+      s.spawnCreature(undefined, Math.cos(angle) * 12, Math.sin(angle) * 12)
+    }
+    for (let t = 0; t < 12000; t++) s.tick()
+
+    const counts = new Map<string, number>()
+    for (const e of s.stories.events) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1)
+    const total = [...counts.values()].reduce((a, b) => a + b, 0)
+    const biggest = Math.max(...counts.values())
+
+    expect(counts.size, 'too few kinds of thing happen').toBeGreaterThanOrEqual(6)
+    expect(total, 'too little happens to be worth watching').toBeGreaterThan(30)
+    expect(biggest / total, 'one kind of event dominates the feed').toBeLessThan(0.4)
+  })
+
+  it('the same thing happening again folds into one running story', () => {
+    const s = createSim(77)
+    const thief = s.spawnCreature(GEN(), 0, 0)
+    const victim = s.spawnCreature(GEN(), 1, 0)
+    for (let i = 0; i < 5; i++) {
+      recordStory(s.stories, {
+        kind: 'theft',
+        tick: 100 + i * 10,
+        actor: thief,
+        target: victim,
+        text: `${thief.name} stole from ${victim.name}`,
+      })
+    }
+    const thefts = s.stories.events.filter((e) => e.kind === 'theft')
+    expect(thefts.length).toBe(1)
+    expect(thefts[0].repeats).toBe(5)
+    expect(thefts[0].text).toContain('5 times')
+  })
+
+  it('a shut till can be robbed overnight, and the takings really go', () => {
+    const s = createSim(31)
+    const burglar = s.spawnCreature(GEN({ theft: 0.98, courage: 0.9, greed: 0.9 }), -28, -28)
+    burglar.chem.hunger = 0.2
+    s.institutions.food.till = 40
+    s.culture.norms.property = 0.05 // a town that has stopped minding
+    s.time = Math.round(DAY_LENGTH * 0.5) // the middle of the night
+    const before = s.institutions.food.till
+    for (let i = 0; i < 400 && s.institutions.food.till === before; i++) {
+      burglar.pos = { x: -28, z: -28 }
+      s.tick()
+    }
+    expect(s.institutions.food.till).toBeLessThan(before)
   })
 
   it('two creatures in the same spot with different natures choose differently', () => {

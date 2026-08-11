@@ -101,6 +101,7 @@ interface SavedCreature {
   beliefs?: BeliefStore
   habits?: HabitStore
   job?: string | null
+  lastTaught?: number
 }
 
 export interface SavedPlayer {
@@ -177,6 +178,7 @@ export function saveSim(sim: Sim): LabSave {
     beliefs: JSON.parse(JSON.stringify(c.beliefs)),
     habits: { ...c.habits },
     job: c.job,
+    lastTaught: c.lastTaught,
   }))
   return {
     version: 6,
@@ -315,6 +317,7 @@ export function loadSim(data: LabSave): Sim {
     c.beliefs = sc.beliefs ? JSON.parse(JSON.stringify(sc.beliefs)) : createBeliefs()
     c.habits = sc.habits ? { ...sc.habits } : createHabits()
     c.job = sc.job ?? null
+    c.lastTaught = sc.lastTaught ?? 0
     c.stage = lifeStageFor(c.age)
     return c
   })
