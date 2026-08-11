@@ -103,6 +103,14 @@ missing, collapsed, or covered by another element.
 - Society panel: population, households, inequality, norms, who is respected, staffed and vacant roles, shared words, overheard lines, chronicle
 - F3 performance overlay: frame time, sim time, population, AI batch, tick
 
+## Atmosphere
+
+The sky, sun and ambient light follow the settlement's own clock: midday is
+bright, dusk and dawn run amber, and night is moonlit blue rather than black —
+dark enough to feel late, light enough to keep watching. Because the same
+clock closes the shops, the hour is something the player feels before they
+read it anywhere.
+
 ## Reading the society without a panel
 
 A creature carries the mark of its trade, everyone in a household wears the

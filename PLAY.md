@@ -102,11 +102,19 @@ export anything you want to keep.
   population cap. **F3** shows where the time is going.
 - **You want a clean start** — add `?fresh=1` to the URL.
 
+## Watching a whole day
+
+Haven runs on a day/night cycle: the market opens in the morning, the tavern
+fills in the evening, and after dark the doors shut and the lamps go out. Press
+**3** for 10× speed to watch a day go by in a couple of minutes — and keep an
+eye on the till, because a closed shop can be burgled.
+
 ## Tuning it for your machine
 
 ```bash
 npm run bench                       # simulation cost at several populations
 npm run bench -- --pops 8,16,32     # widen the sweep
+npm run balance                     # is a simulated hour survivable and varied?
 ```
 
 The defaults (medium, 16 Luma) are chosen so the simulation stays well under a

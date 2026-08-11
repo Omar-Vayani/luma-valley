@@ -1370,24 +1370,32 @@ export class LabView {
    */
   private syncDaylight(): void {
     const t = timeOfDay(this.sim.time)
-    // 0 dawn · 0.25 midday · 0.5 dusk · 0.75 deep night
-    const daylight = Math.max(0, Math.sin(t * Math.PI * 2 + Math.PI * 0.5) * 0.5 + 0.5)
-    const dusk = Math.max(0, 1 - Math.abs(t - 0.5) * 6) // brief amber band at sunset
-    const dawn = Math.max(0, 1 - Math.abs(t - 0.0) * 6)
+    // The settlement's own clock: 0 is the small hours, 0.5 is midday, and the
+    // shops keep their hours inside that. A new world opens at noon.
+    const daylight = 0.5 - Math.cos(t * Math.PI * 2) * 0.5
+    const dawn = Math.max(0, 1 - Math.abs(t - 0.16) * 7) // amber band at sunrise
+    const dusk = Math.max(0, 1 - Math.abs(t - 0.84) * 7) // and again at sunset
 
+    // Night is moonlit, not pitch black: the player still has to be able to
+    // watch the settlement, and a town you cannot see is not atmospheric.
     const sky = new THREE.Color().setHSL(
-      0.58 - daylight * 0.45 + (dusk + dawn) * 0.02,
-      0.25 + (dusk + dawn) * 0.35,
-      0.06 + daylight * 0.62,
+      0.6 - daylight * 0.47 + (dusk + dawn) * 0.02,
+      0.3 + (dusk + dawn) * 0.3,
+      0.22 + daylight * 0.46,
     )
     ;(this.scene.background as THREE.Color).lerp(sky, 0.05)
 
-    this.sun.intensity = 0.12 + daylight * 1.35
-    this.sun.color.setHSL(0.11 - dusk * 0.06, 0.25 + dusk * 0.45, 0.62 + daylight * 0.2)
+    this.sun.intensity = 0.45 + daylight * 1.05
+    this.sun.color.setHSL(
+      daylight > 0.25 ? 0.11 - dusk * 0.06 : 0.6, // moonlight is cold
+      0.2 + dusk * 0.45,
+      0.6 + daylight * 0.22,
+    )
     // the sun tracks across the sky rather than hanging in one corner
     const angle = t * Math.PI * 2 - Math.PI * 0.5
-    this.sun.position.set(Math.cos(angle) * 40, 12 + daylight * 45, Math.sin(angle) * 25)
-    this.hemi.intensity = 0.18 + daylight * 0.85
+    this.sun.position.set(Math.cos(angle) * 40, 16 + daylight * 42, Math.sin(angle) * 25)
+    this.hemi.intensity = 0.5 + daylight * 0.6
+    this.hemi.color.setHSL(daylight > 0.25 ? 0.12 : 0.6, 0.25, 0.75)
   }
   private towerStates: {
     tower: Tower

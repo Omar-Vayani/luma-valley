@@ -62,20 +62,22 @@ Work top-to-bottom within a wave. Waves are dependency-aware, not calendar estim
 
 ## What is left
 
-Every task on this board is implemented. What remains is not a checklist, it is
-the work that only playing reveals:
+Every task on this board is implemented, and the balance pass that follows
+them is done too: `npm run balance` runs simulated hours across seeds and
+judges survival, pacing, variety and cause of death. A full hour now passes
+every check on every seed tried.
 
-- **Balance.** The settlement holds a stable population across every seed
-  tested, but whether it is *interesting* over an hour is a judgement no test
-  makes. Expect to tune fertility, lifespan, and how harshly needs bite.
-- **Depth per system.** Every system is real but shallow in places: a shop
-  cannot be robbed at night, a mentor teaches places and words but not skills,
-  norms cover six expectations rather than twenty.
-- **Presentation beyond readability.** Animation, sound, lighting, and a
-  larger world were deliberately deferred; the groundwork is stable enough to
-  build on now.
-- **A recorded human play session.** Automated checks and a scripted demo are
-  not the same as somebody playing for an hour and saying what was boring.
+What remains is the kind of work only a person playing can direct:
+
+- **Taste.** The numbers say an hour is varied and survivable. Whether it is
+  *gripping* is a judgement no harness makes. Play it, then tune fertility,
+  lifespan, and how hard needs bite.
+- **More depth per system.** Everything is real but finite: six norms rather
+  than twenty, one shift pattern per trade, mentors who teach places, words
+  and a trade but not a craft.
+- **Art.** Models, animation and sound are still the simple originals. The
+  readability work means the game communicates without them; making it
+  beautiful is a separate pass.
 
 ## How to use a task file
 
