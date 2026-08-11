@@ -16,7 +16,7 @@
  *   - never cache dev-server URLs, cross-origin requests, or non-GET methods.
  */
 
-const VERSION = 'v2'
+const VERSION = 'v3'
 const SHELL_CACHE = `luma-shell-${VERSION}`
 const RUNTIME_CACHE = `luma-runtime-${VERSION}`
 const KEEP_CACHES = [SHELL_CACHE, RUNTIME_CACHE]

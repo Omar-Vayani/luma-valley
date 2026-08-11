@@ -85,8 +85,16 @@ Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio c
 
 Dialogue is rule-based and offline; there is no language model per creature, and you can point the game at your own service if you want richer wording. Buildings are exterior shells with usable furniture rather than interiors. Institutions have no opening hours. There is no verticality, so no jumping or climbing. Benchmarks come from the development machine, not from a G14. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the [task board](docs/tasks/README.md) for what remains.
 
+## Hosting it
+
+It is a static bundle with no backend: `npm ci && npm run build` writes `dist/`,
+and `npm start` serves it with nothing but Node. [`HOSTING.md`](HOSTING.md) has
+the details, including Docker, GitHub Pages, and the two caching rules that
+matter after a deploy.
+
 ## Docs
 
+- [`HOSTING.md`](HOSTING.md) — putting it on the web
 - [`docs/VISION.md`](docs/VISION.md) — full product vision prompt
 - [`docs/tasks/README.md`](docs/tasks/README.md) — task board (one system per file)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack choice, systems, limits

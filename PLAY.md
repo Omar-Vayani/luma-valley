@@ -33,6 +33,9 @@ Handy URLs:
 
 ## 3. Put it on the web
 
+(If somebody else is deploying it for you, point them at
+[`HOSTING.md`](HOSTING.md) — it is a static site with no backend.)
+
 The repository ships a workflow that publishes the game to GitHub Pages.
 
 1. On GitHub, open **Settings → Pages**.
