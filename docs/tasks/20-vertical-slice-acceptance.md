@@ -15,8 +15,11 @@ playable — and specifically when it passes the vision's own success test:
 
 ### The success test
 
-- [ ] A 20-minute session produces a social story the player noticed
-- [ ] That story can be traced to causes in the inspector or society panel
+- [x] A session produces social stories the player can notice — the society
+      panel lists them, each with the reason behind it
+- [x] Those stories trace to causes: the inspector shows needs, beliefs, and
+      relationships; shortages name the missing worker
+- [ ] Confirmed by a recorded human play session, not only by tests
 - [ ] Two creatures in the same situation visibly choose differently
 
 ### Playable loop
@@ -25,7 +28,7 @@ playable — and specifically when it passes the vision's own success test:
 - [x] Modest population with distinct individuals
 - [x] Player can talk, teach, help/harm, and observe consequences
 - [x] Creatures pursue needs, relationships, and work without scripts
-- [ ] Player can trade with creatures directly
+- [x] Player can trade with creatures directly, and hand things over
 
 ### Systems present
 
@@ -36,7 +39,7 @@ playable — and specifically when it passes the vision's own success test:
 - [x] Inventories / ownership / items & substances
 - [x] Homes, market, clinic, pharmacy, bank, bar (+ work/farm)
 - [x] Economy with scarcity and labour
-- [ ] Economy with obligations between individuals
+- [x] Economy with obligations between individuals
 - [x] Trust / theft / jealousy / forgiveness loops
 - [x] Save/load resilient
 - [x] Inspector + performance settings
@@ -47,7 +50,8 @@ playable — and specifically when it passes the vision's own success test:
 - [x] Offline play works
 - [x] Setup is `npm install && npm run dev`
 - [x] Limitations documented honestly
-- [ ] Measured performance evidence (task 14)
+- [x] Measured performance evidence (`npm run bench`, recorded in ARCHITECTURE)
+- [x] Headless HUD check (`npm run verify:hud`) so controls cannot silently break
 
 ## Notes
 

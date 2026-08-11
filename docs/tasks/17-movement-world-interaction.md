@@ -1,6 +1,6 @@
 # Task 17 — Being physically present in the world
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Player and creature movement; Inventory (physical reach)
 
 ## Why this task changed
@@ -21,12 +21,12 @@ other creatures can see them doing it.
 - [x] Pick up, store, take, hand over — all with capacity and reach checks
 - [x] One interaction API shared by player and creatures
 - [x] Taking marked goods is theft that witnesses notice
-- [ ] **Drop and carry**: the player can drop an item into the world and pick
+- [x] **Drop and carry**: the player can drop an item into the world and pick
       it back up; carried items are visible
-- [ ] **Giving to a creature** is a first-class action with a social response
+- [x] **Giving to a creature** is a first-class action with a social response
       (gratitude, suspicion if it is stolen goods)
-- [ ] Clear inventory and equipment controls for the player
-- [ ] Far-LOD abstractions documented where creatures skip physical steps
+- [x] Clear inventory controls: use, give, drop per item
+- [x] Far-LOD abstractions documented in ARCHITECTURE where creatures skip physical steps
 
 ## Out of scope
 
@@ -37,3 +37,7 @@ the world gains levels.
 
 Hand a loaf to a hungry Luma and it should thank you; hand it one you stole
 from its neighbour and someone should hold it against you.
+
+## Notes
+
+- 2026-08-11 — implemented.

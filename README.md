@@ -8,9 +8,11 @@ A first-person artificial-life game — a spiritual successor to the *idea* of *
 
 ```bash
 npm install
-npm run dev       # open the local URL (Vite)
-npm test          # simulation + UI contract tests
-npm run build     # production build → dist/
+npm run dev         # open the local URL (Vite)
+npm test            # simulation + UI contract tests
+npm run bench       # measure simulation cost on your machine
+npm run verify:hud  # headless check that the HUD is usable (needs the dev server)
+npm run build       # production build → dist/
 ```
 
 Or open a Netlify deploy of this repo. On first launch you wake in the plaza of **Haven** with a handful of Luma already living their lives.
@@ -45,22 +47,35 @@ manual slots and `.luma.json` export/import. Use `?fresh=1` to start clean.
 - **Families** — households claim houses, adults feed (or neglect) children, culture passes to the next generation
 - **Work** — shopkeepers, healers, bartenders, farmers, porters and teachers staff the institutions; their shifts restock the shelves
 - **Economy** — scarcity pricing, subjective value, haggling, refusal of known thieves, debts, inequality
+- **Supply chains** — the farmer grows the grain the baker needs, so a death upstream empties a shelf downstream
+- **Obligations** — a healer treats someone who cannot pay, and that debt follows both of them
+- **Social moves** — mentoring the young, stepping between two fighters, flattery that gets seen through, alliances built from mutual help
 - **Consequences** — theft changes ownership, memory, trust, reputation, prices, and the settlement's own norms
 
 ## Why did that creature do that?
 
-Select a Luma and open the 🧠 inspector: it shows current needs, the top action
+Open the 🏘️ panel and Haven tells you what people are talking about, each line
+with the reason behind it:
+
+> *Ruxster stole 2 coins from NaxVee — starving*
+> *AxeGot stole 2 coins from TukEum, who trusted them — takes what they want*
+> *NioFen the farmer died, leaving FloPip — failing health*
+> *no bread: no shopkeeper in Haven*
+
+Select a Luma and open the 🧠 inspector for the rest: needs, the top action
 scores, plain-language reasoning, relationships, family, habits, beliefs (with
-how sure they are and where they came from), promises made to them, and recent
-conversation. The 🏘️ panel does the same for the settlement.
+how sure they are and where they came from), debts, promises made to them, and
+their life so far.
 
 ## Performance (G14 / RTX 5070 laptop class)
 
-Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio cap 1.5. Distant and sleeping Luma update less often. Trade quality, population, and AI batch in settings; F3 shows the live frame and simulation cost so you can tune toward ~16 ms/frame.
+Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio cap 1.5. Distant and sleeping Luma update less often.
+
+`npm run bench` measures the simulation on your own machine. On the development machine, 16 Luma at medium cost 0.22 ms per tick — under 8% of a 60 FPS frame budget — so rendering, not thinking, is what you tune. F3 shows the live cost in game.
 
 ## Honest limitations
 
-Dialogue is rule-based and offline (no language model per creature). Buildings are exterior shells with usable furniture rather than full interiors. Goods do not yet flow between institutions. The player cannot jump, crouch, or drag objects. The optional cloud dialogue provider is implemented and tested but not wired to an endpoint. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the [task board](docs/tasks/README.md) for what remains.
+Dialogue is rule-based and offline; there is no language model per creature, and you can point the game at your own service if you want richer wording. Buildings are exterior shells with usable furniture rather than interiors. Institutions have no opening hours. There is no verticality, so no jumping or climbing. Benchmarks come from the development machine, not from a G14. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the [task board](docs/tasks/README.md) for what remains.
 
 ## Docs
 

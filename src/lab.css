@@ -1301,3 +1301,47 @@ button { font: inherit; cursor: pointer; }
 .player-inv-mini:hover {
   opacity: 1;
 }
+.settings-section {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+.settings-section:first-of-type {
+  margin-top: 4px;
+}
+
+/* `.chip` is the floating creature card; the same word is used for the small
+   inline controls inside panels. Inside a panel they must sit in the flow. */
+.talk .chip,
+.inspector .chip,
+.settings .chip,
+.society .chip,
+.teach .chip,
+.help .chip {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings .chip[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Panels sit above the world controls, so their close buttons are never
+   sitting underneath the pointer-lock button in the corner. */
+.talk,
+.inspector,
+.settings,
+.society {
+  z-index: 17;
+}

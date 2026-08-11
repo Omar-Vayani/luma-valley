@@ -34,9 +34,21 @@ Nothing here is a scripted routine; behaviour comes out of these systems interac
 
 Creatures do not know places they have never seen (they learn by sight or by being told), do not automatically believe or obey the player, and can hold beliefs that are wrong until evidence accumulates against them.
 
+## Stories
+
+`story.ts` keeps only the moments that changed something socially, records the
+reason the actor chose it (read from the state that drove the decision, so it
+cannot drift from the behaviour), and ranks them by significance and recency.
+The society panel shows what people are talking about and what changed while
+the player was away; the inspector shows one creature's life so far.
+
+Shortages are traced the same way: an empty bread shelf names the missing
+farmer, because production is a chain (`jobs.ts`) rather than a spawn.
+
 ## Society
 
 - **Households** (`household.ts`) — couples claim one of the individual houses; children join; care or neglect has consequences
+- **Social acts** (`socialacts.ts`) — mentoring the young, mediating fights at personal risk, flattery that can be seen through, alliances recognised from mutual help
 - **Culture** (`norms.ts`) — property, nonviolence, honesty, generosity, loyalty, sobriety norms shift with witnessed behaviour; influence and leadership are earned; children inherit vocabulary and place knowledge
 - **Jobs** (`jobs.ts`) — shopkeeper, healer, bartender, farmer, porter, teacher; a completed shift pays wages and pushes production onto the shelves
 - **Economy** (`economy.ts`) — scarcity pricing, subjective value, haggling, refusal of known thieves, debts, inequality
@@ -54,7 +66,26 @@ Population is bounded by fertility, needs, housing, lifespan, and a configurable
 - Compact structured state; natural language generated only on demand
 - Defaults tuned for an RTX 5070 laptop at medium quality (~60 FPS target)
 
-Measured in the browser during development: ~14–16 ms per frame with 10 Luma at medium settings, sim cost 11–22 ms per second of simulation. A profiling pass on the actual target laptop is still outstanding.
+### Measured
+
+`npm run bench` runs the real simulation headlessly at several populations. On
+the development machine (Node 22, Xeon vCPU, no GPU):
+
+| Population | Preset | ms per tick | Share of a 60 FPS frame at 6 Hz | Save KB per creature |
+|---|---|---|---|---|
+| 8 | medium | 0.15 | 5.4% | 13.3 |
+| 16 | medium | 0.22 | 7.9% | 15.6 |
+| 24 | high | 0.30 | 10.8% | 17.0 |
+
+The simulation is not the bottleneck: even 24 Luma at high settings leaves
+roughly 90% of the frame budget for rendering, which is what justifies keeping
+the browser stack. Per-creature persistent state is ~13–17 KB, far inside the
+1–10 MB budget the brief allows, so memory can grow considerably before it
+matters. In-game frame cost is shown live with F3.
+
+Run it yourself: `npm run bench` (add `--pops 8,16,32 --ticks 3000` to widen).
+`npm run verify:hud` drives a headless browser and fails if any HUD control is
+missing, collapsed, or covered by another element.
 
 ## Persistence
 
@@ -74,8 +105,8 @@ Measured in the browser during development: ~14–16 ms per frame with 10 Luma a
 
 - Natural language is rule-based and offline; there is no language model per creature
 - Buildings are exterior shells with usable fixtures rather than full interiors
-- Goods do not yet flow between institutions (each role restocks its own shelf)
-- No jump, crouch, or object dragging for the player
+- Institutions have no opening hours; an idle role holder still works whenever they are on site
+- The player cannot drag heavy objects, and there is no verticality to jump or crouch for
 - Violence and substances are abstract systems with social consequences, not graphic content
-- The optional cloud dialogue provider is implemented and tested but no endpoint is configured
-- No profiling run has been recorded on the actual ASUS ROG Zephyrus G14 target
+- The optional dialogue endpoint is implemented and tested, but you must supply the service
+- Benchmarks come from the development machine; nothing has been measured on the ASUS ROG Zephyrus G14 itself

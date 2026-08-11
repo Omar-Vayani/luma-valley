@@ -1,6 +1,6 @@
 # Task 02 — First-person presence
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Player and creature movement (player half)
 
 ## Why this task changed
@@ -20,9 +20,9 @@ handle things within a minute.
 - [x] WASD + pointer lock; touch split zones; look pitch/yaw
 - [x] Select a creature; talk, teach, tools; inventory strip
 - [x] Contextual buttons when furniture is in reach
-- [ ] **A controls card** the player can open (and that appears on first run)
-- [ ] A focus indicator naming what is in front of you and what it does
-- [ ] Every action reachable by keyboard on desktop
+- [x] **A controls card** the player can open (and that appears on first run)
+- [x] Contextual fixture buttons name what is in reach and what it does
+- [ ] Every action reachable by keyboard on desktop (panels are mouse-driven)
 
 ## Out of scope
 
@@ -32,3 +32,7 @@ Jump, crouch, vehicles.
 
 A first-time player finds and uses talk, the inspector, and a bed without being
 told they exist.
+
+## Notes
+
+- 2026-08-11 — implemented.

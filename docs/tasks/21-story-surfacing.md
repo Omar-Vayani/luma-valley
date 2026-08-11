@@ -1,6 +1,6 @@
 # Task 21 — Story surfacing
 
-**Status:** `todo`  
+**Status:** `done`  
 **Vision sections:** Primary goal (surprising but understandable stories); Transparency and debugging
 
 ## Why this task exists
@@ -22,18 +22,18 @@ happened here, who did it, and why does it matter?
 
 ## Acceptance
 
-- [ ] A **notable events** feed: only events that changed something socially
+- [x] A **notable events** feed: only events that changed something socially
       (theft, betrayal, birth, death, partnership, separation, job taken,
       shortage, retaliation), not routine eating and walking
-- [ ] Every notable event records **who, what, where, and the cause** — the
+- [x] Every notable event records **who, what, where, and the cause** — the
       reason the actor chose it, captured at decision time
-- [ ] Events are ranked by significance so a quiet moment shows the best story
-- [ ] Per-creature **life story**: the handful of events that shaped this
+- [x] Events are ranked by significance so a quiet moment shows the best story
+- [x] Per-creature **life story**: the handful of events that shaped this
       individual, readable in the inspector
-- [ ] "While you were away": a short summary of what changed since the player
+- [x] "While you were away": a short summary of what changed since the player
       last looked
-- [ ] Nothing fabricated — every line traces to real simulation state
-- [ ] Feed is bounded (cheap to keep, cheap to save)
+- [x] Nothing fabricated — every line traces to real simulation state
+- [x] Feed is bounded (cheap to keep, cheap to save)
 
 ## Out of scope
 
@@ -44,3 +44,7 @@ Quest markers, objectives, scripted narration.
 A 20-minute session should produce at least one chain the player can follow:
 *someone stole → a witness stopped trusting them → the shop refused them → they
 went hungry → they stole again.*
+
+## Notes
+
+- 2026-08-11 — implemented.

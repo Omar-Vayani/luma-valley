@@ -174,6 +174,8 @@ const SPEED = 0.3 // calm, visible pace — the player can keep up and interact
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
+/** How far a raised voice carries — you can hail someone across the plaza. */
+const SHOUT_RANGE = 14
 const BIRTH_COOLDOWN = 120
 const OBSERVE_RANGE = 12 // how close a creature must be to WITNESS an action
 const GOSSIP_RANGE = 10 // how close a creature must be to HEAR gossip
@@ -356,9 +358,13 @@ export function createSim(seed = 1): Sim {
     playerTalk(text: string, targetId?: number): DialogueTurn | null {
       const p = sim.player
       if (!isPlayerAlive(p)) return null
-      const target =
-        (targetId != null ? sim.creatureById(targetId) : null) ??
-        nearestCreatureTo(sim, p.pos.x, p.pos.z, SOCIAL_RANGE + 2)
+      // You can call across a square to someone you are looking at; otherwise
+      // you are talking to whoever is actually beside you.
+      const chosen = targetId != null ? sim.creatureById(targetId) : null
+      const target = chosen && chosen.alive
+        && dist(chosen.pos.x, chosen.pos.z, p.pos.x, p.pos.z) <= SHOUT_RANGE
+        ? chosen
+        : nearestCreatureTo(sim, p.pos.x, p.pos.z, SHOUT_RANGE)
       if (!target || !target.alive) return null
 
       const parsed = parsePlayerText(text)

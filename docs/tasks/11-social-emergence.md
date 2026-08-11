@@ -1,6 +1,6 @@
 # Task 11 — Social behaviours that create stories
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Society; Primary goal (emergent social stories)
 
 ## Why this task changed
@@ -21,15 +21,15 @@ choices, not scripted scenes.
 - [x] Theft, fights, sharing, gossip, revenge, jealousy, forgiveness
 - [x] Norms shift with witnessed acts and feed back into decisions
 - [x] Influence earned through respect; culture inherited by children
-- [ ] **Mentor**: an experienced creature teaches a younger one — words,
+- [x] **Mentor**: an experienced creature teaches a younger one — words,
       places, and a lasting bond
-- [ ] **Mediate**: a respected creature steps between two in conflict, at some
+- [x] **Mediate**: a respected creature steps between two in conflict, at some
       personal risk, and cools the grudge
-- [ ] **Flatter / manipulate**: a low-honesty creature buys trust it has not
+- [x] **Flatter / manipulate**: a low-honesty creature buys trust it has not
       earned, which can later collapse
-- [ ] **Ally**: creatures who benefit each other form a durable mutual bond
+- [x] **Ally**: creatures who benefit each other form a durable mutual bond
       that shows up in defence, trade terms, and gossip
-- [ ] Social status changes access — the disrespected get worse treatment
+- [ ] Social status changes access (reputation gates trade; status does not yet gate more) — the disrespected get worse treatment
 
 ## Out of scope
 
@@ -40,3 +40,7 @@ Formal government, elections, police.
 Over a long run the settlement should produce at least one mentor relationship,
 one mediated conflict, and one manipulator whose reputation eventually catches
 up with them.
+
+## Notes
+
+- 2026-08-11 — implemented.

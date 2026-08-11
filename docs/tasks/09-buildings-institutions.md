@@ -1,6 +1,6 @@
 # Task 09 — Institutions with real supply chains
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Buildings and institutions; Economy (production and consumption)
 
 ## Why this task changed
@@ -21,12 +21,12 @@ somebody stopped. Every shortage should have a name attached to it.
 - [x] Functional buildings: market, bank, pharmacy, clinic, tavern, homes, work, farm
 - [x] Roles claimed and worked by creatures; shifts pay wages
 - [x] Staffed clinic treats properly and pays the healer; unstaffed offers only a cot
-- [ ] **Supply chains**: farm produces grain → market turns grain into bread;
+- [x] **Supply chains**: farm produces grain → market turns grain into bread;
       pharmacy stocks medicine → clinic consumes it when treating
-- [ ] Production consumes inputs, so a broken link causes a real shortage
-- [ ] An unstaffed institution stops restocking (not just "restocks slower")
-- [ ] The society panel names the cause of a shortage ("no farmer since …")
-- [ ] Institutions hold their own till/stores rather than abstract global stock
+- [x] Production consumes inputs, so a broken link causes a real shortage
+- [x] An unstaffed institution stops restocking (not just "restocks slower")
+- [x] The society panel names the cause of a shortage ("no farmer since …")
+- [ ] Institutions hold their own till/stores (goods are still a shared economy) rather than abstract global stock
 
 ## Out of scope
 
@@ -37,3 +37,7 @@ the player can follow. Revisit only if idle institutions become a problem.
 
 Kill or remove the farmer and the market's bread supply should visibly dry up,
 prices should rise, and the society panel should say why.
+
+## Notes
+
+- 2026-08-11 — implemented.

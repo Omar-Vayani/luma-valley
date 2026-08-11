@@ -1,6 +1,6 @@
 # Task 04 — Communication the player is part of
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Creature communication
 
 ## Why this task changed
@@ -20,15 +20,15 @@ trust, mood, age, and vocabulary.
 
 - [x] Typed intent parsing; trust-gated belief and obedience
 - [x] Word teaching; gossip; overheard creature talk; lies and detection
-- [ ] **Trade with the player**: ask to buy or sell, get a price shaped by the
+- [x] **Trade with the player**: ask to buy or sell, get a price shaped by the
       creature's need, wealth, and opinion of you, and complete the exchange
-- [ ] **Requests that stick**: asking for help creates a promise the creature
+- [x] **Requests that stick**: asking for help creates a promise the creature
       may keep or break, with consequences either way
-- [ ] **Warnings and accusations land**: telling a creature about a thief
+- [x] **Warnings and accusations land**: telling a creature about a thief
       changes its beliefs about that individual, weighted by your credibility
-- [ ] Speech reflects age and vocabulary — a child speaks differently from an
+- [x] Speech reflects age and vocabulary — a child speaks differently from an
       elder, and a creature uses words it actually knows
-- [ ] The reply says something the creature could plausibly know (no omniscience)
+- [x] The reply says something the creature could plausibly know (no omniscience)
 
 ## Out of scope
 
@@ -38,3 +38,7 @@ A mandatory language model (see task 19).
 
 The player should be able to talk a hungry stranger into selling their last
 loaf, and be turned down flat by someone who does not trust them.
+
+## Notes
+
+- 2026-08-11 — implemented.

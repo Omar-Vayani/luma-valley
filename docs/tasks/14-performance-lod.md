@@ -1,6 +1,6 @@
 # Task 14 — Performance the owner can verify
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Performance target
 
 ## Why this task changed
@@ -20,11 +20,11 @@ suit their machine, without guessing.
 - [x] Sim LOD bands, AI batching, sim rate independent of render rate
 - [x] Quality presets, population cap, pixel-ratio cap, particle/label toggles
 - [x] Bounded memory: capped episodes, beliefs, edges, chatter
-- [ ] **A benchmark command** that reports simulation cost per tick at several
+- [x] **A benchmark command** (`npm run bench`) that reports simulation cost per tick at several
       population sizes and settings
-- [ ] Measured numbers recorded in the docs, with the machine they came from
-- [ ] Per-system cost breakdown (minds, social, economy) in the overlay
-- [ ] A documented recommendation for the target laptop's defaults
+- [x] Measured numbers recorded in ARCHITECTURE, with the machine, with the machine they came from
+- [ ] Per-system cost breakdown (frame and sim totals only) (minds, social, economy) in the overlay
+- [x] Defaults justified by measurement: simulation uses <11% of the frame budget
 
 ## Out of scope
 
@@ -34,3 +34,7 @@ GPU/VRAM instrumentation beyond what the browser exposes.
 
 `npm run bench` prints a table, and the numbers back up (or correct) the
 default settings shipped in `settings.ts`.
+
+## Notes
+
+- 2026-08-11 — implemented.

@@ -30,6 +30,7 @@ import { applySocialEvent } from './lab/socialbond'
 import { ensureCoupleHousehold, adoptChild } from './lab/household'
 import { transmitCulture } from './lab/norms'
 import { fixtureAt } from './lab/interact'
+import { addItem } from './lab/inventory'
 import { markSeen } from './lab/story'
 import { createCloudProvider, polishTurn } from './lab/dialogue-provider'
 import { saveWorldBlob, loadWorldBlob, loadWorldBackup, hasWorldSlot } from './lab/creature-storage'
@@ -361,6 +362,9 @@ function seedStarterSociety(sim: Sim): void {
     const angle = (i / total) * Math.PI * 2
     made.push(sim.spawnCreature(undefined, Math.cos(angle) * 14, Math.sin(angle) * 14))
   }
+  // somebody is standing in the plaza when you arrive, so the first thing you
+  // can do is talk to a neighbour rather than walk across an empty square
+  if (made[0]) made[0].pos = { x: 2.5, z: 2.5 }
   // pair the first two couples and give each a child
   for (const [a, b] of [[0, 1], [2, 3]] as const) {
     const one = made[a]
@@ -510,6 +514,11 @@ export default function App() {
     sim.settings = { ...loadSettings() }
     if (sim.creatures.filter((c) => c.alive).length === 0) {
       seedStarterSociety(sim)
+      // you arrive with what a traveller carries: something to eat, something
+      // to drink, and something worth giving away
+      addItem(sim.player.inventory, 'bread', 2, 0)
+      addItem(sim.player.inventory, 'water', 1, 0)
+      addItem(sim.player.inventory, 'trinket', 1, 0)
     }
     simRef.current = sim
 
@@ -1374,6 +1383,47 @@ export default function App() {
             <h2>⚙️ settings</h2>
             <button type="button" className="settings-close" data-settings-close aria-label="Close settings" onClick={() => setSettingsOpen(false)}>✕</button>
           </header>
+          <h3 className="settings-section">your world</h3>
+          <div className="settings-row settings-saves" data-save-slots>
+            {[1, 2, 3].map((slot) => (
+              <span key={slot} className="slot-pair">
+                <button type="button" className="chip" data-save-slot={slot} onClick={() => manualSave(slot)}>
+                  save {slot}
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  data-load-slot={slot}
+                  disabled={!hasWorldSlot(slot)}
+                  onClick={() => loadSlot(slot)}
+                >
+                  load {slot}
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="settings-row">
+            <button type="button" className="chip" data-export-save onClick={exportSave}>
+              export to a file
+            </button>
+            <label className="chip" data-import-save>
+              import a file
+              <input
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) importSave(file)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <button type="button" className="chip" data-manual-save onClick={() => manualSave()}>
+              save now
+            </button>
+          </div>
+          <h3 className="settings-section">performance</h3>
           <div className="settings-row">
             <span>quality</span>
             {(['low', 'medium', 'high'] as QualityPreset[]).map((q) => (
@@ -1459,46 +1509,6 @@ export default function App() {
               onChange={(e) => setPerfOverlay(e.target.checked)}
             />
           </label>
-          <div className="settings-row settings-saves" data-save-slots>
-            <span>slots</span>
-            {[1, 2, 3].map((slot) => (
-              <span key={slot} className="slot-pair">
-                <button type="button" className="chip" data-save-slot={slot} onClick={() => manualSave(slot)}>
-                  save {slot}
-                </button>
-                <button
-                  type="button"
-                  className="chip"
-                  data-load-slot={slot}
-                  disabled={!hasWorldSlot(slot)}
-                  onClick={() => loadSlot(slot)}
-                >
-                  load
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="settings-row">
-            <button type="button" className="chip" data-export-save onClick={exportSave}>
-              export file
-            </button>
-            <label className="chip" data-import-save>
-              import file
-              <input
-                type="file"
-                accept="application/json,.json"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) importSave(file)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-          </div>
-          <button type="button" className="dock-btn" data-manual-save onClick={() => manualSave()}>
-            save now
-          </button>
         </section>
       )}
 

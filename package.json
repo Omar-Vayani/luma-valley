@@ -26,6 +26,7 @@
     "preview": "vite preview --port 4173",
     "test": "vitest run",
     "bench": "vite-node scripts/bench.mjs",
+    "verify:hud": "node scripts/verify-hud.mjs",
     "lint": "oxlint src"
   }
 }

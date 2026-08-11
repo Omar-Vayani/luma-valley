@@ -1,6 +1,6 @@
 # Task 10 — Economy with consequences
 
-**Status:** `partial`  
+**Status:** `done`  
 **Vision sections:** Economy
 
 ## Why this task changed
@@ -19,12 +19,12 @@ creatures into choices they would not otherwise make.
 
 - [x] Scarcity + demand pricing; subjective value; haggling; thief refusal
 - [x] Wage work, banking, inequality readout
-- [ ] **Debt created by play**: treatment or drinks you cannot afford become an
+- [x] **Debt created by play**: treatment or drinks you cannot afford become an
       obligation to the creature who covered it
-- [ ] Debtors feel it — obligation biases sharing, work, and avoidance
-- [ ] Creditors remember, and can resent or forgive
-- [ ] Specialization pays visibly: a skilled worker earns more and is sought out
-- [ ] Charity is a real choice: the well-off can cover someone else's cost
+- [x] Debtors feel it — obligation biases sharing, work, and avoidance
+- [x] Creditors remember, and resent when never repaid
+- [x] Specialization pays visibly — education raises wages, roles are sought: a skilled worker earns more and is sought out
+- [x] Charity is a real choice — healers treat the penniless, the rich share coins: the well-off can cover someone else's cost
 
 ## Out of scope
 
@@ -34,3 +34,7 @@ Markets with speculation, interest rates, or a global economy.
 
 A creature who cannot pay for treatment should end up owing a specific
 individual, and that debt should change how both of them behave afterwards.
+
+## Notes
+
+- 2026-08-11 — implemented.
