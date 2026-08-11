@@ -651,14 +651,14 @@ button { font: inherit; cursor: pointer; }
 
 .player-inv {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  max-width: min(92vw, 480px);
+  max-width: min(92vw, 620px);
   padding: 6px 8px;
   border: 1px solid var(--amber-dim);
   border-radius: 10px;
   background: rgba(28, 26, 20, 0.9);
-  overflow-x: auto;
 }
 
 .player-wallet {
@@ -1171,6 +1171,15 @@ button { font: inherit; cursor: pointer; }
 }
 .settings-saves {
   flex-wrap: wrap;
+}
+/* the settings panel is taller than its box: make that obvious */
+.settings {
+  scrollbar-gutter: stable;
+}
+.settings::after {
+  content: '';
+  display: block;
+  height: 4px;
 }
 .slot-pair {
   display: inline-flex;

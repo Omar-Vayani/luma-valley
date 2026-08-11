@@ -26,7 +26,7 @@ import { createBeliefs, createHabits, type BeliefStore, type HabitStore } from '
 import { createChatter, type ChatterState } from './chatter'
 import { createCulture, type Culture } from './norms'
 import { createJobBoard, type JobBoard } from './jobs'
-import { createLedger, type Ledger } from './economy'
+import { createLedger, migrateEconomy, type Ledger } from './economy'
 import { createStoryLog, type StoryLog } from './story'
 import { lifeStageFor } from './lifecycle'
 import { completeGenome } from './genetics'
@@ -321,7 +321,9 @@ export function loadSim(data: LabSave): Sim {
   sim.rng = mulberry32(data.seed + data.time)
   sim.drops = (data.drops ?? []).map((d) => ({ ...d }))
   sim.graves = (data.graves ?? []).map((g) => ({ ...g }))
-  sim.economy = data.economy ? JSON.parse(JSON.stringify(data.economy)) : createEconomy()
+  sim.economy = data.economy
+    ? migrateEconomy(JSON.parse(JSON.stringify(data.economy)))
+    : createEconomy()
   if (data.player) {
     const sp = data.player
     sim.player.pos = { ...sp.pos }

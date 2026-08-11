@@ -44,6 +44,21 @@ export const DEMAND_QUOTA: Record<string, number> = {
 
 const DAY_TICKS = 400 // one "market day" ≈ 400 sim ticks (a few minutes of play)
 
+/**
+ * Bring a loaded economy up to date with the goods this build knows about.
+ * A world saved before a good existed simply gains it at its opening stock,
+ * rather than crashing the market the first time the day rolls over.
+ */
+export function migrateEconomy(loaded: Economy): Economy {
+  const fresh = createEconomy()
+  return {
+    ...fresh,
+    ...loaded,
+    goods: { ...fresh.goods, ...loaded.goods },
+    sales: { ...loaded.sales },
+  }
+}
+
 export function createEconomy(): Economy {
   return {
     goods: {
@@ -112,6 +127,7 @@ export function tickMarketDay(e: Economy, day: number): void {
   e.day = day
   for (const id of GOODS) {
     const g = e.goods[id]
+    if (!g) continue // a good this world does not trade in
     const sold = salesSinceDay(e, id, day - 1)
     const quota = DEMAND_QUOTA[id]
     // heavy demand (sales >> quota) → price rises; light demand → eases down

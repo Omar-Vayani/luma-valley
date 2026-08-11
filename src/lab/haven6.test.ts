@@ -4,6 +4,8 @@ import { randomGenome, type Genome } from './genetics'
 import { addItem, countItem } from './inventory'
 import { DEFAULT_SETTINGS } from './settings'
 import { createCloudProvider, providerFor, localProvider, polishTurn } from './dialogue-provider'
+import { createEconomy, tickMarketDay } from './economy'
+import { saveSim, loadSim } from './save'
 import type { DialogueTurn } from './dialogue'
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
@@ -49,6 +51,27 @@ describe('handling things in front of other people', () => {
     addItem(s.player.inventory, 'bread', 1, 0)
     expect(s.playerGive('bread', far.id)).toBeNull()
     expect(countItem(s.player.inventory, 'bread')).toBe(1)
+  })
+})
+
+describe('a world saved before a good existed keeps working', () => {
+  it('adds goods the save predates instead of crashing the market', () => {
+    const s = createSim(5)
+    const data = saveSim(s)
+    // an older save: this world had never heard of grain
+    delete (data.economy.goods as Record<string, unknown>).grain
+    const s2 = loadSim(data)
+    expect(s2.economy.goods.grain).toBeDefined()
+    // the market day rollover is where the missing good used to throw
+    expect(() => tickMarketDay(s2.economy, 1)).not.toThrow()
+    for (let i = 0; i < 450; i++) s2.tick()
+    expect(s2.economy.goods.grain.stock).toBeGreaterThanOrEqual(0)
+  })
+
+  it('tolerates a good the build no longer defines', () => {
+    const economy = createEconomy()
+    delete (economy.goods as Record<string, unknown>).tonic
+    expect(() => tickMarketDay(economy, 2)).not.toThrow()
   })
 })
 
