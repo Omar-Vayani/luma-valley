@@ -306,8 +306,7 @@ export class WorldView {
     const forward = this.player.forwardVector(this.tmpVec2)
 
     let best: Creature | null = null
-    let bestScore = 0.955
-    let bestDistance = 0
+    let bestDistance = Infinity
     for (const c of this.sim.creatures) {
       const dx = c.x - eye.x
       const dz = c.z - eye.z
@@ -322,8 +321,11 @@ export class WorldView {
       // to talk to them.
       const threshold = distance < 1.6 ? 0.1 : distance < 4 ? 0.8 : 0.955
       if (dot < threshold) continue
-      if (dot > bestScore || best == null) {
-        bestScore = dot
+      // Nearest wins, not best-aimed. Scoring by how centred something is
+      // means a creature twenty metres away that happens to be dead ahead
+      // beats the one you are standing next to, and the prompt tells you
+      // about somebody you cannot reach.
+      if (distance < bestDistance) {
         best = c
         bestDistance = distance
       }
