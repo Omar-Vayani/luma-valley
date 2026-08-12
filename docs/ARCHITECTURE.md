@@ -29,9 +29,35 @@ re-score every tick, mid ones get one every few ticks, far ones only age and
 metabolise. `settings.aiBatchSize` caps how many full re-scores happen per tick,
 so the cost is bounded no matter the population.
 
-This layer was not touched by the rebuild, beyond a faster walking pace for a
-larger valley and four new gatherable items. Its 400-odd tests still describe
-it.
+### The brains
+
+Every creature has a small neural network: sixteen inputs of context, twelve
+hidden units, one output per action, softmaxed. It is trained by reward after
+each action, and its preferences are folded into the utility scores before a
+choice is made — which is what lets two Luma with identical genomes and
+identical needs develop different habits.
+
+It runs on plain arrays. It used to run on TensorFlow.js, which meant a WebGL
+round trip and an async boundary to do six hundred multiply-adds, and because
+the forward pass was async, inference was never actually wired into the
+decision. Every brain in the settlement trained and none of them were ever
+asked. Two other faults were hiding behind that: the cached weight tensors
+were never rebuilt after training mutated the arrays, and reward was
+non-negative, so an action that left a creature hungrier and poorer was merely
+un-rewarded rather than punished.
+
+The brain's authority ramps in with lived experience. A newborn's weights are
+random, and random opinions held confidently are worse than none.
+
+### Substances
+
+Four of them, and the parts that make a habit behave like a habit rather than
+a potion: tolerance tracked separately from dependence (so the payoff of a
+dose shrinks while the damage does not), intoxication as a state with
+consequences for movement and judgement, withdrawal that outbids ordinary
+needs, and recovery where dependence fades faster than tolerance. Sparkdust
+and beer differ socially as much as chemically — being seen on the hard stuff
+costs standing and moves the settlement's own sobriety norm.
 
 ## The place — `src/world/`
 
@@ -63,9 +89,13 @@ stuck.
 **`controller.ts`** is the feel: acceleration and stopping, gravity, a
 one-metre jump with coyote time, sprint with a field-of-view kick, crouch,
 swimming, head bob, footsteps that know what ground you are on, and a slope
-limit that makes the rim a wall. Collision is a height field lookup for the
-ground and circles for buildings — no physics engine, and skipping one leaves
-the frame budget for the world.
+limit that makes the rim a wall.
+
+**`collision.ts`** is a uniform grid of every solid thing in the valley —
+walls, trunks, boulders, stall posts, barrels, gateposts, and whatever you
+have set down — filed into eight-metre cells at load and queried in constant
+time. Solids carry a height, so a jump clears a fence. There is no physics
+engine, and skipping one leaves the frame budget for the world.
 
 **`targeting.ts`** casts a short cylinder down the middle of the screen and
 takes the first thing it hits. This replaced picking whoever was nearest, which
@@ -103,17 +133,26 @@ height so a pine is a pine whichever file it came from.
 **`scatter-view.ts`** draws those instances in chunks that frustum-cull, with a
 one-sine wind in the vertex shader phase-shifted by world position.
 
-**`architecture.ts`** generates every building from a kit of parts — posts,
-plaster panels, timber framing, tiled roofs, awnings — then merges each one down
-to a single mesh per material. The plaza, lamp posts, the Old Bridge and the
+**`architecture.ts`** generates every building from a kit of parts. Each is a
+real shell: four walls with a gap for the doorway, a floor, a roof, furniture
+inside, and a collider for every wall run — so you can walk into the Coinhouse
+and cannot cut the corner through the smithy. Eight outbuildings beyond the
+institutions carry the valley's history, and each is merged down The plaza, lamp posts, the Old Bridge and the
 twelve landmarks are built the same way, so the settlement shares one look with
 the nature models: flat-shaded and untextured.
 
-**`luma.ts`** rebuilds the creatures as an articulated rig — hips, torso, head,
-ears, arms, legs, tail — posed every frame from what the mind is already doing.
-Nothing is keyframed, so the animation cannot drift out of sync with the state
-driving it: gait from measured speed, lean from mood, ears back when frightened,
-tail wagging when happy, a moving mouth while talking, curled up asleep.
+**`luma.ts`** builds the creatures to human proportions — pelvis, spine, chest,
+neck, head, two-segment arms and legs so elbows and knees bend — and poses them
+every frame from what the mind is already doing. Nothing is keyframed, so the
+animation cannot drift out of sync with the state driving it.
+
+The other half of that file is smoothness. The simulation moves bodies six
+times a second and the screen redraws sixty; reading positions straight into
+the transform is what made everybody look like they were teleporting, and
+measuring gait by dividing that jerk by the frame time made the legs blur.
+Positions are followed with a damped spring, and cadence is measured along the
+path actually drawn, so one stride is about three quarters of a metre whatever
+the frame rate.
 
 **`world-view.ts`** is the loop. It owns the player, drives the simulation
 clock, resolves interactions, and hands React a HUD snapshot ten times a second.

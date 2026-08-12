@@ -32,18 +32,24 @@ it, most of which the Luma will tell you about if you ask.
 
 - **Walk, sprint, jump, crouch, swim.** The controls are the ones you already
   know. The crosshair tells you what you are pointing at and what pressing E
-  would do to it.
+  would do to it. Walls, trunks, boulders and market stalls are all solid.
+- **Go inside.** Buildings have interiors: a hearth and a bed in a cottage, a
+  long table in the Commons Hall, shelves and a counter in a shop.
 - **Take things out of the valley.** Hold E to pick berries, cut grain, chop
   fallen wood, break stone, gather herbs, fish the shallows. Everything grows
   back on its own clock.
 - **Make things.** Bake at a hearth, mix remedies at the apothecary, forge a
   lantern at the smithy. Most recipes need a workshop, which means standing in
   a building while somebody works in it.
+- **Trade.** Every shop has a counter. Buy at the prices the Luma pay, out of
+  the stock they empty, and sell into a till that can be too empty to pay you.
 - **Be asked for things.** The notice board in the plaza carries what Haven
   actually needs right now, read off the live simulation: somebody hungry and
   broke, a fever with the infirmary a walk away, an empty shelf because the
   farmer died, two neighbours who have stopped speaking. Ignore them and the
   underlying problem goes on being a problem.
+- **Teach them words.** Say a word for a thing and everyone in earshot starts
+  using it. Enough of them agreeing makes it the settlement's word.
 - **Build a little.** Set lanterns, fence posts and stone markers down anywhere,
   and pick them back up.
 - **Find the twelve places.** Each one enters your journal with what it means.
@@ -53,8 +59,14 @@ it, most of which the Luma will tell you about if you ask.
 The simulation is the part that was already good, and it is untouched by the
 rebuild:
 
-- **Minds** — utility scoring, a small neural net, psyche and habits decide what
-  each Luma does next
+- **Minds** — utility scoring, psyche and habits decide what each Luma does
+  next, and every one of them has a small neural network of its own that
+  learns from how its choices turn out. It fades in behind instinct as they
+  live, so two Luma with the same genome and the same needs end up different
+- **Habits** — beer, a smoked leaf, a hard stimulant and a bought focus, each
+  with tolerance that makes use escalate, intoxication that makes people brave
+  and careless, withdrawal that outbids ordinary needs, and a settlement that
+  minds about the hard stuff far more than about beer
 - **Beliefs** — they learn by seeing or being told, can be wrong, and change
   their minds under evidence
 - **Deception** — a desperate or spiteful Luma may lie; a suspicious, familiar
@@ -97,7 +109,7 @@ cause:
 | Mouse | Look |
 | Shift / Ctrl / Space | Sprint / crouch / jump |
 | E | Interact — hold for the slow jobs |
-| Left click | Give what you hold to whoever you are looking at, or use it |
+| Left click | Give what you hold to whoever you are looking at — or, empty-handed, a hand on their shoulder |
 | Right click | Set it down in the world |
 | Q | Drop it |
 | 1–9, scroll | Hotbar |
