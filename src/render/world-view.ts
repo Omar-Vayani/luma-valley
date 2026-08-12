@@ -36,6 +36,7 @@ import { landmarkNear, type Landmark } from '../world/lore'
 import { worldScatter } from '../world/scatter'
 import { heightAt, regionAt, WATER_LEVEL } from '../world/terrain'
 import type { QualityPreset } from '../lab/settings'
+import type { TowerId } from '../lab/world'
 
 export interface HudGaze {
   id: number
@@ -80,6 +81,7 @@ export interface WorldCallbacks {
   onGave: (creatureId: number, item: ItemId) => void
   onGathered: (item: ItemId, amount: number) => void
   onPointerLock: (locked: boolean) => void
+  onShop: (tower: TowerId) => void
 }
 
 const STEP_SOUNDS: Record<string, SoundSpec> = {
@@ -601,6 +603,10 @@ export class WorldView {
         break
       }
       case 'fixture': {
+        if (target.fixture.kind === 'counter') {
+          this.callbacks.onShop(target.fixture.tower)
+          break
+        }
         const message = this.sim.playerUseFixture(
           target.fixture.kind === 'bed' ? 'rest'
             : target.fixture.kind === 'door' ? 'toggle' : 'take',

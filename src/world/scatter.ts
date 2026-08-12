@@ -213,7 +213,7 @@ export function buildScatter(): ScatterResult {
 
       if (h < WATER_LEVEL) {
         // lily pads in the shallows, and nothing else out on the water
-        if (h > WATER_LEVEL - 1.1 && rng() < 0.14) {
+        if (h > WATER_LEVEL - 1.1 && rng() < 0.14 && distToRoad(x, z) > 4.2) {
           props.push({
             kind: 'lily', variant: Math.floor(rng() * PROP_VARIANTS.lily),
             x, y: WATER_LEVEL + 0.02, z, rot: rng() * Math.PI * 2, scale: 0.8 + rng() * 0.6,

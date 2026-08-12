@@ -21,7 +21,10 @@ import {
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
-import { addItem, useItem, hasItem, tradeItem, countItem, ownerOf, type ItemId } from './inventory'
+import {
+  addItem, canCarry, countItem, hasItem, ownerOf, removeItem, tradeItem, useItem, type ItemId,
+} from './inventory'
+import { itemBaseValue, itemName } from './items'
 import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
@@ -70,7 +73,7 @@ import {
 } from './interact'
 import { createStoryLog, recordStory, explain, type StoryLog } from './story'
 import {
-  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight,
+  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight, tillOf,
   type Institutions,
 } from './institutions'
 import { standingOf, priceMultiplierFor, willingToHelp } from './status'
@@ -175,6 +178,31 @@ export interface Sim {
   institutions: Institutions
   /** Use the nearest fixture as the player: sleep, open, take, or store. */
   playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
+  /** What a shop will sell you, what it pays for things, and whether it is open. */
+  shopAt(tower: TowerId): ShopOffer | null
+  /** Buy one of a shop's stock. Returns what happened. */
+  playerBuy(tower: TowerId, good: string): TradeResult
+  /** Sell something out of your pack to a shop that deals in it. */
+  playerSell(tower: TowerId, id: ItemId): TradeResult
+}
+
+export interface ShopOffer {
+  tower: TowerId
+  label: string
+  open: boolean
+  /** what it sells, with the price today and how many are left */
+  sells: { id: string; price: number; stock: number }[]
+  /** what it will take off your hands, and for how much */
+  buys: { id: ItemId; price: number }[]
+  /** coins in the till, which is what limits what it can buy from you */
+  till: number
+  keeper: string | null
+}
+
+export interface TradeResult {
+  ok: boolean
+  message: string
+  coins?: number
 }
 
 /** Where each institutional role is performed. */
@@ -678,6 +706,71 @@ export function createSim(seed = 1): Sim {
      * Exported so tests can drive the trade directly; the tick calls it via
      * tradeNearby() when a stocked seller meets a hungry, able buyer.
      */
+    shopAt(tower: TowerId): ShopOffer | null {
+      const trade = SHOP_TRADE[tower]
+      if (!trade) return null
+      const t = findTower(tower)
+      const keeper = sim.creatures.find((c) => c.alive && c.job === trade.job)
+      return {
+        tower,
+        label: t?.label ?? tower,
+        open: isOpen(sim.institutions, tower, sim.time),
+        sells: trade.sells.map((id) => ({
+          id,
+          price: Math.max(1, Math.round(marketPrice(sim.economy, id))),
+          stock: sim.economy.goods[id]?.stock ?? 0,
+        })),
+        buys: trade.buys.map((id) => ({ id, price: sellPriceOf(sim, id) })),
+        till: Math.round(tillOf(sim.institutions, tower)),
+        keeper: keeper?.name ?? null,
+      }
+    },
+
+    playerBuy(tower: TowerId, good: string): TradeResult {
+      const offer = sim.shopAt(tower)
+      if (!offer) return { ok: false, message: 'Nobody trades here.' }
+      if (!offer.open) return { ok: false, message: `${offer.label} is shut.` }
+      const line = offer.sells.find((s) => s.id === good)
+      if (!line) return { ok: false, message: 'They do not stock that.' }
+      if (line.stock <= 0) return { ok: false, message: `No ${good} left today.` }
+      if (sim.player.wallet < line.price) {
+        return { ok: false, message: `${line.price} coins, and you have ${sim.player.wallet}.` }
+      }
+      const carried = good === 'weapon' ? 'stick' : (good as ItemId)
+      if (!canCarry(sim.player.inventory, carried, 1)) {
+        return { ok: false, message: 'Your pack is full.' }
+      }
+      sim.player.wallet -= line.price
+      const g = sim.economy.goods[good]
+      if (g) g.stock = Math.max(0, g.stock - 1)
+      recordSale(sim.economy, good, 1)
+      takePayment(sim.institutions, tower, line.price)
+      addItem(sim.player.inventory, carried, 1, 0)
+      return { ok: true, message: `Bought ${itemName(carried)} for ${line.price}.`, coins: -line.price }
+    },
+
+    playerSell(tower: TowerId, id: ItemId): TradeResult {
+      const offer = sim.shopAt(tower)
+      if (!offer) return { ok: false, message: 'Nobody trades here.' }
+      if (!offer.open) return { ok: false, message: `${offer.label} is shut.` }
+      const line = offer.buys.find((b) => b.id === id)
+      if (!line) return { ok: false, message: `${offer.label} has no use for that.` }
+      if (countItem(sim.player.inventory, id) <= 0) return { ok: false, message: 'You have none.' }
+      const paid = payFromTill(sim.institutions, tower, line.price)
+      if (paid <= 0) return { ok: false, message: `${offer.label} has nothing in the till.` }
+      removeItem(sim.player.inventory, id, 1)
+      const g = sim.economy.goods[id]
+      if (g) g.stock = Math.min(g.maxStock, g.stock + 1)
+      sim.player.wallet += paid
+      return {
+        ok: true,
+        message: paid < line.price
+          ? `They could only find ${paid} coins for it.`
+          : `Sold ${itemName(id)} for ${paid}.`,
+        coins: paid,
+      }
+    },
+
     creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean {
       if (!seller.alive || !buyer.alive) return false
       if (!hasItem(seller.inventory, 'bread')) return false
@@ -3020,6 +3113,32 @@ function blendBrain(sim: Sim, c: Creature, scores: Record<string, number>): void
     const learned = (prefs[i] / best) * 1.6
     scores[name] = scores[name] * (1 - weight) + learned * weight
   }
+}
+
+/**
+ * Which building deals in what, from the player's side of the counter.
+ * Creatures buy through `buyFromTower`; this is the same economy seen from
+ * the other direction, because a settlement you can only give things to is
+ * not an economy you are part of.
+ */
+const SHOP_TRADE: Partial<Record<TowerId, { job: string; sells: string[]; buys: ItemId[] }>> = {
+  food: { job: 'shopkeep', sells: ['bread'], buys: ['grain', 'berry', 'fish', 'herb'] },
+  pharmacy: { job: 'healer', sells: ['medicine', 'tonic'], buys: ['herb', 'medicine'] },
+  clinic: { job: 'healer', sells: ['medicine'], buys: ['herb'] },
+  tavern: { job: 'bartender', sells: ['brew'], buys: ['grain', 'berry', 'fish'] },
+  tools: { job: 'porter', sells: ['weapon'], buys: ['timber', 'stone', 'gem'] },
+  den: { job: 'porter', sells: ['herb', 'spark'], buys: ['herb'] },
+  farm: { job: 'farmer', sells: ['grain'], buys: ['timber', 'stone'] },
+}
+
+/**
+ * What a shop pays for something. Well under what it charges, because that
+ * difference is the shopkeeper's living.
+ */
+function sellPriceOf(sim: Sim, id: ItemId): number {
+  const listed = sim.economy.goods[id]
+  const base = listed ? marketPrice(sim.economy, id) : itemBaseValue(id)
+  return Math.max(1, Math.round(base * 0.6))
 }
 
 /**

@@ -768,6 +768,7 @@ export function buildVillage(kit: Kit): VillageBuild {
     root.add(place.group)
   }
 
+  addOutbuildings(kit, root, glow, lamps, colliders)
   addDressing(kit, root)
   addPlaza(kit, root, glow, lamps, colliders)
   addRoadLamps(kit, root, glow, lamps)
@@ -775,6 +776,208 @@ export function buildVillage(kit: Kit): VillageBuild {
   addLandmarks(kit, root, glow, lamps, colliders)
 
   return { group: root, glow, lamps, colliders }
+}
+
+
+/**
+ * The buildings that are not institutions.
+ *
+ * A settlement is not only the places with a counter in it. These are the
+ * ones that explain the shape of the valley: a mill that outlived its river,
+ * a granary the flood taught them to build on stilts, a toll house nobody
+ * collects a toll at any more, a cottage left standing empty since the Quiet
+ * Split. Each is a story you can walk into rather than read.
+ */
+interface Outbuilding {
+  name: string
+  x: number
+  z: number
+  facing: number
+  spec: (kit: Kit) => ShellSpec
+  dress?: (kit: Kit, g: THREE.Group, out: BuiltPlace) => void
+}
+
+const OUTBUILDINGS: Outbuilding[] = [
+  {
+    // the mill that outlived its river, beside the broken millstone
+    name: 'mill', x: -94, z: -30, facing: 2.4,
+    spec: (kit) => ({
+      w: 7, d: 7, wall: 5.6, roof: 'gable', rise: 2.4, door: 1.4,
+      walls: kit.paleStone, gable: kit.darkTimber, roofMat: kit.roofAlt, windows: 1, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      // the wheel, stopped, on the side the water used to run
+      const wheel = new THREE.Group()
+      wheel.position.set(-4.2, 2.4, 0)
+      wheel.rotation.z = 0.1
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2
+        const spoke = box(wheel, kit.darkTimber, 0.16, 4.4, 0.16, 0, 0, 0)
+        spoke.rotation.z = a
+        const paddle = box(wheel, kit.timber, 0.9, 0.5, 0.16, Math.cos(a) * 2.2, Math.sin(a) * 2.2, 0)
+        paddle.rotation.z = a
+      }
+      g.add(wheel)
+      out.solids.push({ x: -4.2, z: 0, r: 1.2, height: 5, kind: 'wheel' })
+      table(kit, g, 0, -1, 1.6, 1)
+      for (let i = 0; i < 4; i++) {
+        cyl(g, kit.thatch, 0.4, 0.46, 0.85, 7, -1.6 + i * 1.1, 0.87, 1.4)
+      }
+    },
+  },
+  {
+    // built up on stilts after the flood, and still built that way
+    name: 'granary', x: -68, z: 22, facing: 1.4,
+    spec: (kit) => ({
+      w: 6, d: 5.5, wall: 3.2, roof: 'gable', rise: 2.2, door: 1.3,
+      walls: kit.timber, gable: kit.timber, roofMat: kit.thatch, windows: 0, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      for (const dx of [-2.2, 2.2]) {
+        for (const dz of [-2, 2]) {
+          box(g, kit.stone, 0.5, 1.4, 0.5, dx, -0.7, dz)
+          // the mushroom caps that stop rats climbing the legs
+          cyl(g, kit.paleStone, 0.62, 0.42, 0.22, 8, dx, 0.05, dz)
+          out.solids.push({ x: dx, z: dz, r: 0.45, height: 1.4, kind: 'stilt' })
+        }
+      }
+      for (let i = 0; i < 5; i++) {
+        cyl(g, kit.thatch, 0.38, 0.44, 0.8, 7, -1.6 + (i % 3) * 1.4, 0.94, -1.2 + Math.floor(i / 3) * 1.6)
+      }
+    },
+  },
+  {
+    // where a toll was collected, in the years the bridge needed paying for
+    name: 'tollhouse', x: 112, z: -26, facing: 1.9,
+    spec: (kit) => ({
+      w: 4.5, d: 4.5, wall: 2.9, roof: 'hip', rise: 1.7, door: 1.2,
+      walls: kit.paleStone, roofMat: kit.roof, windows: 1, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      box(g, kit.darkTimber, 0.2, 1.1, 4.5, 3.4, 0.9, 0)
+      out.solids.push({ x: 3.4, z: 0, r: 0.4, height: 1.1, kind: 'barrier' })
+      stool(kit, g, 0, 0)
+    },
+  },
+  {
+    // empty since the Quiet Split, and nobody has quite claimed it
+    name: 'ruin', x: -84, z: -58, facing: 0.7,
+    spec: (kit) => ({
+      w: 7, d: 6, wall: 2.6, roof: 'flat', rise: 0.2, door: 1.5,
+      walls: kit.stone, roofMat: kit.darkTimber, windows: 0, frame: false,
+    }),
+    dress: (kit, g) => {
+      // the roof has mostly gone: a few rafters over an open room
+      for (let i = -3; i <= 3; i++) {
+        const beam = box(g, kit.darkTimber, 0.18, 0.18, 7, i * 1.1, 3.2, 0)
+        beam.rotation.z = 0.04 * i
+      }
+      box(g, kit.stone, 1.4, 1.0, 0.6, 2.4, 0.94, -2.4)
+      table(kit, g, -1, 0, 1.4, 0.8)
+    },
+  },
+  {
+    // the charcoal burner works where nobody has to smell it
+    name: 'charcoal', x: -58, z: -96, facing: 2.9,
+    spec: (kit) => ({
+      w: 4.2, d: 4, wall: 2.4, roof: 'gable', rise: 1.5, door: 1.2,
+      walls: kit.darkTimber, gable: kit.darkTimber, roofMat: kit.thatch, windows: 1, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      // the earth kiln, smoking quietly
+      const mound = cyl(g, kit.soil, 1.1, 2.1, 1.9, 10, 4.5, 0.95, 1)
+      mound.castShadow = true
+      out.solids.push({ x: 4.5, z: 1, r: 2, height: 2, kind: 'kiln' })
+      for (let i = 0; i < 6; i++) {
+        const log = cyl(g, kit.darkTimber, 0.2, 0.2, 2, 6, -3 + (i % 3) * 0.45, 0.2 + Math.floor(i / 3) * 0.42, 2)
+        log.rotation.z = Math.PI / 2
+      }
+    },
+  },
+  {
+    // for whoever eventually tries the lake again
+    name: 'boathouse', x: 106, z: 60, facing: 0.5,
+    spec: (kit) => ({
+      w: 6.5, d: 7, wall: 3.0, roof: 'gable', rise: 2.0, door: 3.4,
+      walls: kit.timber, gable: kit.timber, roofMat: kit.roofAlt, windows: 1, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      // a jetty out toward the water
+      for (let i = 0; i < 6; i++) {
+        box(g, kit.darkTimber, 2.4, 0.14, 0.9, 0, 0.4, 4.4 + i * 0.95)
+        if (i % 2 === 0) {
+          for (const dx of [-1, 1]) box(g, kit.darkTimber, 0.16, 1.2, 0.16, dx, -0.2, 4.4 + i * 0.95)
+        }
+      }
+      out.solids.push({ x: 0, z: 8, r: 0.6, height: 0.5, kind: 'jetty' })
+      // an upturned hull, patched and never used
+      const hull = cyl(g, kit.timber, 0.6, 0.9, 3.4, 7, -2, 0.9, 1)
+      hull.rotation.z = Math.PI / 2
+      hull.rotation.y = 0.2
+    },
+  },
+  {
+    // the schoolhouse annexe: where the chronicle is kept
+    name: 'archive', x: -34, z: 44, facing: 0.4,
+    spec: (kit) => ({
+      w: 6, d: 5.5, wall: 3.2, roof: 'hip', rise: 1.9, door: 1.4,
+      walls: kit.plaster, roofMat: kit.roofAlt, windows: 2,
+    }),
+    dress: (kit, g, out) => {
+      shelves(kit, g, -2.4, 0, 4, Math.PI / 2)
+      shelves(kit, g, 2.4, 0, 4, -Math.PI / 2)
+      table(kit, g, 0, 0.6, 1.6, 0.9)
+      stool(kit, g, 0, 1.6)
+      lantern(kit, g, out, 0, 3.0, 0)
+    },
+  },
+  {
+    // beehives at the bitter orchard, which is what the orchard is actually for
+    name: 'apiary', x: -110, z: 50, facing: 1.1,
+    spec: (kit) => ({
+      w: 3.6, d: 3.4, wall: 2.2, roof: 'gable', rise: 1.3, door: 1.1,
+      walls: kit.timber, gable: kit.timber, roofMat: kit.thatch, windows: 0, frame: false,
+    }),
+    dress: (kit, g, out) => {
+      for (let i = 0; i < 5; i++) {
+        const x = -4 - (i % 3) * 1.6
+        const z = 1 + Math.floor(i / 3) * 1.8
+        for (let tier = 0; tier < 3; tier++) {
+          cyl(g, kit.thatch, 0.42 - tier * 0.08, 0.5 - tier * 0.08, 0.32, 9, x, 0.5 + tier * 0.32, z)
+        }
+        out.solids.push({ x, z, r: 0.5, height: 1.4, kind: 'hive' })
+      }
+    },
+  },
+]
+
+function addOutbuildings(
+  kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: Lamp[], colliders: Solid[],
+): void {
+  for (const b of OUTBUILDINGS) {
+    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [] }
+    buildShell(kit, place.group, b.spec(kit), place)
+    b.dress?.(kit, place.group, place)
+
+    place.group.position.set(b.x, heightAt(b.x, b.z), b.z)
+    place.group.rotation.y = b.facing
+    place.group.updateMatrixWorld(true)
+
+    for (const m of place.glow) glow.push(m)
+    for (const l of place.lamps) {
+      lamps.push({ pos: l.pos.clone().applyMatrix4(place.group.matrixWorld), indoor: l.indoor })
+    }
+    const sin = Math.sin(b.facing)
+    const cos = Math.cos(b.facing)
+    for (const solid of place.solids) {
+      colliders.push({
+        ...solid,
+        x: b.x + solid.x * cos + solid.z * sin,
+        z: b.z - solid.x * sin + solid.z * cos,
+      })
+    }
+    root.add(place.group)
+  }
 }
 
 /**

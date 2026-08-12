@@ -10,8 +10,8 @@ import { memo } from 'react'
 import type { ItemId } from '../lab/inventory'
 import { itemName } from '../lab/items'
 import type { HudSnapshot } from '../render/world-view'
-import { itemGradient } from './item-visuals'
 import { Icon, type IconName } from './Icon'
+import { ItemIcon } from './ItemIcon'
 
 export interface ToastItem {
   id: number
@@ -36,7 +36,8 @@ export interface HudProps {
 }
 
 export type PanelId =
-  | 'talk' | 'pack' | 'journal' | 'society' | 'mind' | 'board' | 'atlas' | 'settings' | 'guide'
+  | 'talk' | 'pack' | 'journal' | 'society' | 'mind' | 'board' | 'atlas' | 'settings'
+  | 'guide' | 'shop'
 
 const TOOLS: { id: PanelId; icon: IconName; key: string; title: string }[] = [
   { id: 'board', icon: 'board', key: 'R', title: 'Requests' },
@@ -115,7 +116,7 @@ function Hotbar({
               <span className="n">{i + 1}</span>
               {item && count > 0 && (
                 <>
-                  <span className="icon" style={{ background: itemGradient(item) }} />
+                  <span className="icon"><ItemIcon id={item} size={30} /></span>
                   <span className="count">{count}</span>
                 </>
               )}

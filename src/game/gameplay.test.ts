@@ -312,13 +312,19 @@ describe('lore — the valley has a history you can walk into', () => {
     expect(landmarkNear(500, 500)).toBeNull()
   })
 
-  it('spreads them out, so finding one is not finding them all', () => {
+  it('spreads them out, so each is somewhere of its own', () => {
+    // Some are deliberately neighbours — a toll house belongs at a bridge —
+    // so what matters is that no two share a spot, and that standing at one
+    // resolves to exactly one of them.
     for (let i = 0; i < LANDMARKS.length; i++) {
       for (let j = i + 1; j < LANDMARKS.length; j++) {
         const a = LANDMARKS[i]
         const b = LANDMARKS[j]
-        expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThan(a.radius + b.radius)
+        expect(Math.hypot(a.x - b.x, a.z - b.z), `${a.id} and ${b.id}`).toBeGreaterThan(9)
       }
+    }
+    for (const l of LANDMARKS) {
+      expect(landmarkNear(l.x, l.z)?.id, `standing at ${l.id}`).toBe(l.id)
     }
   })
 

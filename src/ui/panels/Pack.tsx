@@ -14,7 +14,7 @@ import { nearestTower } from '../../lab/world'
 import { craft, hasInputs, RECIPES, STATION_LABEL, STATION_TOWERS } from '../../game/craft'
 import { HOTBAR_SLOTS, type PlayerProgress } from '../../game/progress'
 import { Panel } from '../Panel'
-import { itemGradient } from '../item-visuals'
+import { ItemIcon } from '../ItemIcon'
 
 export interface PackProps {
   sim: Sim
@@ -74,7 +74,7 @@ export function Pack({
                 onClick={() => setPicked(picked === id ? null : id)}
                 title={itemDef(id)?.effect}
               >
-                <span className="icon" style={{ background: itemGradient(id) }} />
+                <span className="icon"><ItemIcon id={id} size={30} /></span>
                 <span className="name">{itemName(id)}</span>
                 <span className="count">×{n}</span>
               </button>
@@ -98,7 +98,7 @@ export function Pack({
                   title={picked ? 'Put it here' : 'Clear this slot'}
                 >
                   <span className="n">{i + 1}</span>
-                  {id && <span className="icon" style={{ background: itemGradient(id) }} />}
+                  {id && <span className="icon"><ItemIcon id={id} size={26} /></span>}
                 </button>
               )
             })}
@@ -118,7 +118,7 @@ export function Pack({
               const ready = hasInputs(inv, r) && stationOk
               return (
                 <div className="recipe" key={r.id} data-recipe={r.id}>
-                  <span className="out" style={{ background: itemGradient(r.output.id) }} />
+                  <span className="out"><ItemIcon id={r.output.id} size={26} /></span>
                   <div className="info">
                     <b>{r.name}</b>
                     <p>{r.note}</p>

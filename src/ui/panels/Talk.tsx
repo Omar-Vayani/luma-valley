@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Sim } from '../../lab/sim'
 import type { DialogueTurn } from '../../lab/dialogue'
 import { deriveEmotion } from '../../lab/emotion'
+import { CONCEPTS, getWord } from '../../lab/language'
 import { Panel } from '../Panel'
 
 export interface TalkProps {
@@ -32,6 +33,9 @@ export function Talk({ sim, creatureId, distance, onClose, onSpoke, voice }: Tal
   const creature = sim.creatureById(creatureId)
   const [text, setText] = useState('')
   const [turns, setTurns] = useState<DialogueTurn[]>([])
+  const [teaching, setTeaching] = useState(false)
+  const [concept, setConcept] = useState<string>(CONCEPTS[0])
+  const [word, setWord] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
@@ -118,7 +122,65 @@ export function Talk({ sim, creatureId, distance, onClose, onSpoke, voice }: Tal
         {OPENERS.slice(0, 6).map((o) => (
           <button key={o} className="chip" onClick={() => say(o)} disabled={outOfEarshot}>{o}</button>
         ))}
+        <button
+          className="chip"
+          onClick={() => setTeaching((v) => !v)}
+          disabled={outOfEarshot}
+          style={teaching ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+        >
+          teach a word…
+        </button>
       </div>
+
+      {teaching && (
+        <div className="card" style={{ marginBottom: 10 }} data-teach>
+          <p className="small faint" style={{ margin: '0 0 8px' }}>
+            Say a word while pointing at a thing and they will start using it for that thing —
+            and so will anyone else in earshot. It is how Haven ends up with its own words.
+          </p>
+          <div className="row" style={{ gap: 6 }}>
+            <select
+              className="field"
+              style={{ width: 130 }}
+              value={concept}
+              onChange={(e) => setConcept(e.target.value)}
+            >
+              {CONCEPTS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input
+              className="field"
+              value={word}
+              placeholder="your word for it"
+              onChange={(e) => setWord(e.target.value)}
+              data-teach-word
+            />
+            <button
+              className="btn primary"
+              disabled={!word.trim()}
+              onClick={() => {
+                sim.playerTeach(concept, word.trim())
+                setWord('')
+                setTurns((prev) => [...prev.slice(-14), {
+                  speakerId: 0, listenerId: creatureId,
+                  text: `"${word.trim()}" — ${concept}`,
+                  semantic: { kind: 'greet' } as DialogueTurn['semantic'],
+                  believed: true, obeyed: false, tick: sim.time,
+                }])
+                onSpoke(creatureId)
+              }}
+            >
+              Teach
+            </button>
+          </div>
+          <p className="small muted" style={{ margin: '8px 0 0' }}>
+            {creature.name} says{' '}
+            {CONCEPTS.filter((c) => getWord(creature.language, c))
+              .slice(0, 6)
+              .map((c) => `"${getWord(creature.language, c)}" for ${c}`)
+              .join(', ') || 'nothing in particular yet'}.
+          </p>
+        </div>
+      )}
 
       <form
         className="talk-input"

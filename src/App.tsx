@@ -14,6 +14,7 @@ import { loadSim, saveSim, type LabSave } from './lab/save'
 import { loadWorldBackup, loadWorldBlob, saveWorldBlob } from './lab/creature-storage'
 import { loadSettings, saveSettings, type QualityPreset } from './lab/settings'
 import { countItem, type ItemId } from './lab/inventory'
+import type { TowerId } from './lab/world'
 import { itemName } from './lab/items'
 import { formatStory, storiesSince } from './lab/story'
 
@@ -39,6 +40,7 @@ import { Board } from './ui/panels/Board'
 import { Atlas } from './ui/panels/Atlas'
 import { Settings } from './ui/panels/Settings'
 import { Guide } from './ui/panels/Guide'
+import { Shop } from './ui/panels/Shop'
 
 const AUTOSAVE_EVERY = 20000
 const SENSITIVITY_KEY = 'luma-haven-sensitivity'
@@ -98,6 +100,7 @@ export default function App(): React.ReactElement {
   const [hud, setHud] = useState<HudSnapshot>(EMPTY_HUD)
   const [panel, setPanel] = useState<PanelId | null>(null)
   const [talkId, setTalkId] = useState<number | null>(null)
+  const [shopTower, setShopTower] = useState<TowerId | null>(null)
   const [mindId, setMindId] = useState<number | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const [regionTitle, setRegionTitle] = useState<{ name: string; key: number } | null>(null)
@@ -160,6 +163,10 @@ export default function App(): React.ReactElement {
       },
       onGathered: () => redraw(),
       onPointerLock: setLocked,
+      onShop: (tower) => {
+        setShopTower(tower)
+        setPanel('shop')
+      },
     })
     viewRef.current = view
     view.input.setSensitivity(sensitivity)
@@ -467,6 +474,16 @@ export default function App(): React.ReactElement {
             simRef.current = next
             location.reload()
           }}
+        />
+      )}
+
+      {sim && panel === 'shop' && shopTower && (
+        <Shop
+          sim={sim}
+          tower={shopTower}
+          onClose={closePanel}
+          onToast={toast}
+          onChanged={redraw}
         />
       )}
 
