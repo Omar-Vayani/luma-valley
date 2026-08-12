@@ -183,7 +183,10 @@ const JOB_TOWER: Record<JobId, TowerId> = {
   teacher: 'school',
 }
 
-const SPEED = 0.3 // calm, visible pace — the player can keep up and interact
+// Haven is spread across a valley now, not a ring of kiosks, so a walker
+// covers ground at a brisk 2.7 units a second. Still slow enough to fall in
+// beside someone and talk to them while they go.
+const SPEED = 0.45
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3

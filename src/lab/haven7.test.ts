@@ -15,6 +15,10 @@ import { inspectSociety, inspectCreature } from './inspect'
 import { recordStory } from './story'
 import { scoreActions } from './mind'
 import { applySocialEvent } from './socialbond'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -55,7 +59,7 @@ describe('institutions keep their own hours and their own money', () => {
 
   it('a worker whose shop has taken nothing goes unpaid', () => {
     const s = createSim(3)
-    const keeper = s.spawnCreature(GEN(), -28, -28) // standing in the market
+    const keeper = s.spawnCreature(GEN(), at('food').x, at('food').z) // standing in the market
     claimJob(s.jobs, keeper, 'shopkeep')
     s.institutions.food.till = 0
     keeper.wallet = 0
@@ -180,7 +184,8 @@ describe('per-system profiling', () => {
 })
 
 describe('the settlement holds together over a long run', () => {
-  it('keeps a living population across several seeds', () => {
+  // a deliberate long soak: four seeds x 7000 ticks, so it needs room to run
+  it('keeps a living population across several seeds', { timeout: 30000 }, () => {
     for (const seed of [7, 42, 99, 2026]) {
       const s = createSim(seed)
       s.settings.lodNear = 200
@@ -239,14 +244,14 @@ describe('the settlement holds together over a long run', () => {
 
   it('a shut till can be robbed overnight, and the takings really go', () => {
     const s = createSim(31)
-    const burglar = s.spawnCreature(GEN({ theft: 0.98, courage: 0.9, greed: 0.9 }), -28, -28)
+    const burglar = s.spawnCreature(GEN({ theft: 0.98, courage: 0.9, greed: 0.9 }), at('food').x, at('food').z)
     burglar.chem.hunger = 0.2
     s.institutions.food.till = 40
     s.culture.norms.property = 0.05 // a town that has stopped minding
     s.time = Math.round(DAY_LENGTH * 0.5) // the middle of the night
     const before = s.institutions.food.till
     for (let i = 0; i < 400 && s.institutions.food.till === before; i++) {
-      burglar.pos = { x: -28, z: -28 }
+      burglar.pos = { x: at('food').x, z: at('food').z }
       s.tick()
     }
     expect(s.institutions.food.till).toBeLessThan(before)

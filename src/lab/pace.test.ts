@@ -3,6 +3,10 @@ import { createChem, tickChem, applyPlay } from './chem'
 import { randomGenome, type Genome } from './genetics'
 import { createSim } from './sim'
 import { TOWERS, TOWER_IDS } from './world'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -27,7 +31,7 @@ describe('play/exercise tower — strength and joy', () => {
     expect(TOWER_IDS).toContain('play')
     const play = TOWERS.find((t) => t.id === 'play')
     expect(play).toBeDefined()
-    expect(play?.label).toBe('gym')
+    expect(play?.label).toBe('The Green')
   })
 
   it('playing raises pleasure and strength', () => {
@@ -41,10 +45,10 @@ describe('play/exercise tower — strength and joy', () => {
 
   it('a creature at the play tower plays instead of starving', () => {
     const s = createSim(99)
-    const c = s.spawnCreature(GEN(), 0, 36) // at play tower (gym)
+    const c = s.spawnCreature(GEN(), at('play').x, at('play').z) // at play tower (gym)
     c.chem.hunger = 0.4
     c.chem.pleasure = 0.2 // bored → seeks play
-    c.pos = { x: 0, z: 36 }
+    c.pos = { x: at('play').x, z: at('play').z }
     c.learnTower('play')
     s.tick()
     expect(c.action).toBe('play')

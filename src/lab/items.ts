@@ -115,6 +115,24 @@ export const ITEM_CATALOG: Record<ItemId, ItemDef> = {
     id: 'grain', name: 'field grain', category: 'material', value: 2, weight: 1.2, rarity: 0.15,
     acceptance: 1, durability: -1, effect: 'becomes bread at the market',
   },
+  berry: {
+    id: 'berry', name: 'hedge berries', category: 'food', value: 1, weight: 0.2, rarity: 0.05,
+    acceptance: 1, durability: 0, effect: 'a handful off the bush',
+    use: { hunger: 0.16, thirst: 0.06, pleasure: 0.05 },
+  },
+  stone: {
+    id: 'stone', name: 'river stone', category: 'material', value: 2, weight: 3, rarity: 0.2,
+    acceptance: 1, durability: -1, effect: 'raw building material',
+  },
+  fish: {
+    id: 'fish', name: 'silverfin', category: 'food', value: 4, weight: 0.8, rarity: 0.3,
+    acceptance: 1, durability: 0, effect: 'a proper meal, if you can catch one',
+    use: { hunger: 0.5, pleasure: 0.15, health: 0.04 },
+  },
+  lantern: {
+    id: 'lantern', name: 'valley lantern', category: 'tool', value: 9, weight: 1.5, rarity: 0.5,
+    acceptance: 1, durability: -1, effect: 'set it down and it burns all night',
+  },
 }
 
 export const ITEM_LIST: ItemDef[] = Object.values(ITEM_CATALOG)

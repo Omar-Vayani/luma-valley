@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createSim } from './sim'
 import { randomGenome, type Genome } from './genetics'
 import { towerAt } from './world'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -35,8 +39,8 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
 
   it('children inherit the parents genome (gene crossover on birth)', () => {
     const s = createSim(2028)
-    const a = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), -36, 0) // at homes
-    const b = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), -43, 0)
+    const a = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), at('homes').x, at('homes').z) // at homes
+    const b = s.spawnCreature(GEN({ aggression: 0.9, curiosity: 0.9 }), at('homes').x - 7, at('homes').z + 0)
     a.partnerId = b.id
     b.partnerId = a.id
     a.chem.bond = 1
@@ -44,7 +48,8 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     a.age = 700 // old enough to procreate
     b.age = 700
     const before = s.creatures.length
-    for (let i = 0; i < 60; i++) s.tick()
+    // the hearths are a walk from the commons hall, so give them time to nest
+    for (let i = 0; i < 200; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
     const child = s.creatures[s.creatures.length - 1]
     // child's genome came from the parents: aggression is high, not random-low

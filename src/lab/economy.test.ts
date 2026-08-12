@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createEconomy, tickEconomy, buyFromTower, workShift, marketPrice, WORK_SHIFT_TICKS } from './economy'
 import { createSim } from './sim'
 import { randomGenome, type Genome } from './genetics'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -62,7 +66,7 @@ describe('economy — nothing is free', () => {
 
   it('a creature stays at work for several ticks before getting paid', () => {
     const s = createSim(1)
-    const c = s.spawnCreature(GEN(), 0, 52) // at the work tower
+    const c = s.spawnCreature(GEN(), at('work').x, at('work').z) // at the work tower
     c.wallet = 0
     c.chem.hunger = 0.3 // hungry + broke → motivated to earn
     s.tick()
@@ -75,7 +79,7 @@ describe('economy — nothing is free', () => {
 describe('economy — buying in the sim', () => {
   it('a creature with coins buys food at the food tower (nothing free)', () => {
     const s = createSim(2)
-    const c = s.spawnCreature(GEN(), -28, -28) // at food tower
+    const c = s.spawnCreature(GEN(), at('food').x, at('food').z) // at food tower
     c.wallet = 20
     c.chem.hunger = 0.2
     for (let i = 0; i < 5; i++) s.tick()
@@ -85,7 +89,7 @@ describe('economy — buying in the sim', () => {
 
   it('a broke creature cannot eat and goes to work instead', () => {
     const s = createSim(3)
-    const c = s.spawnCreature(GEN(), -28, -28) // at food tower, broke
+    const c = s.spawnCreature(GEN(), at('food').x, at('food').z) // at food tower, broke
     c.wallet = 0
     c.chem.hunger = 0.2
     c.learnTower('work') // has explored and knows where work is

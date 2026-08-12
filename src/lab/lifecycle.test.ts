@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createSim } from './sim'
 import { randomGenome, type Genome } from './genetics'
 import { AGE_LIMIT_BASE, procreationCost, agingDamage, isAgeProtected, canProcreate } from './lifecycle'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -70,8 +74,8 @@ describe('lifecycle — sleep suspension, population control, player bonds', () 
     expect(canProcreate(0.5, 0.5, 700)).toBe(true)
     // and the sim respects it while both are still exhausted
     const s = createSim(5)
-    const a = s.spawnCreature(GEN(), -36, 0) // at homes
-    const b = s.spawnCreature(GEN(), -35, 0)
+    const a = s.spawnCreature(GEN(), at('homes').x, at('homes').z) // at homes
+    const b = s.spawnCreature(GEN(), at('homes').x + 1, at('homes').z + 0)
     a.partnerId = b.id
     b.partnerId = a.id
     a.chem.bond = 1
@@ -87,8 +91,8 @@ describe('lifecycle — sleep suspension, population control, player bonds', () 
 
   it('well-fed parents can procreate (energy cost paid)', () => {
     const s = createSim(6)
-    const a = s.spawnCreature(GEN(), -36, 0) // at homes
-    const b = s.spawnCreature(GEN(), -35, 0)
+    const a = s.spawnCreature(GEN(), at('homes').x, at('homes').z) // at homes
+    const b = s.spawnCreature(GEN(), at('homes').x + 1, at('homes').z + 0)
     a.partnerId = b.id
     b.partnerId = a.id
     a.chem.bond = 1
