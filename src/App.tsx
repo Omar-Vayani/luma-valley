@@ -270,6 +270,10 @@ export default function App(): React.ReactElement {
   }, [panel])
 
   useEffect(() => {
+    viewRef.current?.setHeld(progressRef.current.hotbar[slot] ?? null)
+  }, [slot, panel])
+
+  useEffect(() => {
     viewRef.current?.input.setSensitivity(sensitivity)
     localStorage.setItem(SENSITIVITY_KEY, String(sensitivity))
   }, [sensitivity])

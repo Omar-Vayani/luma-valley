@@ -20,6 +20,7 @@ import { loadPropGeometries } from './assets'
 import { ScatterView } from './scatter-view'
 import { LumaView } from './luma'
 import { Fx } from './fx'
+import { ViewModel } from './viewmodel'
 import { PlayerController, type Collider } from '../game/controller'
 import { Input } from '../game/input'
 import {
@@ -121,6 +122,7 @@ export class WorldView {
   private scatterView: ScatterView | null = null
   private luma = new LumaView()
   private fx = new Fx()
+  private viewmodel: ViewModel
   private controller: PlayerController
   readonly input: Input
 
@@ -170,6 +172,8 @@ export class WorldView {
     this.engine = new Engine(container, sim.settings.quality)
     this.atmosphere = new Atmosphere(this.engine.scene)
     this.controller = new PlayerController(sim.player.pos.x, sim.player.pos.z)
+    this.viewmodel = new ViewModel(this.engine.camera)
+    this.engine.scene.add(this.engine.camera)
     this.input = new Input(this.engine.canvas)
     this.input.onLockChange = (locked) => this.callbacks.onPointerLock(locked)
 
@@ -383,6 +387,7 @@ export class WorldView {
 
     const fov = this.controller.applyTo(this.engine.camera, this.baseFov, dt)
     this.engine.setFov(fov)
+    this.viewmodel.update(dt, this.controller.gait, this.elapsed, this.controller.underwater)
 
     // the simulation only knows about the ground plane
     this.sim.player.pos.x = this.controller.position.x
@@ -516,6 +521,7 @@ export class WorldView {
       this.holdElapsed = 0
       this.holdFor = 0
     }
+    this.viewmodel.setWorking(this.holdFor > 0 ? Math.min(1, this.holdElapsed / this.holdFor) : 0)
   }
 
   private updateHold(dt: number): void {
@@ -562,6 +568,7 @@ export class WorldView {
   interact(): void {
     const target = this.target
     if (!target) return
+    if (target.kind !== 'node') this.viewmodel.swing()
     switch (target.kind) {
       case 'creature': {
         const c = this.sim.creatureById(target.id)
@@ -621,8 +628,14 @@ export class WorldView {
     }
   }
 
+  /** What is in the player's hand, for the viewmodel. */
+  setHeld(item: ItemId | null): void {
+    this.viewmodel.setItem(item)
+  }
+
   /** Left click: give what you are holding, or use it on yourself. */
   useHeld(item: ItemId | null): void {
+    this.viewmodel.swing()
     if (!item) return
     if (countItem(this.sim.player.inventory, item) <= 0) return
     const target = this.target

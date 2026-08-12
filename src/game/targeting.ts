@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three'
 import type { Sim } from '../lab/sim'
-import type { Fixture } from '../lab/interact'
+import { REACH, type Fixture } from '../lab/interact'
 import { itemName } from '../lab/items'
 import type { ResourceNode } from '../world/scatter'
 import { heightAt, isUnderwater, WATER_LEVEL } from '../world/terrain'
@@ -25,7 +25,8 @@ export type Target =
   | { kind: 'landmark'; landmark: Landmark; label: string; verb: string; point: THREE.Vector3; distance: number }
   | { kind: 'water'; label: string; verb: string; point: THREE.Vector3; distance: number }
 
-export const REACH = 4.2
+/** Arm's length, and the same number the simulation's own reach checks use. */
+export { REACH } from '../lab/interact'
 /** How far away a name will appear over someone's head when you look at them. */
 export const GAZE_RANGE = 34
 

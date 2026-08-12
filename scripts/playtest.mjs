@@ -156,8 +156,22 @@ const targeting = await page.evaluate(() => {
   const l = window.luma
   const living = l.sim.creatures.filter((c) => c.alive)
   if (living.length < 2) return { ok: false, reason: 'not enough Luma' }
-  // stand between two of them and look at each in turn
-  const [a, b] = living
+  // the closest pair, so that standing between them puts both in reach
+  let a = living[0]
+  let b = living[1]
+  let best = Infinity
+  for (const x of living) {
+    for (const y of living) {
+      if (x.id >= y.id) continue
+      const d = Math.hypot(x.pos.x - y.pos.x, x.pos.z - y.pos.z)
+      if (d < best) {
+        best = d
+        a = x
+        b = y
+      }
+    }
+  }
+  if (best > 5) return { ok: false, reason: `nearest pair are ${best.toFixed(1)} m apart` }
   const mx = (a.pos.x + b.pos.x) / 2
   const mz = (a.pos.z + b.pos.z) / 2
   l.view.teleport(mx, mz)
