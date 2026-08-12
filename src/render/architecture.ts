@@ -10,6 +10,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { TOWERS, type Tower, type TowerKind } from '../lab/world'
+import type { Solid } from '../game/collision'
 import { heightAt, BRIDGE, distToRoad, ROADS } from '../world/terrain'
 import { LANDMARKS, type Landmark } from '../world/lore'
 
@@ -31,6 +32,7 @@ export interface Kit {
   glow: THREE.MeshStandardMaterial
   soil: THREE.MeshLambertMaterial
   leaf: THREE.MeshLambertMaterial
+  floor: THREE.MeshLambertMaterial
 }
 
 function lambert(color: string): THREE.MeshLambertMaterial {
@@ -59,6 +61,7 @@ export function makeKit(): Kit {
     }),
     soil: lambert('#6b4f34'),
     leaf: lambert('#4f7a3a'),
+    floor: lambert('#b39468'),
   }
 }
 
@@ -191,15 +194,6 @@ function windows(
   }
 }
 
-function door(parent: THREE.Object3D, kit: Kit, w: number, d: number): void {
-  const frame = box(parent, kit.darkTimber, 1.3, 2.1, 0.16, 0, 1.05, d / 2 + 0.02)
-  frame.castShadow = false
-  box(parent, kit.timber, 1.05, 1.9, 0.1, 0, 1.0, d / 2 + 0.1)
-  // step
-  box(parent, kit.paleStone, 1.8, 0.16, 0.7, 0, 0.08, d / 2 + 0.42)
-  void w
-}
-
 /** A hanging sign, painted in the building's own colour. */
 function signboard(parent: THREE.Object3D, kit: Kit, color: string, d: number): void {
   const post = box(parent, kit.darkTimber, 0.14, 1.0, 0.14, 1.5, 2.9, d / 2 + 0.3)
@@ -215,203 +209,416 @@ function signboard(parent: THREE.Object3D, kit: Kit, color: string, d: number): 
   parent.add(emblem)
 }
 
-// ---------------------------------------------------------------- buildings
+// ---------------------------------------------------------------- shells
 
 export interface BuiltPlace {
   group: THREE.Group
   /** panes and lanterns that should light up after dark */
   glow: THREE.Mesh[]
-  /** where a lamp should hang, for the point-light pool */
-  lamps: THREE.Vector3[]
+  /**
+   * Where a lamp hangs, for the point-light pool. Indoor ones burn during the
+   * day as well — a room with a roof on it is dark at noon, and the sun is not
+   * going to help.
+   */
+  lamps: Lamp[]
+  /** solid things, in the building's own local space */
+  solids: Solid[]
 }
+
+export interface Lamp {
+  pos: THREE.Vector3
+  indoor: boolean
+}
+
+export interface ShellSpec {
+  /** across the front */
+  w: number
+  /** front to back */
+  d: number
+  /** to the eaves */
+  wall: number
+  roof: 'gable' | 'hip' | 'flat'
+  rise: number
+  /** width of the doorway in the front wall; 0 for no way in */
+  door: number
+  walls: THREE.Material
+  gable?: THREE.Material
+  roofMat: THREE.Material
+  frame?: boolean
+  windows?: number
+  /** a second storey, for the grander places */
+  upper?: boolean
+}
+
+const WALL_T = 0.28
+
+/**
+ * Four walls with a gap for the door, a floor you can stand on, a roof over
+ * it, and the solids that stop you walking through any of it.
+ *
+ * Buildings used to be a single circle of collision with no inside at all.
+ * Making the walls real is what lets you step into the tavern, and it is also
+ * what stops you strolling diagonally through the bank.
+ */
+function buildShell(kit: Kit, g: THREE.Group, spec: ShellSpec, out: BuiltPlace): void {
+  const { w, d, wall } = spec
+  const half = { w: w / 2, d: d / 2 }
+  const total = spec.upper ? wall * 2 : wall
+
+  // footing and floor
+  box(g, kit.paleStone, w + 0.7, 0.42, d + 0.7, 0, 0.21, 0)
+  const floor = box(g, kit.floor, w - 0.1, 0.1, d - 0.1, 0, 0.44, 0)
+  floor.castShadow = false
+  floor.receiveShadow = true
+
+  const solid = (x: number, z: number, r: number): void => {
+    out.solids.push({ x, z, r, height: total + 0.6, kind: 'wall' })
+  }
+  /** A wall run, with collision along it. */
+  const run = (x1: number, z1: number, x2: number, z2: number): void => {
+    const len = Math.hypot(x2 - x1, z2 - z1)
+    if (len < 0.05) return
+    const cx = (x1 + x2) / 2
+    const cz = (z1 + z2) / 2
+    const angle = Math.atan2(x2 - x1, z2 - z1)
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(WALL_T, total, len), spec.walls)
+    panel.position.set(cx, 0.44 + total / 2, cz)
+    panel.rotation.y = angle
+    panel.castShadow = true
+    panel.receiveShadow = true
+    g.add(panel)
+    const steps = Math.max(1, Math.ceil(len / 0.9))
+    for (let i = 0; i <= steps; i++) {
+      const f = i / steps
+      solid(x1 + (x2 - x1) * f, z1 + (z2 - z1) * f, WALL_T * 0.8)
+    }
+  }
+
+  // back and sides
+  run(-half.w, -half.d, half.w, -half.d)
+  run(-half.w, -half.d, -half.w, half.d)
+  run(half.w, -half.d, half.w, half.d)
+
+  // front, with the doorway left open
+  if (spec.door > 0) {
+    const gap = spec.door / 2
+    run(-half.w, half.d, -gap, half.d)
+    run(gap, half.d, half.w, half.d)
+    // lintel over the opening, so the wall reads as continuous
+    box(g, spec.walls, spec.door + 0.2, total - 2.15, WALL_T, 0, 0.44 + 2.15 + (total - 2.15) / 2, half.d)
+    box(g, kit.darkTimber, spec.door + 0.4, 0.22, WALL_T + 0.1, 0, 0.44 + 2.2, half.d)
+    for (const side of [-1, 1]) {
+      box(g, kit.darkTimber, 0.18, 2.2, WALL_T + 0.08, side * (gap + 0.09), 0.44 + 1.1, half.d)
+    }
+    // step up to the door
+    box(g, kit.paleStone, spec.door + 0.9, 0.22, 0.9, 0, 0.33, half.d + 0.55)
+  } else {
+    run(-half.w, half.d, half.w, half.d)
+  }
+
+  if (spec.frame !== false) {
+    timberFrame(g, kit.darkTimber, w + 0.02, total, d + 0.02, 0.44)
+  }
+
+  const eaves = 0.44 + total
+  if (spec.roof === 'gable') {
+    gableRoof(g, spec.roofMat, spec.gable ?? spec.walls, w + 0.3, d + 0.3, spec.rise, eaves, 0.55)
+  } else if (spec.roof === 'hip') {
+    hipRoof(g, spec.roofMat, w + 1.4, d + 1.4, spec.rise, eaves)
+  } else {
+    const slab = box(g, spec.roofMat, w + 1.1, 0.3, d + 1.1, 0, eaves + 0.15, 0)
+    slab.castShadow = true
+  }
+
+  if (spec.windows) {
+    windows(g, kit, out, w, d, Math.min(2.0, 0.44 + wall * 0.55), spec.windows)
+    if (spec.upper) windows(g, kit, out, w, d, 0.44 + wall + wall * 0.5, spec.windows)
+  }
+}
+
+/** A lamp on a bracket, inside or out. */
+function lantern(
+  kit: Kit, parent: THREE.Object3D, out: BuiltPlace,
+  x: number, y: number, z: number, indoor = true,
+): void {
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.26), kit.glow)
+  lamp.position.set(x, y, z)
+  parent.add(lamp)
+  out.glow.push(lamp)
+  out.lamps.push({ pos: new THREE.Vector3(x, y, z), indoor })
+}
+
+/** A table with legs, which is most interiors. */
+function table(kit: Kit, parent: THREE.Object3D, x: number, z: number, w = 1.6, d = 0.9): void {
+  box(parent, kit.timber, w, 0.1, d, x, 1.24, z)
+  for (const dx of [-w / 2 + 0.14, w / 2 - 0.14]) {
+    for (const dz of [-d / 2 + 0.12, d / 2 - 0.12]) {
+      box(parent, kit.darkTimber, 0.11, 0.7, 0.11, x + dx, 0.89, z + dz)
+    }
+  }
+}
+
+function stool(kit: Kit, parent: THREE.Object3D, x: number, z: number): void {
+  box(parent, kit.timber, 0.36, 0.08, 0.36, x, 0.94, z)
+  for (const dx of [-0.13, 0.13]) {
+    for (const dz of [-0.13, 0.13]) {
+      box(parent, kit.darkTimber, 0.06, 0.46, 0.06, x + dx, 0.71, z + dz)
+    }
+  }
+}
+
+function shelves(kit: Kit, parent: THREE.Object3D, x: number, z: number, w: number, ry = 0): void {
+  const rack = new THREE.Group()
+  rack.position.set(x, 0, z)
+  rack.rotation.y = ry
+  for (let i = 0; i < 3; i++) {
+    box(rack, kit.timber, w, 0.07, 0.4, 0, 1.0 + i * 0.55, 0)
+  }
+  for (const dx of [-w / 2 + 0.08, w / 2 - 0.08]) {
+    box(rack, kit.darkTimber, 0.1, 1.8, 0.4, dx, 1.34, 0)
+  }
+  // things on the shelves
+  for (let i = 0; i < 7; i++) {
+    const shelf = i % 3
+    box(rack, i % 2 ? kit.thatch : kit.cloth, 0.2, 0.26, 0.2,
+      -w / 2 + 0.35 + (i % 4) * (w / 5), 1.16 + shelf * 0.55, 0)
+  }
+  parent.add(rack)
+}
+
+function bed(kit: Kit, parent: THREE.Object3D, x: number, z: number, ry = 0): void {
+  const b = new THREE.Group()
+  b.position.set(x, 0, z)
+  b.rotation.y = ry
+  box(b, kit.darkTimber, 1.1, 0.32, 2.0, 0, 0.66, 0)
+  box(b, kit.plaster, 1.0, 0.18, 1.8, 0, 0.9, 0.05)
+  box(b, kit.cloth, 1.02, 0.1, 1.1, 0, 1.0, -0.3)
+  box(b, kit.darkTimber, 1.15, 0.6, 0.12, 0, 1.1, -1.0)
+  parent.add(b)
+}
+
+function hearth(kit: Kit, parent: THREE.Object3D, out: BuiltPlace, x: number, z: number): void {
+  box(parent, kit.stone, 1.5, 1.2, 0.6, x, 1.04, z)
+  box(parent, kit.stone, 1.7, 0.16, 0.7, x, 1.7, z)
+  const fire = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), kit.glow)
+  fire.position.set(x, 0.78, z + 0.24)
+  parent.add(fire)
+  out.glow.push(fire)
+  out.lamps.push({ pos: new THREE.Vector3(x, 0.9, z + 0.3), indoor: true })
+}
+
+// ---------------------------------------------------------------- buildings
 
 function buildHouse(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  const w = 6.2
-  const d = 5.4
-  const h = 3.1
-  box(g, kit.paleStone, w + 0.5, 0.5, d + 0.5, 0, 0.25, 0)
-  box(g, kit.plaster, w, h, d, 0, 0.5 + h / 2, 0)
-  timberFrame(g, kit.darkTimber, w, h, d, 0.5)
-  gableRoof(g, kit.roof, kit.plasterWarm, w, d, 2.4, 0.5 + h)
-  door(g, kit, w, d)
-  windows(g, kit, out, w, d, 2.0, 2)
-  // chimney with a cap
-  const ch = box(g, kit.stone, 0.9, 3.2, 0.9, w / 2 - 1.2, 0.5 + h + 0.8, -d / 2 + 1.2)
+  const w = 8
+  const d = 7
+  buildShell(kit, g, {
+    w, d, wall: 3.1, roof: 'gable', rise: 2.6, door: 1.5,
+    walls: kit.plaster, gable: kit.plasterWarm, roofMat: kit.roof, windows: 2,
+  }, out)
+
+  // a chimney, and something burning at the bottom of it
+  const ch = box(g, kit.stone, 1.0, 4.4, 1.0, w / 2 - 1.4, 2.6, -d / 2 + 1.3)
   ch.castShadow = true
-  box(g, kit.stone, 1.1, 0.2, 1.1, w / 2 - 1.2, 0.5 + h + 2.5, -d / 2 + 1.2)
+  box(g, kit.stone, 1.2, 0.22, 1.2, w / 2 - 1.4, 4.9, -d / 2 + 1.3)
+
+  // inside: a bed, a hearth, a table to eat at
+  hearth(kit, g, out, w / 2 - 1.4, -d / 2 + 0.9)
+  bed(kit, g, -w / 2 + 1.0, -d / 2 + 1.6, 0)
+  table(kit, g, -0.4, 0.9, 1.4, 0.8)
+  stool(kit, g, -1.4, 0.9)
+  stool(kit, g, 0.7, 0.9)
+  shelves(kit, g, -w / 2 + 0.5, 1.6, 1.6, Math.PI / 2)
   signboard(g, kit, t.color, d)
-  out.lamps.push(new THREE.Vector3(0, 2.6, d / 2 + 0.5))
+  out.lamps.push({ pos: new THREE.Vector3(0, 2.6, d / 2 + 0.6), indoor: false })
 }
 
 function buildShop(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  const w = 7
-  const d = 6
-  const h = 3.4
-  box(g, kit.paleStone, w + 0.6, 0.5, d + 0.6, 0, 0.25, 0)
-  box(g, kit.plasterWarm, w, h, d, 0, 0.5 + h / 2, 0)
-  timberFrame(g, kit.darkTimber, w, h, d, 0.5)
-  gableRoof(g, kit.roofAlt, kit.plaster, w, d, 2.1, 0.5 + h)
-  door(g, kit, w, d)
-  windows(g, kit, out, w, d, 2.1, 2)
-  // shop counter under a striped awning
-  const awning = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 2.0), kit.cloth)
-  awning.position.set(-1.2, 3.0, d / 2 + 1.0)
-  awning.rotation.x = -0.22
+  const w = 9
+  const d = 8
+  buildShell(kit, g, {
+    w, d, wall: 3.4, roof: 'gable', rise: 2.4, door: 1.6,
+    walls: kit.plasterWarm, gable: kit.plaster, roofMat: kit.roofAlt, windows: 2,
+  }, out)
+
+  // a serving counter across the room, and stock behind it
+  box(g, kit.timber, w - 2.4, 0.9, 0.7, 0, 0.89, 1.1)
+  box(g, kit.darkTimber, w - 2.2, 0.14, 0.9, 0, 1.36, 1.1)
+  shelves(kit, g, 0, -d / 2 + 0.7, w - 3, 0)
+  for (let i = 0; i < 3; i++) {
+    cyl(g, kit.timber, 0.34, 0.4, 0.85, 8, -w / 2 + 1.1 + i * 0.95, 0.87, -1.2)
+  }
+  lantern(kit, g, out, 0, 3.0, 0)
+
+  // an awning and a stall out front, so trade is visible from the road
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(w - 1.5, 0.14, 2.2), kit.cloth)
+  awning.position.set(0, 3.2, d / 2 + 1.2)
+  awning.rotation.x = -0.2
   awning.castShadow = true
   g.add(awning)
-  box(g, kit.timber, 0.14, 2.4, 0.14, -3.1, 1.2, d / 2 + 1.8)
-  box(g, kit.timber, 0.14, 2.4, 0.14, 0.7, 1.2, d / 2 + 1.8)
-  box(g, kit.timber, 4.2, 0.24, 1.1, -1.2, 1.1, d / 2 + 1.2)
+  for (const dx of [-(w / 2 - 1), w / 2 - 1]) {
+    box(g, kit.timber, 0.15, 2.6, 0.15, dx, 1.5, d / 2 + 2.1)
+    out.solids.push({ x: dx, z: d / 2 + 2.1, r: 0.22, height: 2.6, kind: 'post' })
+  }
+  box(g, kit.timber, w - 2.4, 0.24, 1.1, 0, 1.15, d / 2 + 1.5)
   signboard(g, kit, t.color, d)
-  out.lamps.push(new THREE.Vector3(-1.2, 2.8, d / 2 + 1.6))
+  out.lamps.push({ pos: new THREE.Vector3(-1.2, 3.0, d / 2 + 1.6), indoor: false })
 }
 
 function buildHall(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  const w = 10
-  const d = 8
-  const h = 5.2
-  box(g, kit.stone, w + 1.0, 0.7, d + 1.0, 0, 0.35, 0)
-  box(g, kit.plaster, w, h, d, 0, 0.7 + h / 2, 0)
-  timberFrame(g, kit.darkTimber, w, h, d, 0.7)
-  hipRoof(g, kit.roof, w + 1.6, d + 1.6, 3.2, 0.7 + h)
+  const w = 13
+  const d = 11
+  buildShell(kit, g, {
+    w, d, wall: 3.6, roof: 'hip', rise: 3.4, door: 2.2,
+    walls: kit.plaster, roofMat: kit.roof, windows: 3, upper: true,
+  }, out)
+
   // a porch with columns, which is what makes a building look civic
-  for (const x of [-2.2, 2.2]) {
-    cyl(g, kit.paleStone, 0.32, 0.36, 3.4, 8, x, 1.7, d / 2 + 1.4).castShadow = true
+  for (const x of [-2.6, 2.6]) {
+    const col = cyl(g, kit.paleStone, 0.34, 0.4, 4.0, 8, x, 2.0, d / 2 + 1.8)
+    col.castShadow = true
+    out.solids.push({ x, z: d / 2 + 1.8, r: 0.5, height: 4, kind: 'column' })
   }
-  const porch = box(g, kit.roofAlt, 6.2, 0.3, 3.4, 0, 3.55, d / 2 + 1.0)
+  const porch = box(g, kit.roofAlt, 7.4, 0.34, 4.0, 0, 4.15, d / 2 + 1.2)
   porch.castShadow = true
-  box(g, kit.darkTimber, 1.8, 2.6, 0.18, 0, 2.0, d / 2 + 0.02)
-  box(g, kit.paleStone, 6.6, 0.2, 1.2, 0, 0.8, d / 2 + 2.4)
-  box(g, kit.paleStone, 7.0, 0.2, 1.2, 0, 0.6, d / 2 + 3.2)
-  windows(g, kit, out, w, d, 3.0, 3)
+  box(g, kit.paleStone, 8.0, 0.22, 1.3, 0, 0.42, d / 2 + 3.3)
+
+  // inside: a long table, benches, a fire, and a board of notices
+  table(kit, g, 0, -1.2, 6.0, 1.6)
+  for (let i = -2; i <= 2; i++) {
+    stool(kit, g, i * 1.3, -2.4)
+    stool(kit, g, i * 1.3, 0)
+  }
+  hearth(kit, g, out, -w / 2 + 1.3, -d / 2 + 1.2)
+  shelves(kit, g, w / 2 - 0.6, -1, 4, -Math.PI / 2)
+  lantern(kit, g, out, 0, 3.4, -1)
+  lantern(kit, g, out, 0, 3.4, 3)
   signboard(g, kit, t.color, d + 2)
-  out.lamps.push(new THREE.Vector3(-2.6, 3.2, d / 2 + 1.4))
-  out.lamps.push(new THREE.Vector3(2.6, 3.2, d / 2 + 1.4))
 }
 
 function buildMarket(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  // a small lock-up at the back, and stalls in front of it
-  const w = 6
-  const d = 5
-  const h = 3
+  const w = 9
+  const d = 7
   const lockup = new THREE.Group()
-  lockup.position.z = -2.5
+  lockup.position.z = -3
   g.add(lockup)
-  box(lockup, kit.paleStone, w + 0.5, 0.4, d + 0.5, 0, 0.2, 0)
-  box(lockup, kit.plasterWarm, w, h, d, 0, 0.4 + h / 2, 0)
-  timberFrame(lockup, kit.darkTimber, w, h, d, 0.4)
-  gableRoof(lockup, kit.roof, kit.plasterWarm, w, d, 1.9, 0.4 + h)
-  windows(lockup, kit, out, w, d, 2.0, 2)
-  box(lockup, kit.darkTimber, 1.3, 2.1, 0.14, 0, 1.45, d / 2 + 0.02)
+  const inner: BuiltPlace = { group: lockup, glow: out.glow, lamps: [], solids: [] }
+  buildShell(kit, lockup, {
+    w, d, wall: 3.2, roof: 'gable', rise: 2.2, door: 1.6,
+    walls: kit.plasterWarm, gable: kit.plasterWarm, roofMat: kit.roof, windows: 2,
+  }, inner)
+  for (const s of inner.solids) out.solids.push({ ...s, z: s.z - 3 })
+  for (const l of inner.lamps) {
+    out.lamps.push({ pos: l.pos.clone().add(new THREE.Vector3(0, 0, -3)), indoor: l.indoor })
+  }
+  shelves(kit, lockup, 0, -d / 2 + 0.7, w - 3, 0)
+  box(lockup, kit.timber, w - 2.6, 0.9, 0.7, 0, 0.89, 1.2)
 
   const stallColors = [kit.cloth, kit.clothAlt, kit.cloth]
   for (let i = 0; i < 3; i++) {
-    const sx = -4.6 + i * 4.6
-    const sz = 3.2
-    for (const dx of [-1.7, 1.7]) {
-      for (const dz of [-1.1, 1.1]) {
-        box(g, kit.timber, 0.13, 2.3, 0.13, sx + dx, 1.15, sz + dz)
+    const sx = -5 + i * 5
+    const sz = 4.2
+    for (const dx of [-1.9, 1.9]) {
+      for (const dz of [-1.2, 1.2]) {
+        box(g, kit.timber, 0.14, 2.4, 0.14, sx + dx, 1.2, sz + dz)
       }
+      out.solids.push({ x: sx + dx, z: sz, r: 0.2, height: 2.4, kind: 'post' })
     }
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.12, 2.8), stallColors[i])
-    canopy.position.set(sx, 2.45, sz)
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.13, 3.0), stallColors[i])
+    canopy.position.set(sx, 2.55, sz)
     canopy.rotation.x = 0.1
     canopy.castShadow = true
     g.add(canopy)
-    box(g, kit.timber, 3.7, 0.2, 1.5, sx, 1.05, sz - 0.4)
-    // produce: a couple of crates and a sack
-    box(g, kit.darkTimber, 0.7, 0.7, 0.7, sx - 1.1, 1.5, sz - 0.4)
-    box(g, kit.darkTimber, 0.6, 0.6, 0.6, sx + 1.0, 1.45, sz - 0.5)
-    cyl(g, kit.thatch, 0.36, 0.42, 0.7, 7, sx + 0.1, 1.5, sz - 0.45)
-    out.lamps.push(new THREE.Vector3(sx, 2.4, sz))
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.26), kit.glow)
-    lamp.position.set(sx + 1.7, 2.25, sz + 1.1)
-    g.add(lamp)
-    out.glow.push(lamp)
+    box(g, kit.timber, 4.0, 0.22, 1.6, sx, 1.1, sz - 0.4)
+    out.solids.push({ x: sx, z: sz - 0.4, r: 1.1, height: 1.1, kind: 'counter' })
+    box(g, kit.darkTimber, 0.7, 0.7, 0.7, sx - 1.2, 1.55, sz - 0.4)
+    box(g, kit.darkTimber, 0.6, 0.6, 0.6, sx + 1.1, 1.5, sz - 0.5)
+    cyl(g, kit.thatch, 0.36, 0.42, 0.7, 7, sx + 0.1, 1.55, sz - 0.45)
+    lantern(kit, g, out, sx + 1.8, 2.35, sz + 1.2, false)
   }
   signboard(g, kit, t.color, d)
 }
 
 function buildYard(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  // open shed
-  const w = 7
-  const d = 5
-  for (const dx of [-w / 2, w / 2]) {
-    for (const dz of [-d / 2, d / 2]) {
-      box(g, kit.timber, 0.26, 3.0, 0.26, dx, 1.5, dz - 1.5)
-    }
-  }
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 1.2, 0.24, d + 1.2), kit.roofAlt)
-  roof.position.set(0, 3.2, -1.5)
-  roof.rotation.x = 0.14
-  roof.castShadow = true
-  g.add(roof)
-  box(g, kit.darkTimber, w, 2.4, 0.3, 0, 1.2, -d / 2 - 1.5)
+  const w = 9
+  const d = 6
+  // an open-fronted shed: three walls and a roof
+  buildShell(kit, g, {
+    w, d, wall: 3.2, roof: 'flat', rise: 0.4, door: 5.5,
+    walls: kit.darkTimber, roofMat: kit.roofAlt, frame: false, windows: 1,
+  }, out)
 
-  // workbench, anvil, log pile, barrels
-  box(g, kit.timber, 3.0, 0.24, 1.2, -1.4, 1.0, -1.4)
-  for (const dx of [-2.6, -0.2]) box(g, kit.darkTimber, 0.2, 1.0, 0.2, dx, 0.5, -1.4)
-  cyl(g, kit.metal, 0.5, 0.62, 0.8, 6, 2.0, 0.4, -1.2).castShadow = true
-  box(g, kit.metal, 1.3, 0.5, 0.55, 2.0, 1.05, -1.2)
-  for (let i = 0; i < 5; i++) {
-    const log = cyl(g, kit.darkTimber, 0.24, 0.24, 2.4, 7, -3.2 + (i % 3) * 0.5, 0.24 + Math.floor(i / 3) * 0.46, 2.2)
+  table(kit, g, -1.6, -1.2, 3.0, 1.1)
+  cyl(g, kit.metal, 0.5, 0.62, 0.8, 6, 2.4, 0.84, -1.2).castShadow = true
+  box(g, kit.metal, 1.3, 0.5, 0.55, 2.4, 1.49, -1.2)
+  out.solids.push({ x: 2.4, z: -1.2, r: 0.7, height: 1.3, kind: 'anvil' })
+  shelves(kit, g, -w / 2 + 0.6, 0.6, 2.2, Math.PI / 2)
+
+  for (let i = 0; i < 6; i++) {
+    const log = cyl(g, kit.darkTimber, 0.24, 0.24, 2.4, 7, -4.2 + (i % 3) * 0.5, 0.66 + Math.floor(i / 3) * 0.46, 5.2)
     log.rotation.z = Math.PI / 2
     log.castShadow = true
   }
+  out.solids.push({ x: -3.7, z: 5.2, r: 1.4, height: 1.2, kind: 'logs' })
   for (let i = 0; i < 3; i++) {
-    cyl(g, kit.timber, 0.42, 0.48, 1.0, 8, 3.0 + i * 1.1, 0.5, 1.8).castShadow = true
+    cyl(g, kit.timber, 0.42, 0.48, 1.0, 8, 3.2 + i * 1.1, 0.9, 4.6).castShadow = true
+    out.solids.push({ x: 3.2 + i * 1.1, z: 4.6, r: 0.5, height: 1.0, kind: 'barrel' })
   }
-  // a brazier that burns after dark
-  cyl(g, kit.metal, 0.4, 0.28, 0.5, 8, 0, 0.75, 2.6)
-  for (const dx of [-0.25, 0.25]) box(g, kit.metal, 0.08, 0.9, 0.08, dx, 0.45, 2.6)
+
+  cyl(g, kit.metal, 0.4, 0.28, 0.5, 8, 0, 1.15, 5.4)
+  for (const dx of [-0.25, 0.25]) box(g, kit.metal, 0.08, 0.9, 0.08, dx, 0.85, 5.4)
   const fire = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 0), kit.glow)
-  fire.position.set(0, 1.0, 2.6)
+  fire.position.set(0, 1.4, 5.4)
   g.add(fire)
   out.glow.push(fire)
-  out.lamps.push(new THREE.Vector3(0, 1.2, 2.6))
+  out.lamps.push({ pos: new THREE.Vector3(0, 1.6, 5.4), indoor: false })
   signboard(g, kit, t.color, d)
 }
 
 function buildField(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  // a barn
-  const w = 8
-  const d = 6
-  const h = 3.6
-  box(g, kit.darkTimber, w, h, d, -1, h / 2, -4)
-  gableRoof(g, kit.roof, kit.darkTimber, w, d, 2.6, h)
-  box(g, kit.timber, 2.6, 2.8, 0.2, -1, 1.4, -4 + d / 2 + 0.02)
-  windows(g, kit, out, w, d, 2.4, 1)
-  g.children[g.children.length - 1].position.z -= 4
+  const barn = new THREE.Group()
+  barn.position.set(-1, 0, -5)
+  g.add(barn)
+  const inner: BuiltPlace = { group: barn, glow: out.glow, lamps: [], solids: [] }
+  buildShell(kit, barn, {
+    w: 9, d: 7, wall: 4.0, roof: 'gable', rise: 3.0, door: 2.6,
+    walls: kit.darkTimber, gable: kit.darkTimber, roofMat: kit.roof, frame: false, windows: 1,
+  }, inner)
+  for (const s of inner.solids) out.solids.push({ ...s, x: s.x - 1, z: s.z - 5 })
+  for (const l of inner.lamps) {
+    out.lamps.push({ pos: l.pos.clone().add(new THREE.Vector3(-1, 0, -5)), indoor: l.indoor })
+  }
+  for (let i = 0; i < 6; i++) {
+    cyl(barn, kit.thatch, 0.42, 0.5, 0.9, 7, -2.5 + (i % 3) * 1.2, 0.9, -1.5 + Math.floor(i / 3) * 1.2)
+  }
 
-  // ploughed rows
   for (let i = 0; i < 7; i++) {
-    const row = box(g, kit.soil, 14, 0.16, 0.9, 0, 0.08, 1 + i * 1.5)
+    const row = box(g, kit.soil, 15, 0.18, 1.0, 0, 0.09, 1 + i * 1.6)
     row.receiveShadow = true
   }
   // a scarecrow, because a field needs a silhouette
-  box(g, kit.timber, 0.16, 2.4, 0.16, 5, 1.2, 4)
-  box(g, kit.timber, 1.8, 0.14, 0.14, 5, 1.9, 4)
+  box(g, kit.timber, 0.16, 2.4, 0.16, 5.5, 1.2, 4)
+  box(g, kit.timber, 1.8, 0.14, 0.14, 5.5, 1.9, 4)
   const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.34, 0), kit.thatch)
-  head.position.set(5, 2.5, 4)
+  head.position.set(5.5, 2.5, 4)
   head.castShadow = true
   g.add(head)
-  box(g, kit.cloth, 1.1, 1.0, 0.2, 5, 1.6, 4)
-  signboard(g, kit, t.color, d)
+  box(g, kit.cloth, 1.1, 1.0, 0.2, 5.5, 1.6, 4)
+  signboard(g, kit, t.color, 7)
 }
 
 function buildGrove(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  // a ring of benches around a fire circle
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + 0.4
-    const bx = Math.cos(a) * 3.6
-    const bz = Math.sin(a) * 3.6
+    const bx = Math.cos(a) * 3.8
+    const bz = Math.sin(a) * 3.8
     const bench = new THREE.Group()
     box(bench, kit.timber, 2.2, 0.16, 0.5, 0, 0.5, 0)
     box(bench, kit.darkTimber, 0.2, 0.5, 0.4, -0.9, 0.25, 0)
@@ -419,6 +626,7 @@ function buildGrove(kit: Kit, t: Tower, out: BuiltPlace): void {
     bench.position.set(bx, 0, bz)
     bench.rotation.y = -a
     g.add(bench)
+    out.solids.push({ x: bx, z: bz, r: 0.8, height: 0.6, kind: 'bench' })
   }
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2
@@ -428,31 +636,30 @@ function buildGrove(kit: Kit, t: Tower, out: BuiltPlace): void {
   fire.position.set(0, 0.35, 0)
   g.add(fire)
   out.glow.push(fire)
-  out.lamps.push(new THREE.Vector3(0, 0.7, 0))
+  out.lamps.push({ pos: new THREE.Vector3(0, 0.7, 0), indoor: false })
   signboard(g, kit, t.color, 3)
 }
 
 function buildGraveyard(kit: Kit, t: Tower, out: BuiltPlace): void {
   const g = out.group
-  // low wall with a gate
-  const r = 7.5
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2
+  const r = 8
+  for (let i = 0; i < 30; i++) {
+    const a = (i / 30) * Math.PI * 2
     if (a > 3.6 && a < 4.3) continue // the gap the gate stands in
-    const seg = box(g, kit.stone, 1.3, 0.8, 0.5, Math.cos(a) * r, 0.4, Math.sin(a) * r)
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    const seg = box(g, kit.stone, 1.3, 0.9, 0.5, x, 0.45, z)
     seg.rotation.y = -a
     seg.castShadow = true
+    out.solids.push({ x, z, r: 0.6, height: 0.9, kind: 'wall' })
   }
-  for (const dx of [-1.2, 1.2]) {
-    box(g, kit.paleStone, 0.5, 2.6, 0.5, dx, 1.3, r - 0.6)
+  for (const dx of [-1.3, 1.3]) {
+    box(g, kit.paleStone, 0.5, 2.8, 0.5, dx, 1.4, r - 0.6)
+    out.solids.push({ x: dx, z: r - 0.6, r: 0.4, height: 2.8, kind: 'gatepost' })
   }
-  box(g, kit.darkTimber, 3.2, 0.24, 0.3, 0, 2.5, r - 0.6)
+  box(g, kit.darkTimber, 3.4, 0.26, 0.32, 0, 2.7, r - 0.6)
   signboard(g, kit, t.color, r)
-  out.lamps.push(new THREE.Vector3(0, 2.4, r - 0.6))
-  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.4, 0.28), kit.glow)
-  lamp.position.set(0, 2.3, r - 0.6)
-  g.add(lamp)
-  out.glow.push(lamp)
+  lantern(kit, g, out, 0, 2.4, r - 0.6, false)
 }
 
 const BUILDERS: Record<TowerKind, (kit: Kit, t: Tower, out: BuiltPlace) => void> = {
@@ -521,9 +728,9 @@ export function mergeByMaterial(group: THREE.Object3D, keep: Set<THREE.Object3D>
 export interface VillageBuild {
   group: THREE.Group
   glow: THREE.Mesh[]
-  lamps: THREE.Vector3[]
+  lamps: Lamp[]
   /** obstacles the player and creatures should not walk through */
-  colliders: { x: number; z: number; r: number }[]
+  colliders: Solid[]
 }
 
 /** Every building in the register, placed on the terrain and merged. */
@@ -531,11 +738,11 @@ export function buildVillage(kit: Kit): VillageBuild {
   const root = new THREE.Group()
   root.name = 'village'
   const glow: THREE.Mesh[] = []
-  const lamps: THREE.Vector3[] = []
-  const colliders: { x: number; z: number; r: number }[] = []
+  const lamps: Lamp[] = []
+  const colliders: Solid[] = []
 
   for (const t of TOWERS) {
-    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [] }
+    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [] }
     const builder = BUILDERS[t.kind] ?? buildHouse
     builder(kit, t, place)
 
@@ -543,18 +750,20 @@ export function buildVillage(kit: Kit): VillageBuild {
     place.group.rotation.y = t.facing
     place.group.updateMatrixWorld(true)
 
-    for (const m of place.glow) {
-      const world = new THREE.Vector3()
-      m.getWorldPosition(world)
-      glow.push(m)
-    }
+    for (const m of place.glow) glow.push(m)
     for (const l of place.lamps) {
-      lamps.push(l.clone().applyMatrix4(place.group.matrixWorld))
+      lamps.push({ pos: l.pos.clone().applyMatrix4(place.group.matrixWorld), indoor: l.indoor })
     }
 
-    // a building blocks movement, but a grove or a field does not
-    if (t.kind !== 'grove' && t.kind !== 'field' && t.kind !== 'graveyard') {
-      colliders.push({ x: t.x, z: t.z, r: t.radius * 0.62 })
+    // every wall, post and counter, rotated into the world
+    const sin = Math.sin(t.facing)
+    const cos = Math.cos(t.facing)
+    for (const solid of place.solids) {
+      colliders.push({
+        ...solid,
+        x: t.x + solid.x * cos + solid.z * sin,
+        z: t.z - solid.x * sin + solid.z * cos,
+      })
     }
     root.add(place.group)
   }
@@ -676,8 +885,8 @@ function addDressing(kit: Kit, root: THREE.Group): void {
 
 /** The well, the notice board, and the crossroads dressing. */
 function addPlaza(
-  kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: THREE.Vector3[],
-  colliders: { x: number; z: number; r: number }[],
+  kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: Lamp[],
+  colliders: Solid[],
 ): void {
   const g = new THREE.Group()
   const y = heightAt(0, 0)
@@ -707,7 +916,7 @@ function addPlaza(
   const bucket = cyl(g, kit.timber, 0.3, 0.26, 0.42, 8, 0, 2.3, 0)
   bucket.castShadow = true
   box(g, kit.metal, 0.03, 0.85, 0.03, 0, 2.75, 0)
-  colliders.push({ x: 0, z: 0, r: 1.9 })
+  colliders.push({ x: 0, z: 0, r: 1.9, height: 1.2, kind: 'well' })
 
   // the notice board, where Haven posts what it needs
   const board = new THREE.Group()
@@ -721,7 +930,7 @@ function addPlaza(
     note.rotation.z = (i - 1.5) * 0.06
   }
   g.add(board)
-  colliders.push({ x: 4.5, z: 3.2, r: 1.2 })
+  colliders.push({ x: 4.5, z: 3.2, r: 1.2, height: 2.4, kind: 'board' })
 
   // banners on poles at the four road mouths
   for (let i = 0; i < 4; i++) {
@@ -737,7 +946,7 @@ function addPlaza(
     lamp.position.set(0, 3.6, 0)
     pole.add(lamp)
     glow.push(lamp)
-    lamps.push(new THREE.Vector3(px, y + 3.6, pz))
+    lamps.push({ pos: new THREE.Vector3(px, y + 3.6, pz), indoor: false })
     g.add(pole)
   }
 
@@ -745,7 +954,7 @@ function addPlaza(
 }
 
 /** Lamp posts down the main roads, so the village reads at night. */
-function addRoadLamps(kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: THREE.Vector3[]): void {
+function addRoadLamps(kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: Lamp[]): void {
   const g = new THREE.Group()
   for (const road of ROADS.slice(0, 5)) {
     for (let i = 0; i < road.length - 1; i++) {
@@ -768,7 +977,7 @@ function addRoadLamps(kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: TH
         lamp.position.set(0.6, 3.25, 0)
         post.add(lamp)
         glow.push(lamp)
-        lamps.push(new THREE.Vector3(x + 0.6, y + 3.25, z))
+        lamps.push({ pos: new THREE.Vector3(x + 0.6, y + 3.25, z), indoor: false })
         g.add(post)
       }
     }
@@ -919,8 +1128,8 @@ function landmarkMesh(kit: Kit, l: Landmark): THREE.Group {
 }
 
 function addLandmarks(
-  kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: THREE.Vector3[],
-  colliders: { x: number; z: number; r: number }[],
+  kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: Lamp[],
+  colliders: Solid[],
 ): void {
   for (const l of LANDMARKS) {
     if (l.kind === 'well' || l.kind === 'bridge') continue
@@ -932,10 +1141,10 @@ function addLandmarks(
       flame.position.set(l.x, heightAt(l.x, l.z) + 1.35, l.z)
       root.add(flame)
       glow.push(flame)
-      lamps.push(flame.position.clone())
+      lamps.push({ pos: flame.position.clone(), indoor: false })
     }
     if (l.kind === 'ruin' || l.kind === 'arch' || l.kind === 'tree' || l.kind === 'mill') {
-      colliders.push({ x: l.x, z: l.z, r: l.kind === 'tree' ? 2 : 3 })
+      colliders.push({ x: l.x, z: l.z, r: l.kind === 'tree' ? 2 : 3, height: 6, kind: l.kind })
     }
   }
 }

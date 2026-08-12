@@ -152,45 +152,97 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(400)
 
 // --- the crosshair picks who you are pointing at ---------------------------
-const targeting = await page.evaluate(() => {
+const targeting = await page.evaluate(async () => {
   const l = window.luma
+  const t = await import('/src/world/terrain.ts')
   const living = l.sim.creatures.filter((c) => c.alive)
   if (living.length < 2) return { ok: false, reason: 'not enough Luma' }
-  // the closest pair, so that standing between them puts both in reach
-  let a = living[0]
-  let b = living[1]
-  let best = Infinity
-  for (const x of living) {
-    for (const y of living) {
-      if (x.id >= y.id) continue
-      const d = Math.hypot(x.pos.x - y.pos.x, x.pos.z - y.pos.z)
-      if (d < best) {
-        best = d
-        a = x
-        b = y
-      }
-    }
+  // Put two of them side by side in the plaza and stand in front of both, so
+  // the check is about where the crosshair points and nothing else.
+  const [a, b] = living
+  a.pos = { x: -1.4, z: -4 }
+  b.pos = { x: 1.4, z: -4 }
+  a.busyTicks = 200
+  b.busyTicks = 200
+  l.view.teleport(0, -1.6)
+  return {
+    ok: true,
+    aId: a.id, bId: b.id,
+    ax: a.pos.x, az: a.pos.z, ay: t.heightAt(a.pos.x, a.pos.z) + 1,
+    bx: b.pos.x, bz: b.pos.z, by: t.heightAt(b.pos.x, b.pos.z) + 1,
   }
-  if (best > 5) return { ok: false, reason: `nearest pair are ${best.toFixed(1)} m apart` }
-  const mx = (a.pos.x + b.pos.x) / 2
-  const mz = (a.pos.z + b.pos.z) / 2
-  l.view.teleport(mx, mz)
-  l.view.lookAt(a.pos.x, a.pos.z, 0)
-  return { ok: true, aId: a.id, bId: b.id, ax: a.pos.x, az: a.pos.z, bx: b.pos.x, bz: b.pos.z }
 })
 if (targeting.ok) {
-  await until((t) => window.luma.view.currentTarget?.id === t.aId, targeting, 'the first Luma')
+  await page.evaluate((t) => window.luma.view.aimAt(t.ax, t.ay, t.az), targeting)
+  await until((t) => window.luma.view.currentTarget?.id === t.aId, targeting, 'the left Luma')
   const first = await page.evaluate(() => window.luma.view.currentTarget?.id ?? null)
-  await page.evaluate((t) => window.luma.view.lookAt(t.bx, t.bz, 0), targeting)
-  await until((t) => window.luma.view.currentTarget?.id === t.bId, targeting, 'the second Luma')
+  await page.evaluate((t) => window.luma.view.aimAt(t.bx, t.by, t.bz), targeting)
+  await until((t) => window.luma.view.currentTarget?.id === t.bId, targeting, 'the right Luma')
   const second = await page.evaluate(() => window.luma.view.currentTarget?.id ?? null)
   check(
     'the crosshair selects who you point at, not the nearest',
     first !== null && second !== null && first !== second,
-    `looked at ${first} then ${second}`,
+    `looked left at ${first}, right at ${second}`,
   )
 } else {
   check('the crosshair selects who you point at', false, targeting.reason)
+}
+
+// --- walls are solid ---------------------------------------------------------
+const walled = await page.evaluate(async () => {
+  const l = window.luma
+  const world = await import('/src/lab/world.ts')
+  const t = await import('/src/world/terrain.ts')
+  const hall = world.findTower('bank')
+  // stand outside the back of the building and try to walk straight through it
+  const back = { x: hall.x - Math.sin(hall.facing) * 12, z: hall.z - Math.cos(hall.facing) * 12 }
+  l.view.teleport(back.x, back.z)
+  l.view.lookAt(hall.x, hall.z, 0)
+  return { hx: hall.x, hz: hall.z, sx: back.x, sz: back.z, ground: t.heightAt(back.x, back.z) }
+})
+await page.waitForTimeout(800)
+await page.keyboard.down('KeyW')
+await until(
+  (w) => {
+    const p = window.luma.view.playerPosition()
+    return Math.hypot(p.x - w.sx, p.z - w.sz) > 5.5
+  },
+  walled, 'the player to reach the wall', 12_000,
+)
+await page.waitForTimeout(1200)
+await page.keyboard.up('KeyW')
+const stopped = await page.evaluate(() => window.luma.view.playerPosition())
+const intoBuilding = Math.hypot(stopped.x - walled.hx, stopped.z - walled.hz)
+check(
+  'a wall stops you instead of letting you walk through the building',
+  intoBuilding > 4.5,
+  `${intoBuilding.toFixed(1)} m from the middle of the hall`,
+)
+
+// --- trees are solid ---------------------------------------------------------
+const treed = await page.evaluate(async () => {
+  const l = window.luma
+  const scatter = await import('/src/world/scatter.ts')
+  const tree = scatter.worldScatter().props
+    .filter((p) => p.kind === 'pine' || p.kind === 'tree')
+    .sort((p, q) => Math.hypot(p.x, p.z) - Math.hypot(q.x, q.z))[0]
+  if (!tree) return null
+  const angle = Math.atan2(tree.z, tree.x)
+  const from = { x: tree.x + Math.cos(angle) * 4, z: tree.z + Math.sin(angle) * 4 }
+  l.view.teleport(from.x, from.z)
+  l.view.lookAt(tree.x, tree.z, 0)
+  return { tx: tree.x, tz: tree.z }
+})
+if (treed) {
+  await page.waitForTimeout(700)
+  await page.keyboard.down('KeyW')
+  await page.waitForTimeout(2500)
+  await page.keyboard.up('KeyW')
+  const at = await page.evaluate(() => window.luma.view.playerPosition())
+  const gap = Math.hypot(at.x - treed.tx, at.z - treed.tz)
+  check('you cannot walk through a tree', gap > 0.6, `${gap.toFixed(2)} m from the trunk`)
+} else {
+  check('you cannot walk through a tree', false, 'no tree found')
 }
 
 // --- gathering -------------------------------------------------------------

@@ -15,13 +15,14 @@ import { avgFrameMs, recordFrameTime } from '../lab/lod'
 import { Atmosphere } from './atmosphere'
 import { Engine, QUALITY } from './engine'
 import { buildTerrain, Water } from './ground'
-import { buildVillage, makeKit, mergeByMaterial, type Kit } from './architecture'
+import { buildVillage, makeKit, mergeByMaterial, type Kit, type Lamp } from './architecture'
 import { loadPropGeometries } from './assets'
 import { ScatterView } from './scatter-view'
 import { LumaView } from './luma'
 import { Fx } from './fx'
 import { ViewModel } from './viewmodel'
-import { PlayerController, type Collider } from '../game/controller'
+import { PlayerController } from '../game/controller'
+import { CollisionGrid, PROP_SOLIDITY } from '../game/collision'
 import { Input } from '../game/input'
 import {
   GAZE_RANGE, pickGaze, pickTarget, promptFor, type Target,
@@ -147,11 +148,12 @@ export class WorldView {
   private holdFor = 0
   private holdElapsed = 0
   private regionId: string | null = null
-  private lastLampSync = 0
+  private lastLampSync = -99
 
   private glowMeshes: THREE.Mesh[] = []
-  private lampPositions: THREE.Vector3[] = []
+  private lampPositions: Lamp[] = []
   private lampLights: THREE.PointLight[] = []
+  private solids: CollisionGrid | null = null
   private placedGroup = new THREE.Group()
   private placedMeshes = new Map<string, THREE.Object3D>()
   private graveGroup = new THREE.Group()
@@ -214,7 +216,11 @@ export class WorldView {
       if (mesh.isMesh && mesh.material === this.kit.glow) this.glowMeshes.push(mesh)
     })
     this.lampPositions = village.lamps
-    this.controller.setColliders(village.colliders as Collider[])
+    this.solids = new CollisionGrid()
+    for (const c of village.colliders) {
+      this.solids.add({ x: c.x, z: c.z, r: c.r, height: c.height ?? 6, kind: c.kind })
+    }
+    this.controller.setWorld(this.solids)
     await frameBreak()
 
     this.callbacks.onLoadProgress(0.3, 'planting the woods')
@@ -225,6 +231,15 @@ export class WorldView {
 
     this.callbacks.onLoadProgress(0.84, 'scattering the valley')
     const scatter = worldScatter()
+    // trunks and boulders are solid; undergrowth is not
+    for (const p of scatter.props) {
+      const solid = PROP_SOLIDITY[p.kind]
+      if (solid) this.solids?.add({ x: p.x, z: p.z, r: solid.r * p.scale, height: solid.height, kind: p.kind })
+    }
+    for (const n of scatter.nodes) {
+      const solid = PROP_SOLIDITY[n.prop]
+      if (solid) this.solids?.add({ x: n.x, z: n.z, r: solid.r * n.scale, height: solid.height, kind: n.prop })
+    }
     this.scatterView = new ScatterView(scatter, geo)
     this.scatterView.setDrawDistance(this.engine.quality.propDistance)
     this.engine.scene.add(this.scatterView.group)
@@ -475,15 +490,14 @@ export class WorldView {
   }
 
   private updateLamps(amount: number): void {
-    this.kit.glow.emissiveIntensity = amount * 2.4
-    if (this.elapsed - this.lastLampSync < 0.5) {
-      for (const l of this.lampLights) l.intensity = l.userData.base * amount
-      return
-    }
+    this.kit.glow.emissiveIntensity = Math.max(amount * 2.4, 0.5)
+    if (this.elapsed - this.lastLampSync < 0.5) return
     this.lastLampSync = this.elapsed
     const cam = this.engine.camera.position
+    // Indoor lamps burn by day as well: a room with a roof on it is dark at
+    // noon and the sun is not going to help.
     const near = this.lampPositions
-      .map((p) => ({ p, d: p.distanceToSquared(cam) }))
+      .map((l) => ({ l, d: l.pos.distanceToSquared(cam) }))
       .sort((a, b) => a.d - b.d)
       .slice(0, this.lampLights.length)
     this.lampLights.forEach((light, i) => {
@@ -493,9 +507,10 @@ export class WorldView {
         light.userData.base = 0
         return
       }
-      light.position.copy(entry.p)
-      light.userData.base = 16
-      light.intensity = 16 * amount
+      light.position.copy(entry.l.pos)
+      const level = entry.l.indoor ? Math.max(0.75, amount) : amount
+      light.userData.base = entry.l.indoor ? 20 : 16
+      light.intensity = light.userData.base * level
     })
   }
 
@@ -701,7 +716,7 @@ export class WorldView {
     }
     for (const p of this.progress.placed) {
       if (this.placedMeshes.has(p.id)) continue
-      const obj = this.makePlaced(p.kind)
+      const obj = this.makePlaced(p.kind, p)
       obj.position.set(p.x, p.y, p.z)
       obj.rotation.y = p.rot
       this.placedGroup.add(obj)
@@ -709,7 +724,7 @@ export class WorldView {
     }
   }
 
-  private makePlaced(kind: PlaceableKind): THREE.Object3D {
+  private makePlaced(kind: PlaceableKind, at: { x: number; y: number; z: number }): THREE.Object3D {
     const g = new THREE.Group()
     if (kind === 'lantern') {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), this.kit.darkTimber)
@@ -720,7 +735,7 @@ export class WorldView {
       lamp.position.y = 1.6
       g.add(lamp)
       this.glowMeshes.push(lamp)
-      this.lampPositions.push(new THREE.Vector3())
+      this.lampPositions.push({ pos: new THREE.Vector3(at.x, at.y + 1.6, at.z), indoor: false })
     } else if (kind === 'fence') {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.1, 0.16), this.kit.timber)
       post.position.y = 0.55
