@@ -4,7 +4,7 @@
  * All values are plain JSON-safe so they persist with the save / localStorage.
  */
 
-export type QualityPreset = 'low' | 'medium' | 'high'
+export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra'
 
 export interface GameSettings {
   /** Visual quality preset — drives pixel ratio, particles, labels. */
@@ -39,11 +39,11 @@ export interface GameSettings {
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  quality: 'medium',
-  populationCap: 16,
-  aiBatchSize: 4,
-  lodNear: 28,
-  lodFar: 55,
+  quality: 'high',
+  populationCap: 22,
+  aiBatchSize: 6,
+  lodNear: 44,
+  lodFar: 90,
   simHz: 6,
   pixelRatioCap: 1.5,
   showLabels: true,
@@ -72,11 +72,23 @@ export function settingsForPreset(quality: QualityPreset): Partial<GameSettings>
       quality,
       populationCap: 24,
       aiBatchSize: 6,
+      pixelRatioCap: 1.5,
+      showLabels: true,
+      showParticles: true,
+      lodNear: 44,
+      lodFar: 90,
+    }
+  }
+  if (quality === 'ultra') {
+    return {
+      quality,
+      populationCap: 32,
+      aiBatchSize: 8,
       pixelRatioCap: 2,
       showLabels: true,
       showParticles: true,
-      lodNear: 36,
-      lodFar: 70,
+      lodNear: 60,
+      lodFar: 120,
     }
   }
   return { ...DEFAULT_SETTINGS }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createSim, type Sim } from './sim'
 import { randomGenome, type Genome } from './genetics'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -42,7 +46,7 @@ describe('sim — decisions and movement', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 0.15
-    c.pos = { x: -28, z: -28 } // at food tower
+    c.pos = { x: at('food').x, z: at('food').z } // at food tower
     s.tick()
     expect(c.chem.hunger).toBeGreaterThan(0.2)
   })
@@ -53,7 +57,7 @@ describe('sim — economy and stealing', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.hunger = 0.3 // hungry + broke → motivated to work
-    c.pos = { x: 0, z: 52 } // at work tower
+    c.pos = { x: at('work').x, z: at('work').z } // at work tower
     c.learnTower('work')
     c.wallet = 0
     c.intention = 'work'
@@ -100,7 +104,7 @@ describe('sim — economy and stealing', () => {
     c.chem.hunger = 1
     c.wallet = 10
     c.memory.facts.bankIsSafe = 1
-    c.pos = { x: 0, z: -36 } // at bank
+    c.pos = { x: at('bank').x, z: at('bank').z } // at bank
     for (let i = 0; i < 10; i++) s.tick()
     expect(c.banked).toBeGreaterThan(0)
   })
@@ -179,8 +183,8 @@ describe('sim — love, procreation, sleep, addiction', () => {
     b.chem.bond = 1
     a.age = 700 // old enough to procreate
     b.age = 700
-    a.pos = { x: -36, z: 0 } // at homes
-    b.pos = { x: -35, z: 0 }
+    a.pos = { x: at('homes').x, z: at('homes').z } // at homes
+    b.pos = { x: at('homes').x + 1, z: at('homes').z + 0 }
     const before = s.creatures.length
     // conception is not guaranteed on any single tick — fertility varies
     for (let i = 0; i < 80 && s.creatures.length === before; i++) s.tick()
@@ -194,7 +198,7 @@ describe('sim — love, procreation, sleep, addiction', () => {
     const s = makeSim(1)
     const c = s.creatures[0]
     c.chem.energy = 0.1
-    c.pos = { x: -36, z: 0 } // at homes
+    c.pos = { x: at('homes').x, z: at('homes').z } // at homes
     s.tick()
     expect(c.chem.energy).toBeGreaterThan(0.3)
   })
@@ -214,7 +218,7 @@ describe('sim — love, procreation, sleep, addiction', () => {
     c.genome.addictionProne = 0.95
     c.chem.pleasure = 0.1 // sad — the tavern is the rational escape
     c.wallet = 10 // can afford a drink
-    c.pos = { x: -28, z: 28 } // at tavern
+    c.pos = { x: at('tavern').x, z: at('tavern').z } // at tavern
     for (let i = 0; i < 10; i++) s.tick()
     expect(c.chem.addiction.brew ?? 0).toBeGreaterThan(0)
   })

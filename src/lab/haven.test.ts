@@ -10,6 +10,10 @@ import { createSim } from './sim'
 import { inspectCreature } from './inspect'
 import { saveSim, loadSim, SAVE_VERSION } from './save'
 import { tickPsyche } from './psyche'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = () => randomGenome(() => 0.5)
 
@@ -89,7 +93,7 @@ describe('socialbond — multidimensional edges', () => {
 
 describe('lod — time-sliced AI', () => {
   it('bands distant creatures as mid/far', () => {
-    const c = createCreature(1, 'A', GEN(), 80, 0)
+    const c = createCreature(1, 'A', GEN(), DEFAULT_SETTINGS.lodFar + 20, 0)
     expect(bandFor(c, 0, 0, DEFAULT_SETTINGS)).toBe('far')
     c.pos.x = 10
     expect(bandFor(c, 0, 0, DEFAULT_SETTINGS)).toBe('near')
@@ -179,7 +183,7 @@ describe('playerTalk + inspect + save v5', () => {
 
   it('clinic action is scored when ill', () => {
     const s = createSim(2)
-    const c = s.spawnCreature(GEN(), 52, -36)
+    const c = s.spawnCreature(GEN(), at('clinic').x, at('clinic').z)
     c.learnTower('clinic')
     c.illness = 0.6
     c.wallet = 20

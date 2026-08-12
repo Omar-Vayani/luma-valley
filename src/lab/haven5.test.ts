@@ -15,6 +15,10 @@ import { parsePlayerText, extractItem, inVoiceOf } from './dialogue'
 import { inspectSociety, inspectCreature } from './inspect'
 import { saveSim, loadSim } from './save'
 import { addItem } from './inventory'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -167,8 +171,8 @@ describe('supply chains — shortages have a name', () => {
 describe('debt between individuals', () => {
   it('a healer treats someone who cannot pay, and is owed for it', () => {
     const s = createSim(7)
-    const healer = s.spawnCreature(GEN({ loyalty: 0.9 }), 52, -36)
-    const patient = s.spawnCreature(GEN(), 52, -35)
+    const healer = s.spawnCreature(GEN({ loyalty: 0.9 }), at('clinic').x, at('clinic').z)
+    const patient = s.spawnCreature(GEN(), at('clinic').x, at('clinic').z)
     claimJob(s.jobs, healer, 'healer')
     healer.job = 'healer'
     patient.wallet = 0

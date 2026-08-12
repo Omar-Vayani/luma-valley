@@ -60,24 +60,49 @@ Work top-to-bottom within a wave. Waves are dependency-aware, not calendar estim
 | [19](./19-optional-cloud-ai.md) | Optional richer voice, never required | `done` |
 | [20](./20-vertical-slice-acceptance.md) | Acceptance checklist for the first complete version | `done` |
 
+### Wave 4 — The presentation and player rebuild
+
+Not on the original board. The simulation had reached the point where the
+honest verdict was that it was a good simulation and a poor game: the world was
+eighteen kiosks on a flat green square, the interface was a debug panel, and
+the only verb the player had was watching. This wave replaced everything above
+`src/lab/`.
+
+| Task | Status |
+|---|---|
+| A valley with geography and a history (`src/world/`) | `done` |
+| A settlement laid out like a place rather than a ring | `done` |
+| Renderer rebuild: atmosphere, terrain, water, instancing, post | `done` |
+| Architecture generated from a kit of parts | `done` |
+| Creature rigs animated from simulation state | `done` |
+| First-person feel: gravity, jump, sprint, swim, head bob | `done` |
+| Crosshair targeting, replacing nearest-body picking | `done` |
+| A loop for the player: gather, craft, build, be asked for help | `done` |
+| Interface rebuild: HUD and nine panels | `done` |
+| A browser playtest harness that drives a real session | `done` |
+
 ## What is left
 
-Every task on this board is implemented, and the balance pass that follows
-them is done too: `npm run balance` runs simulated hours across seeds and
-judges survival, pacing, variety and cause of death. A full hour now passes
-every check on every seed tried.
+Every task on this board is implemented. `npm test` covers the rules,
+`npm run playtest` covers a real session in a real browser, and `npm run
+balance` still judges simulated hours across seeds for survival, pacing and
+variety.
 
 What remains is the kind of work only a person playing can direct:
 
-- **Taste.** The numbers say an hour is varied and survivable. Whether it is
-  *gripping* is a judgement no harness makes. Play it, then tune fertility,
-  lifespan, and how hard needs bite.
+- **Taste.** The numbers say an hour is varied and survivable, and the valley
+  now looks like somewhere. Whether it is *gripping* is a judgement no harness
+  makes. Play it, then tune fertility, lifespan, how hard needs bite, and how
+  often Haven asks you for something.
 - **More depth per system.** Everything is real but finite: six norms rather
-  than twenty, one shift pattern per trade, mentors who teach places, words
-  and a trade but not a craft.
-- **Art.** Models, animation and sound are still the simple originals. The
-  readability work means the game communicates without them; making it
-  beautiful is a separate pass.
+  than twenty, one shift pattern per trade, eight recipes, nine kinds of
+  request, mentors who teach places and words but not a craft.
+- **Interiors.** Buildings have exteriors and you interact at the door. Being
+  able to walk into the tavern is the largest single thing still missing.
+- **Sound.** A handful of oscillators, and no music.
+- **Hand-authored animation.** The procedural rig cannot drift out of sync with
+  the mind driving it, which is the point, but it caps how expressive a Luma
+  can be.
 
 ## How to use a task file
 

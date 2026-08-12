@@ -1,5 +1,6 @@
 {
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/three": "^0.185.4",
@@ -28,11 +29,13 @@
     "play": "vite build && vite preview --host --port 4173",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
+    "lint": "oxlint src",
     "bench": "vite-node scripts/bench.mjs",
     "balance": "vite-node scripts/balance.mjs",
-    "verify:hud": "node scripts/verify-hud.mjs",
-    "demo": "node scripts/demo.mjs",
-    "lint": "oxlint src"
+    "playtest": "node scripts/playtest.mjs",
+    "gallery": "node scripts/gallery.mjs",
+    "perf": "node scripts/perf.mjs",
+    "shot": "node scripts/shot.mjs"
   },
   "engines": {
     "node": ">=20"

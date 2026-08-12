@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { scoreActions, chooseAction } from './mind'
 import { createSim } from './sim'
 import { randomGenome, type Genome } from './genetics'
+import { findTower, type TowerId } from './world'
+
+/** A tower’s position, so moving a building never breaks a test. */
+const at = (id: TowerId) => findTower(id)!
 
 const GEN = (over: Partial<Genome> = {}): Genome => ({ ...randomGenome(() => 0.5), ...over })
 
@@ -56,7 +60,7 @@ describe('mind — utility scoring (creatures rationalise, not preprogrammed)', 
 
   it('a sad addict rates drinking above work', () => {
     const s = createSim(5)
-    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), -28, 28) // at tavern
+    const c = s.spawnCreature(GEN({ addictionProne: 0.95 }), at('tavern').x, at('tavern').z) // at tavern
     c.wallet = 20
     c.chem.pleasure = 0.1
     const scores = scoreActions(s, c)

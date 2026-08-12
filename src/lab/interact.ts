@@ -12,7 +12,11 @@ import { TOWERS, type TowerId } from './world'
 import { dist } from './util'
 
 /** How close you must be to use something. */
-export const REACH = 2.2
+/**
+ * How far an arm reaches. Shared with the crosshair in `src/game/targeting.ts`
+ * so the prompt never offers something the action then refuses to do.
+ */
+export const REACH = 3.6
 
 export type FixtureKind = 'bed' | 'door' | 'container' | 'counter' | 'bench'
 

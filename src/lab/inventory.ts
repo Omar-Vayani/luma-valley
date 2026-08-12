@@ -23,14 +23,24 @@ export type ItemId =
   | 'satchel'
   | 'timber'
   | 'grain'
+  // things the player gathers out in the valley
+  | 'berry'
+  | 'stone'
+  | 'fish'
+  | 'lantern'
 
 export const ITEM_IDS: ItemId[] = [
   'bread', 'water', 'medicine', 'brew', 'herb', 'spark', 'tonic',
   'stick', 'cloak', 'trinket', 'gem', 'satchel', 'timber', 'grain',
+  'berry', 'stone', 'fish', 'lantern',
 ]
 
-/** Base carry capacity in weight units before container bonuses. */
-export const BASE_CAPACITY = 12
+/**
+ * Base carry capacity in weight units before container bonuses.
+ * Raised when the player started gathering timber and stone: three logs
+ * filling a pack made the whole loop feel like admin.
+ */
+export const BASE_CAPACITY = 18
 
 export interface Inventory {
   items: Partial<Record<ItemId, number>>

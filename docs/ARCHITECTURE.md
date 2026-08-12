@@ -1,135 +1,178 @@
-# Luma Haven — Architecture
+# Architecture
 
-**Stack decision:** Keep the browser (Vite + React 19 + TypeScript + Three.js). Profiling and practical constraints for a dense 8–24 creature settlement favour this stack: zero install friction, offline PWA, WebGL on the target G14 laptop, and a pure-TypeScript simulation core that is easy to test. A desktop engine remains an option if population or ML needs grow; optional cloud NL is never required.
+Four layers, and one rule between each pair: the layer below never knows the
+layer above exists.
 
-## Layers
+```
+src/lab/      the simulation      minds, bodies, society, economy, saves
+src/world/    the place           terrain, history, what grows where
+src/game/     being in it         movement, input, targeting, gathering, requests
+src/render/   the picture         three.js: terrain, water, sky, buildings, rigs
+src/ui/       the interface       react: HUD and panels
+```
 
-| Layer | Role |
-|---|---|
-| `src/lab/*` | Pure simulation: needs, mind, genetics, economy, society, dialogue semantics, LOD |
-| `src/render/labview.ts` | Three.js presentation; never owns game rules |
-| `src/App.tsx` | HUD, controls, settings, talk, inspector, society panel, autosave |
-| `public/` | PWA shell for offline play |
+`src/lab` has no imports from any of the others. `src/render` never imports
+React. `src/ui` never imports three. If those three statements stop being true,
+the seams have gone.
 
-## Creature mind (hybrid)
+---
 
-Nothing here is a scripted routine; behaviour comes out of these systems interacting.
+## The simulation — `src/lab/`
 
-| Module | Responsibility |
-|---|---|
-| `chem.ts` | Hunger, thirst, energy, health, fear, comfort, privacy, purpose, addiction |
-| `mind.ts` | Utility scoring: needs × genes × opportunity × reputation × norms × risk |
-| `brain.ts` | Tiny TF.js net that learns action preferences from outcomes (batched, async) |
-| `beliefs.ts` | What a creature thinks is true — confidence, provenance, revision, habits, lying |
-| `psyche.ts` | Stress, confidence, belonging, boredom, personal values, mood |
-| `emotions.ts` | Joy, pride, shame, guilt, gratitude, hope, envy, resentment… via appraisal |
-| `memory.ts` | Episodes with importance, consolidation into semantic patterns, forgetting |
-| `socialbond.ts` | Asymmetric edges: trust, affection, attraction, respect, fear, resentment… |
-| `courtship.ts` | Interest, rejection, partnership, strain, separation, reconciliation |
-| `language.ts` | Concept ↔ word maps learned by association |
-| `dialogue.ts` | Player conversation: intent parsing, trust-gated belief and obedience |
-| `chatter.ts` | Compact creature↔creature messages, promises, overheard rendering |
-| `reputation.ts` | Witnessed events plus hearsay |
-| `lifecycle.ts` | Child → adolescent → adult → elder, learning rate, vigor, lifespan |
+Plain, JSON-safe data with a single entry point: `sim.tick()`. One tick advances
+the settlement by one step; the renderer calls it at 6 Hz regardless of frame
+rate. Within a tick, work is phased (`minds`, `bodies`, `economy`, `social`,
+`world`) and each phase is timed, which is what the F3 overlay reports.
 
-Creatures do not know places they have never seen (they learn by sight or by being told), do not automatically believe or obey the player, and can hold beliefs that are wrong until evidence accumulates against them.
+Level of detail is by distance from the player: near Luma get a full utility
+re-score every tick, mid ones get one every few ticks, far ones only age and
+metabolise. `settings.aiBatchSize` caps how many full re-scores happen per tick,
+so the cost is bounded no matter the population.
 
-## Stories
+This layer was not touched by the rebuild, beyond a faster walking pace for a
+larger valley and four new gatherable items. Its 400-odd tests still describe
+it.
 
-`story.ts` keeps only the moments that changed something socially, records the
-reason the actor chose it (read from the state that drove the decision, so it
-cannot drift from the behaviour), and ranks them by significance and recency.
-The society panel shows what people are talking about and what changed while
-the player was away; the inspector shows one creature's life so far.
+## The place — `src/world/`
 
-Shortages are traced the same way: an empty bread shelf names the missing
-farmer, because production is a chain (`jobs.ts`) rather than a spawn.
+**`terrain.ts`** is one deterministic height function and the authority on the
+shape of the valley. The renderer tessellates it, the player's feet read it, and
+the scatter pass asks it where a tree can stand. There is no seed: this is *the*
+valley, the same one on every machine, which is what lets the history refer to
+specific ground.
 
-## Society
+It composes, outward from the plaza: a flattened basin, rolling hills, mountains
+at the rim that hide the world's edge, the Coldrun carved down the east side
+into Mirror Lake, roads cut and filled but only across ground a road would
+plausibly be built on, and a level pad under every landmark. A final rule keeps
+the settlement's own ground above the water line, because a valley floor that
+grows ponds looks like a bug.
 
-- **Households** (`household.ts`) — couples claim one of the individual houses; children join; care or neglect has consequences
-- **Social acts** (`socialacts.ts`) — mentoring the young, mediating fights at personal risk, flattery that can be seen through, alliances recognised from mutual help
-- **Standing** (`status.ts`) — respect, contribution, wealth and disgrace decide prices, who helps you, and who gets an empty house
-- **Institutions** (`institutions.ts`) — each building keeps its own hours and its own till, so wages come from what the place actually took
-- **Culture** (`norms.ts`) — property, nonviolence, honesty, generosity, loyalty, sobriety norms shift with witnessed behaviour; influence and leadership are earned; children inherit vocabulary and place knowledge
-- **Jobs** (`jobs.ts`) — shopkeeper, healer, bartender, farmer, porter, teacher; a completed shift pays wages and pushes production onto the shelves
-- **Economy** (`economy.ts`) — scarcity pricing, subjective value, haggling, refusal of known thieves, debts, inequality
-- **Items** (`items.ts` + `inventory.ts`) — data-defined catalog, weight capacity, ownership marks that make theft detectable
-- **Interaction** (`interact.ts`) — beds, doors, chests, counters; the player and creatures use the same reach rules
+**`lore.ts`** is two centuries of history and the twelve landmarks that are its
+evidence. **`scatter.ts`** places several thousand plants and rocks
+deterministically, refusing water, roads, steep ground and building footprints,
+and promotes some of them into the resource nodes the player harvests.
 
-Population is bounded by fertility, needs, housing, lifespan, and a configurable cap. Travellers settle when the town thins, so a small settlement does not dwindle to nothing.
+## Being in it — `src/game/`
 
-## Performance
+**`input.ts`** is the only place that decides whether a key means "walk forward"
+or the letter W. When a text field has focus or a panel owns the screen, the
+world gets no keys at all, and anything held down is released rather than left
+stuck.
 
-- Simulation LOD (`lod.ts`): near / mid / far / sleep bands, with per-phase timing (minds, bodies, social, economy, world) shown by F3
-- Time-sliced AI batches (`settings.aiBatchSize`)
-- Render frame rate independent of `simHz` (default 6 Hz)
-- Particle and label toggles; pixel-ratio cap
-- Compact structured state; natural language generated only on demand
-- Defaults tuned for an RTX 5070 laptop at medium quality (~60 FPS target)
+**`controller.ts`** is the feel: acceleration and stopping, gravity, a
+one-metre jump with coyote time, sprint with a field-of-view kick, crouch,
+swimming, head bob, footsteps that know what ground you are on, and a slope
+limit that makes the rim a wall. Collision is a height field lookup for the
+ground and circles for buildings — no physics engine, and skipping one leaves
+the frame budget for the world.
 
-### Measured
+**`targeting.ts`** casts a short cylinder down the middle of the screen and
+takes the first thing it hits. This replaced picking whoever was nearest, which
+is why talking to a crowd used to answer with the same Luma however you turned.
 
-`npm run bench` runs the real simulation headlessly at several populations. On
-the development machine (Node 22, Xeon vCPU, no GPU):
+**`gather.ts`**, **`craft.ts`**, **`requests.ts`** and **`progress.ts`** are the
+player's own loop: hold-to-gather with regrowth, recipes that mostly need a
+workshop, requests read off live need rather than a quest script, and the
+standing, discoveries and built things that belong to your particular visit.
 
-| Population | Preset | ms per tick | Share of a 60 FPS frame at 6 Hz | Save KB per creature |
-|---|---|---|---|---|
-| 8 | medium | 0.15 | 5.4% | 13.3 |
-| 16 | medium | 0.22 | 7.9% | 15.6 |
-| 24 | high | 0.30 | 10.8% | 17.0 |
+Requests are the interesting one. Nothing is authored: a scan every ten seconds
+of game time looks for somebody hungry and unable to pay, a fever, an empty
+shelf with a cause, a grieving neighbour nobody has visited, two Luma whose
+mutual resentment has crossed a line. Completing one changes the real
+underlying state; letting it expire leaves the problem in place.
 
-The simulation is not the bottleneck: even 24 Luma at high settings leaves
-roughly 90% of the frame budget for rendering, which is what justifies keeping
-the browser stack. Per-creature persistent state is ~13–17 KB, far inside the
-1–10 MB budget the brief allows, so memory can grow considerably before it
-matters. In-game frame cost is shown live with F3.
+## The picture — `src/render/`
 
-Run it yourself: `npm run bench` (add `--pops 8,16,32 --ticks 3000` to widen).
-`npm run verify:hud` drives a headless browser and fails if any HUD control is
-missing, collapsed, or covered by another element.
+**`engine.ts`** owns the renderer, an ACES tone curve, optional MSAA, bloom and
+a warm grade with the blacks lifted, behind four quality presets that trade
+shadow resolution, draw distance and ground cover.
+
+**`atmosphere.ts`** is the sky dome, the sun's arc, the moon on the other side
+of it, stars, drifting clouds, and a keyframed light rig. The settlement already
+kept hours; this makes them visible. Dusk carries a lot of fill light on
+purpose — a low sun lights almost nothing that faces upward, and a valley you
+cannot read is not atmospheric.
+
+**`assets.ts`** bakes the low-poly nature packs into instanceable geometry:
+merge the sub-meshes, bake each material's colour into vertex colours *per
+geometry group* (doing it per mesh is how every tree ended up the colour of
+bark), lift the very dark authored greens with a gamma knee, and normalise
+height so a pine is a pine whichever file it came from.
+
+**`scatter-view.ts`** draws those instances in chunks that frustum-cull, with a
+one-sine wind in the vertex shader phase-shifted by world position.
+
+**`architecture.ts`** generates every building from a kit of parts — posts,
+plaster panels, timber framing, tiled roofs, awnings — then merges each one down
+to a single mesh per material. The plaza, lamp posts, the Old Bridge and the
+twelve landmarks are built the same way, so the settlement shares one look with
+the nature models: flat-shaded and untextured.
+
+**`luma.ts`** rebuilds the creatures as an articulated rig — hips, torso, head,
+ears, arms, legs, tail — posed every frame from what the mind is already doing.
+Nothing is keyframed, so the animation cannot drift out of sync with the state
+driving it: gait from measured speed, lean from mood, ears back when frightened,
+tail wagging when happy, a moving mouth while talking, curled up asleep.
+
+**`world-view.ts`** is the loop. It owns the player, drives the simulation
+clock, resolves interactions, and hands React a HUD snapshot ten times a second.
+
+## The interface — `src/ui/`
+
+One HUD and nine panels on one design language. The HUD keeps the middle of the
+screen clear except for the crosshair and what the crosshair is telling you;
+anything that needs reading is a panel. Icons are drawn in SVG rather than
+borrowed from an emoji font, so the interface is the same shape everywhere.
+
+Opening a panel releases the pointer lock and stops the world hearing the
+keyboard. It does **not** pause the simulation — the valley does not wait while
+you read about it.
 
 ## Persistence
 
-- Save version **6** (`save.ts`) — creatures with beliefs, habits, psyche, social graphs; households, culture, jobs, ledger, container contents, player
-- Autosave to `localStorage` every ~20 s, plus three manual slots
-- One-deep backup: an unreadable autosave falls back to the previous one before starting fresh
-- Export / import `.luma.json` from the settings panel
-- v4 and v5 saves still load, with new fields defaulted
+The world saves through `src/lab/save.ts` (versioned, with migrations) into
+local storage, with a one-deep backup, three manual slots, and export/import.
+The player's own progress saves separately and merges over defaults on load, so
+an older save opens rather than breaking.
 
-## Transparency
+## Testing
 
-- Mind inspector (`inspect.ts`): needs, action scores, plain-language reasoning, bonds, family, habits, beliefs with confidence and source, promises, memories, recent talk, estimated memory cost
-- Society panel: population, households, inequality, norms, who is respected, staffed and vacant roles, shared words, overheard lines, chronicle
-- F3 performance overlay: frame time, sim time, population, AI batch, tick
+- **`npm test`** — 500-odd unit tests. The simulation's own suite, plus the
+  terrain (determinism, drainage, buildable ground, road gradients), the scatter
+  (nothing in the lake or on a road), gathering, crafting, requests, progress,
+  the controller (walk, sprint, jump, swim, slopes, bounds) and targeting.
+- **`npm run playtest`** — drives a real browser through a real session: loads,
+  walks, opens a conversation, types without walking into a wall, checks the
+  crosshair picks who you point at, gathers a bush, bakes a loaf, gives it away,
+  sets a lantern down, finds a landmark, and opens every panel. This catches the
+  class of bug a unit test cannot: an element that renders but has no size, a
+  key that is swallowed, an interaction that fires on the wrong target.
+- **`npm run perf`** — draw calls and triangles per preset from five viewpoints.
+- **`npm run balance`** — simulated hours across seeds, judging survival,
+  pacing, variety and cause of death.
 
-## Atmosphere
+## Measured
 
-The sky, sun and ambient light follow the settlement's own clock: midday is
-bright, dusk and dawn run amber, and night is moonlit blue rather than black —
-dark enough to feel late, light enough to keep watching. Because the same
-clock closes the shops, the hour is something the player feels before they
-read it anywhere.
+On the software rasteriser used in CI, frame times are meaningless; draw calls
+and triangles are not, and they are the same on any GPU:
 
-## Reading the society without a panel
+| Preset | Draw calls | Triangles |
+|---|---|---|
+| low | 110–560 | 0.7–1.5 M |
+| medium | 200–750 | 1.2–2.2 M |
+| high | 520–1000 | 1.5–2.5 M |
+| ultra | 370–1130 | 1.5–2.8 M |
 
-A creature carries the mark of its trade, everyone in a household wears the
-same colour band, children are small and elders stoop, and strong feeling
-toward whoever is beside them shows above their head. Buildings light a lamp
-when open and post `closed`, `sold out`, or `no one here`. This is refreshed
-every twelfth frame, not every frame.
-
-## Determinism
-
-A world is reproducible from its seed: creature lifespan, facing, mediation
-outcomes and directions-giving all draw from the simulation's own generator
-rather than `Math.random`. The same seed grows the same settlement.
+The simulation costs roughly 1–3 ms per tick at 20 living Luma with the default
+batch size, six times a second, independent of the frame rate.
 
 ## Genuine limitations
 
-- Natural language is rule-based and offline; there is no language model per creature
-- Buildings are exterior shells with usable fixtures rather than full interiors
-- The player cannot drag heavy objects, and there is no verticality to jump or crouch for
-- Violence and substances are abstract systems with social consequences, not graphic content
-- The optional dialogue endpoint is implemented and tested, but you must supply the service
-- Benchmarks come from the development machine; nothing has been measured on the ASUS ROG Zephyrus G14 itself
+- The valley is hand-designed and always the same. Only the Luma vary.
+- Buildings have exteriors only; you interact at doors and counters.
+- Shadows come from a single directional light with one cascade, so very long
+  dawn shadows lose resolution at the far edge of the map.
+- The creature rig is procedural, which keeps it in sync with the mind but caps
+  how expressive it can get. Hand-authored animation would go further.
+- Sound is a handful of oscillators. There is no music.
