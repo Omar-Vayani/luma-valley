@@ -91,6 +91,7 @@ export default function App(): React.ReactElement {
   const boardRef = useRef<RequestBoard>(createBoard())
   const toastId = useRef(1)
   const lastStoryTick = useRef(0)
+  const toldStories = useRef(new Set<number>())
 
   const [ready, setReady] = useState(false)
   const [loadState, setLoadState] = useState({ fraction: 0, label: 'waking the valley' })
@@ -317,14 +318,18 @@ export default function App(): React.ReactElement {
       scanRequests(sim, boardRef.current, sim.time)
       pruneNodes(progressRef.current, sim.time)
 
-      // surface the settlement's own news, sparingly
-      const fresh = storiesSince(sim.stories, lastStoryTick.current, 2)
-      if (fresh.length) {
-        lastStoryTick.current = sim.time
-        for (const story of fresh) {
-          if (story.significance < 0.45) continue
-          toast(formatStory(story), 'story')
-        }
+      // Surface the settlement's own news, sparingly, and once each. A story
+      // that keeps happening between the same two Luma is folded into one
+      // entry whose tick keeps moving, so filtering by time alone showed the
+      // same line over and over.
+      const fresh = storiesSince(sim.stories, lastStoryTick.current, 3)
+      lastStoryTick.current = sim.time
+      for (const story of fresh) {
+        if (story.significance < 0.45) continue
+        if (toldStories.current.has(story.id)) continue
+        toldStories.current.add(story.id)
+        if (toldStories.current.size > 300) toldStories.current.clear()
+        toast(formatStory(story), 'story')
       }
       redraw()
     }, 2500)
