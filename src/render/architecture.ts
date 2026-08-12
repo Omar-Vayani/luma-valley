@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { TOWERS, type Tower, type TowerKind } from '../lab/world'
 import type { Solid } from '../game/collision'
+import type { Fixture, FixtureKind } from '../lab/interact'
 import { heightAt, BRIDGE, distToRoad, ROADS } from '../world/terrain'
 import { LANDMARKS, type Landmark } from '../world/lore'
 
@@ -223,6 +224,26 @@ export interface BuiltPlace {
   lamps: Lamp[]
   /** solid things, in the building's own local space */
   solids: Solid[]
+  /** things you can use, in the building's own local space */
+  furniture: FurnitureSpot[]
+}
+
+/**
+ * A place you can sit, sleep, open or rummage in — recorded where the mesh
+ * was actually put.
+ *
+ * The simulation used to invent its own furniture positions from a tower's
+ * radius, which was fine when buildings were solid blocks and hopeless once
+ * they had insides: you would aim at a bench you could see and the game
+ * would offer you a door two metres underground.
+ */
+export interface FurnitureSpot {
+  kind: FixtureKind
+  x: number
+  z: number
+  rot: number
+  /** doorways get a swinging leaf built for them */
+  width?: number
 }
 
 export interface Lamp {
@@ -312,6 +333,7 @@ function buildShell(kit: Kit, g: THREE.Group, spec: ShellSpec, out: BuiltPlace):
     }
     // step up to the door
     box(g, kit.paleStone, spec.door + 0.9, 0.22, 0.9, 0, 0.33, half.d + 0.55)
+    out.furniture.push({ kind: 'door', x: 0, z: half.d, rot: 0, width: spec.door })
   } else {
     run(-half.w, half.d, half.w, half.d)
   }
@@ -358,6 +380,23 @@ function table(kit: Kit, parent: THREE.Object3D, x: number, z: number, w = 1.6, 
   }
 }
 
+/** A chest you can put things in and take things out of. */
+function chest(kit: Kit, parent: THREE.Object3D, out: BuiltPlace, x: number, z: number, ry = 0): void {
+  const c = new THREE.Group()
+  c.position.set(x, 0, z)
+  c.rotation.y = ry
+  box(c, kit.darkTimber, 0.95, 0.55, 0.6, 0, 0.72, 0)
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.95, 8, 1, false, 0, Math.PI), kit.timber)
+  lid.rotation.z = Math.PI / 2
+  lid.position.y = 1.0
+  lid.castShadow = true
+  c.add(lid)
+  box(c, kit.metal, 0.1, 0.16, 0.62, 0, 0.86, 0)
+  parent.add(c)
+  out.solids.push({ x, z, r: 0.55, height: 1.1, kind: 'chest' })
+  out.furniture.push({ kind: 'container', x, z, rot: ry })
+}
+
 function stool(kit: Kit, parent: THREE.Object3D, x: number, z: number): void {
   box(parent, kit.timber, 0.36, 0.08, 0.36, x, 0.94, z)
   for (const dx of [-0.13, 0.13]) {
@@ -386,7 +425,8 @@ function shelves(kit: Kit, parent: THREE.Object3D, x: number, z: number, w: numb
   parent.add(rack)
 }
 
-function bed(kit: Kit, parent: THREE.Object3D, x: number, z: number, ry = 0): void {
+function bed(kit: Kit, parent: THREE.Object3D, out: BuiltPlace, x: number, z: number, ry = 0): void {
+  out.furniture.push({ kind: 'bed', x, z, rot: ry })
   const b = new THREE.Group()
   b.position.set(x, 0, z)
   b.rotation.y = ry
@@ -425,10 +465,11 @@ function buildHouse(kit: Kit, t: Tower, out: BuiltPlace): void {
 
   // inside: a bed, a hearth, a table to eat at
   hearth(kit, g, out, w / 2 - 1.4, -d / 2 + 0.9)
-  bed(kit, g, -w / 2 + 1.0, -d / 2 + 1.6, 0)
+  bed(kit, g, out, -w / 2 + 1.0, -d / 2 + 1.6, 0)
   table(kit, g, -0.4, 0.9, 1.4, 0.8)
   stool(kit, g, -1.4, 0.9)
   stool(kit, g, 0.7, 0.9)
+  chest(kit, g, out, w / 2 - 1.1, 1.8, -0.3)
   shelves(kit, g, -w / 2 + 0.5, 1.6, 1.6, Math.PI / 2)
   signboard(g, kit, t.color, d)
   out.lamps.push({ pos: new THREE.Vector3(0, 2.6, d / 2 + 0.6), indoor: false })
@@ -446,6 +487,9 @@ function buildShop(kit: Kit, t: Tower, out: BuiltPlace): void {
   // a serving counter across the room, and stock behind it
   box(g, kit.timber, w - 2.4, 0.9, 0.7, 0, 0.89, 1.1)
   box(g, kit.darkTimber, w - 2.2, 0.14, 0.9, 0, 1.36, 1.1)
+  out.furniture.push({ kind: 'counter', x: 0, z: 1.1, rot: 0 })
+  out.solids.push({ x: 0, z: 1.1, r: 1.2, height: 1.1, kind: 'counter' })
+  chest(kit, g, out, w / 2 - 1.1, -d / 2 + 1.2, 0)
   shelves(kit, g, 0, -d / 2 + 0.7, w - 3, 0)
   for (let i = 0; i < 3; i++) {
     cyl(g, kit.timber, 0.34, 0.4, 0.85, 8, -w / 2 + 1.1 + i * 0.95, 0.87, -1.2)
@@ -493,7 +537,14 @@ function buildHall(kit: Kit, t: Tower, out: BuiltPlace): void {
     stool(kit, g, i * 1.3, 0)
   }
   hearth(kit, g, out, -w / 2 + 1.3, -d / 2 + 1.2)
+  chest(kit, g, out, w / 2 - 1.2, -d / 2 + 1.2, 0)
   shelves(kit, g, w / 2 - 0.6, -1, 4, -Math.PI / 2)
+  // benches down each side of the long table, which is what a commons hall is
+  for (const z of [-2.4, 0]) {
+    for (const x of [-2.2, 2.2]) {
+      out.furniture.push({ kind: 'bench', x, z, rot: 0 })
+    }
+  }
   lantern(kit, g, out, 0, 3.4, -1)
   lantern(kit, g, out, 0, 3.4, 3)
   signboard(g, kit, t.color, d + 2)
@@ -506,7 +557,7 @@ function buildMarket(kit: Kit, t: Tower, out: BuiltPlace): void {
   const lockup = new THREE.Group()
   lockup.position.z = -3
   g.add(lockup)
-  const inner: BuiltPlace = { group: lockup, glow: out.glow, lamps: [], solids: [] }
+  const inner: BuiltPlace = { group: lockup, glow: out.glow, lamps: [], solids: [], furniture: [] }
   buildShell(kit, lockup, {
     w, d, wall: 3.2, roof: 'gable', rise: 2.2, door: 1.6,
     walls: kit.plasterWarm, gable: kit.plasterWarm, roofMat: kit.roof, windows: 2,
@@ -535,6 +586,7 @@ function buildMarket(kit: Kit, t: Tower, out: BuiltPlace): void {
     g.add(canopy)
     box(g, kit.timber, 4.0, 0.22, 1.6, sx, 1.1, sz - 0.4)
     out.solids.push({ x: sx, z: sz - 0.4, r: 1.1, height: 1.1, kind: 'counter' })
+    out.furniture.push({ kind: 'counter', x: sx, z: sz - 0.4, rot: 0 })
     box(g, kit.darkTimber, 0.7, 0.7, 0.7, sx - 1.2, 1.55, sz - 0.4)
     box(g, kit.darkTimber, 0.6, 0.6, 0.6, sx + 1.1, 1.5, sz - 0.5)
     cyl(g, kit.thatch, 0.36, 0.42, 0.7, 7, sx + 0.1, 1.55, sz - 0.45)
@@ -554,6 +606,8 @@ function buildYard(kit: Kit, t: Tower, out: BuiltPlace): void {
   }, out)
 
   table(kit, g, -1.6, -1.2, 3.0, 1.1)
+  out.furniture.push({ kind: 'counter', x: -1.6, z: -1.2, rot: 0 })
+  chest(kit, g, out, -w / 2 + 0.9, 2.4, 0)
   cyl(g, kit.metal, 0.5, 0.62, 0.8, 6, 2.4, 0.84, -1.2).castShadow = true
   box(g, kit.metal, 1.3, 0.5, 0.55, 2.4, 1.49, -1.2)
   out.solids.push({ x: 2.4, z: -1.2, r: 0.7, height: 1.3, kind: 'anvil' })
@@ -585,7 +639,7 @@ function buildField(kit: Kit, t: Tower, out: BuiltPlace): void {
   const barn = new THREE.Group()
   barn.position.set(-1, 0, -5)
   g.add(barn)
-  const inner: BuiltPlace = { group: barn, glow: out.glow, lamps: [], solids: [] }
+  const inner: BuiltPlace = { group: barn, glow: out.glow, lamps: [], solids: [], furniture: [] }
   buildShell(kit, barn, {
     w: 9, d: 7, wall: 4.0, roof: 'gable', rise: 3.0, door: 2.6,
     walls: kit.darkTimber, gable: kit.darkTimber, roofMat: kit.roof, frame: false, windows: 1,
@@ -597,6 +651,9 @@ function buildField(kit: Kit, t: Tower, out: BuiltPlace): void {
   for (let i = 0; i < 6; i++) {
     cyl(barn, kit.thatch, 0.42, 0.5, 0.9, 7, -2.5 + (i % 3) * 1.2, 0.9, -1.5 + Math.floor(i / 3) * 1.2)
   }
+  chest(kit, barn, inner, 3, 1, 0)
+  for (const s2 of inner.furniture) out.furniture.push({ ...s2, x: s2.x - 1, z: s2.z - 5 })
+  inner.furniture.length = 0
 
   for (let i = 0; i < 7; i++) {
     const row = box(g, kit.soil, 15, 0.18, 1.0, 0, 0.09, 1 + i * 1.6)
@@ -627,6 +684,7 @@ function buildGrove(kit: Kit, t: Tower, out: BuiltPlace): void {
     bench.rotation.y = -a
     g.add(bench)
     out.solids.push({ x: bx, z: bz, r: 0.8, height: 0.6, kind: 'bench' })
+    out.furniture.push({ kind: 'bench', x: bx, z: bz, rot: -a })
   }
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2
@@ -658,6 +716,13 @@ function buildGraveyard(kit: Kit, t: Tower, out: BuiltPlace): void {
     out.solids.push({ x: dx, z: r - 0.6, r: 0.4, height: 2.8, kind: 'gatepost' })
   }
   box(g, kit.darkTimber, 3.4, 0.26, 0.32, 0, 2.7, r - 0.6)
+  for (const dx of [-3.2, 3.2]) {
+    box(g, kit.timber, 2.2, 0.16, 0.5, dx, 0.5, 2)
+    box(g, kit.darkTimber, 0.2, 0.5, 0.4, dx - 0.9, 0.25, 2)
+    box(g, kit.darkTimber, 0.2, 0.5, 0.4, dx + 0.9, 0.25, 2)
+    out.solids.push({ x: dx, z: 2, r: 0.8, height: 0.6, kind: 'bench' })
+    out.furniture.push({ kind: 'bench', x: dx, z: 2, rot: 0 })
+  }
   signboard(g, kit, t.color, r)
   lantern(kit, g, out, 0, 2.4, r - 0.6, false)
 }
@@ -731,6 +796,20 @@ export interface VillageBuild {
   lamps: Lamp[]
   /** obstacles the player and creatures should not walk through */
   colliders: Solid[]
+  /** the furniture the simulation should use, where it was actually drawn */
+  fixtures: Fixture[]
+  /** doorways that want a leaf built and hung */
+  doors: DoorSpec[]
+}
+
+export interface DoorSpec {
+  id: string
+  x: number
+  y: number
+  z: number
+  /** the wall's facing, so the leaf sits in the opening */
+  angle: number
+  width: number
 }
 
 /** Every building in the register, placed on the terrain and merged. */
@@ -740,9 +819,11 @@ export function buildVillage(kit: Kit): VillageBuild {
   const glow: THREE.Mesh[] = []
   const lamps: Lamp[] = []
   const colliders: Solid[] = []
+  const fixtures: Fixture[] = []
+  const doors: DoorSpec[] = []
 
   for (const t of TOWERS) {
-    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [] }
+    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [], furniture: [] }
     const builder = BUILDERS[t.kind] ?? buildHouse
     builder(kit, t, place)
 
@@ -765,6 +846,32 @@ export function buildVillage(kit: Kit): VillageBuild {
         z: t.z - solid.x * sin + solid.z * cos,
       })
     }
+    // the furniture, rotated into the world so what you point at is what
+    // the simulation acts on
+    let n = 0
+    for (const spot of place.furniture) {
+      const x = t.x + spot.x * cos + spot.z * sin
+      const z = t.z - spot.x * sin + spot.z * cos
+      const id = `${t.id}-${spot.kind}-${n++}`
+      if (spot.kind === 'door') {
+        doors.push({
+          id, x, y: heightAt(t.x, t.z), z,
+          angle: t.facing + spot.rot,
+          width: spot.width ?? 1.5,
+        })
+      }
+      fixtures.push({
+        id,
+        kind: spot.kind,
+        tower: t.id,
+        x,
+        z,
+        rot: t.facing + spot.rot,
+        open: spot.kind === 'door' ? true : undefined,
+        storage: spot.kind === 'container' ? { items: {}, owners: {} } : undefined,
+      })
+    }
+
     root.add(place.group)
   }
 
@@ -775,7 +882,7 @@ export function buildVillage(kit: Kit): VillageBuild {
   addBridge(kit, root)
   addLandmarks(kit, root, glow, lamps, colliders)
 
-  return { group: root, glow, lamps, colliders }
+  return { group: root, glow, lamps, colliders, fixtures, doors }
 }
 
 
@@ -955,7 +1062,7 @@ function addOutbuildings(
   kit: Kit, root: THREE.Group, glow: THREE.Mesh[], lamps: Lamp[], colliders: Solid[],
 ): void {
   for (const b of OUTBUILDINGS) {
-    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [] }
+    const place: BuiltPlace = { group: new THREE.Group(), glow: [], lamps: [], solids: [], furniture: [] }
     buildShell(kit, place.group, b.spec(kit), place)
     b.dress?.(kit, place.group, place)
 
@@ -1000,44 +1107,49 @@ function addDressing(kit: Kit, root: THREE.Group): void {
     }
 
     if (t.kind === 'house') {
-      // a low garden fence along the front, and a washing line at the side
+      // A garden fence across the front with a gap for the path, a washing
+      // line down the side, and the woodpile against the other wall. All of
+      // it outside the walls: a cottage is 8 by 7, and this used to be strung
+      // up in the middle of the bedroom.
       for (let i = -3; i <= 3; i++) {
-        box(place, kit.timber, 0.13, 0.9, 0.13, i * 1.1, 0.45, 4.4)
-        if (i < 3) box(place, kit.timber, 1.1, 0.09, 0.07, i * 1.1 + 0.55, 0.66, 4.4)
+        if (i === 0) continue // the way in
+        box(place, kit.timber, 0.13, 0.9, 0.13, i * 1.3, 0.45, 5.6)
+        if (i !== -1 && i < 3) box(place, kit.timber, 1.3, 0.09, 0.07, i * 1.3 + 0.65, 0.66, 5.6)
       }
-      for (const dx of [-4.4, 4.4]) box(place, kit.darkTimber, 0.16, 2.4, 0.16, dx, 1.2, -1)
-      box(place, kit.paleStone, 8.6, 0.05, 0.05, 0, 2.3, -1)
+      for (const dz of [-2.4, 2.6]) box(place, kit.darkTimber, 0.16, 2.4, 0.16, -5.4, 1.2, dz)
+      box(place, kit.paleStone, 0.05, 0.05, 5.2, -5.4, 2.3, 0.1)
       for (let i = 0; i < 4; i++) {
-        const cloth = box(place, i % 2 ? kit.cloth : kit.clothAlt, 0.8, 0.9, 0.04, -3 + i * 2, 1.8, -1)
-        cloth.rotation.y = (rnd(i) - 0.5) * 0.3
+        const cloth = box(place, i % 2 ? kit.cloth : kit.clothAlt, 0.04, 0.9, 0.8, -5.4, 1.8, -1.7 + i * 1.2)
+        cloth.rotation.z = (rnd(i) - 0.5) * 0.2
       }
-      // a woodpile and a planter
       for (let i = 0; i < 4; i++) {
-        const logMesh = cyl(place, kit.darkTimber, 0.16, 0.16, 1.4, 6, -3.6, 0.18 + Math.floor(i / 2) * 0.34, 1.2 + (i % 2) * 0.36)
-        logMesh.rotation.z = Math.PI / 2
+        const logMesh = cyl(place, kit.darkTimber, 0.16, 0.16, 1.4, 6, 5.2, 0.18 + Math.floor(i / 2) * 0.34, -1 + (i % 2) * 0.36)
+        logMesh.rotation.x = Math.PI / 2
       }
-      box(place, kit.timber, 1.3, 0.4, 0.6, 2.6, 0.2, 3.6)
-      box(place, kit.leaf, 1.1, 0.25, 0.45, 2.6, 0.5, 3.6)
+      box(place, kit.timber, 1.3, 0.4, 0.6, 2.8, 0.2, 4.6)
+      box(place, kit.leaf, 1.1, 0.25, 0.45, 2.8, 0.5, 4.6)
     }
 
     if (t.kind === 'shop' || t.kind === 'market') {
+      // barrels and crates stacked against the outside walls
       for (let i = 0; i < 3; i++) {
-        cyl(place, kit.timber, 0.36, 0.42, 0.9, 8, -4 - i * 0.9, 0.45, -2 + rnd(i) * 1.4)
+        cyl(place, kit.timber, 0.36, 0.42, 0.9, 8, -5.6 - i * 0.9, 0.45, -2 + rnd(i) * 1.4)
       }
-      box(place, kit.darkTimber, 0.8, 0.8, 0.8, 4.2, 0.4, -1.6)
-      box(place, kit.darkTimber, 0.7, 0.7, 0.7, 4.4, 1.15, -1.5)
+      box(place, kit.darkTimber, 0.8, 0.8, 0.8, 5.6, 0.4, -1.6)
+      box(place, kit.darkTimber, 0.7, 0.7, 0.7, 5.7, 1.15, -1.5)
     }
 
     if (t.kind === 'hall') {
-      for (const dx of [-5.4, 5.4]) {
+      for (const dx of [-6.8, 6.8]) {
         box(place, kit.paleStone, 0.9, 0.5, 0.9, dx, 0.25, 6.2)
         box(place, kit.leaf, 0.8, 0.4, 0.8, dx, 0.66, 6.2)
       }
       // a bench either side of the door
-      for (const dx of [-3.6, 3.6]) {
-        box(place, kit.timber, 1.8, 0.14, 0.45, dx, 0.5, 5.4)
-        box(place, kit.darkTimber, 0.16, 0.5, 0.4, dx - 0.7, 0.25, 5.4)
-        box(place, kit.darkTimber, 0.16, 0.5, 0.4, dx + 0.7, 0.25, 5.4)
+      // benches either side of the porch steps, outside the doors
+      for (const dx of [-4.6, 4.6]) {
+        box(place, kit.timber, 1.8, 0.14, 0.45, dx, 0.5, 6.8)
+        box(place, kit.darkTimber, 0.16, 0.5, 0.4, dx - 0.7, 0.25, 6.8)
+        box(place, kit.darkTimber, 0.16, 0.5, 0.4, dx + 0.7, 0.25, 6.8)
       }
     }
 

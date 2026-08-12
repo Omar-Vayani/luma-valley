@@ -36,6 +36,8 @@ const GRAVITY = 21
 const JUMP_SPEED = 6.4
 const EYE_STAND = 1.68
 const EYE_CROUCH = 1.06
+/** eye height with your backside on a bench */
+const EYE_SEATED = 1.0
 const RADIUS = 0.42
 /**
  * Anything steeper than this you slide off rather than climb — roughly a
@@ -52,6 +54,8 @@ export class PlayerController {
   pitch = 0
 
   onGround = true
+  /** sitting on something, until you ask to move */
+  seated = false
   crouching = false
   sprinting = false
   swimming = false
@@ -64,6 +68,7 @@ export class PlayerController {
   private landImpact = 0
   private coyote = 0
   private world: CollisionGrid | null = null
+  private dynamic: Solid[] = []
   private scratch: Solid[] = []
   private stepDistance = 0
   private lastStep = 0
@@ -79,6 +84,14 @@ export class PlayerController {
   /** Everything solid in the valley, filed into a grid. */
   setWorld(grid: CollisionGrid): void {
     this.world = grid
+  }
+
+  /**
+   * Solids that come and go — a door that is shut right now. Held by
+   * reference, so the renderer can rewrite the list every frame.
+   */
+  setDynamicSolids(list: Solid[]): void {
+    this.dynamic = list
   }
 
   /** Where the eyes are, which is where the camera goes. */
@@ -101,6 +114,21 @@ export class PlayerController {
     this.pitch = -0.06
   }
 
+  /** Sit on something at this spot, facing the way it faces. */
+  sit(x: number, z: number, rot: number): void {
+    this.seated = true
+    this.position.x = x
+    this.position.z = z
+    this.position.y = heightAt(x, z)
+    this.velocity.set(0, 0, 0)
+    // look out from the bench rather than into its back
+    this.yaw = rot + Math.PI
+  }
+
+  stand(): void {
+    this.seated = false
+  }
+
   update(dt: number, input: ControllerInputs): void {
     // --- look ---------------------------------------------------------------
     this.yaw -= input.lookX
@@ -108,6 +136,21 @@ export class PlayerController {
     this.pitch = THREE.MathUtils.clamp(this.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02)
     if (this.yaw > Math.PI) this.yaw -= Math.PI * 2
     if (this.yaw < -Math.PI) this.yaw += Math.PI * 2
+
+    // --- sitting ------------------------------------------------------------
+    // Any attempt to move is a request to stand up, which is the only
+    // control scheme for sitting anybody has ever wanted.
+    if (this.seated) {
+      if (input.forward || input.strafe || input.jump) {
+        this.seated = false
+      } else {
+        this.gait = 0
+        this.bobAmount = 0
+        this.eyeHeight += (EYE_SEATED - this.eyeHeight) * Math.min(1, dt * 8)
+        this.position.y = heightAt(this.position.x, this.position.z)
+        return
+      }
+    }
 
     // --- what we are standing in --------------------------------------------
     const ground = heightAt(this.position.x, this.position.z)
@@ -205,8 +248,21 @@ export class PlayerController {
 
     if (this.world) {
       // how high off the ground we are, so a jump clears a fence
-      const feet = this.position.y - heightAt(this.position.x, this.position.z)
-      if (this.world.resolve(probe, RADIUS, Math.max(0, feet), this.scratch)) {
+      const feet = Math.max(0, this.position.y - heightAt(this.position.x, this.position.z))
+      let hit = this.world.resolve(probe, RADIUS, feet, this.scratch)
+      for (const s of this.dynamic) {
+        if (feet >= s.height) continue
+        const dx = probe.x - s.x
+        const dz = probe.z - s.z
+        const min = s.r + RADIUS
+        const d = Math.hypot(dx, dz)
+        if (d >= min || d < 1e-4) continue
+        const push = (min - d) / d
+        probe.x += dx * push
+        probe.z += dz * push
+        hit = true
+      }
+      if (hit) {
         // bleed off the speed we were carrying into whatever we hit, so
         // running at a wall stops rather than juddering along it
         this.velocity.x *= 0.5

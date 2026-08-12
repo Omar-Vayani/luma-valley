@@ -133,6 +133,13 @@ height so a pine is a pine whichever file it came from.
 **`scatter-view.ts`** draws those instances in chunks that frustum-cull, with a
 one-sine wind in the vertex shader phase-shifted by world position.
 
+Furniture is registered where it is drawn. The simulation used to invent its
+own fixture positions from a tower's radius, which was fine when buildings were
+solid blocks and hopeless once they had insides — you would aim at a bench you
+could see and the game would offer you a door two metres underground. Each
+building now reports the bed, bench, counter, chest and doorway it actually
+built, and the renderer installs that list as the settlement's fixtures.
+
 **`architecture.ts`** generates every building from a kit of parts. Each is a
 real shell: four walls with a gap for the doorway, a floor, a roof, furniture
 inside, and a collider for every wall run — so you can walk into the Coinhouse
