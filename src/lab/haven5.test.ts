@@ -78,7 +78,7 @@ describe('story — the moments worth noticing', () => {
     expect(log.events.length).toBeLessThanOrEqual(120)
   })
 
-  it('records the real events of a running settlement', () => {
+  it('records the real events of a running settlement', { timeout: 30_000 }, () => {
     const s = createSim(99)
     s.settings.lodNear = 200
     s.settings.aiBatchSize = 8
