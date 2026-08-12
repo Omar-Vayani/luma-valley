@@ -54,8 +54,10 @@ export interface ViewCallbacks {
   onToast: (text: string) => void
 }
 
-const REACH = 3.2
+const REACH = 4
 const GAZE_RANGE = 26
+/** Close enough that E means "talk to them" even if you are not quite aimed. */
+const NUDGE_RANGE = 2.6
 
 export class WorldView {
   readonly engine: Engine
@@ -325,6 +327,25 @@ export class WorldView {
         best = c
         bestDistance = distance
       }
+    }
+
+    if (!best) {
+      // Standing next to somebody and not quite looking at them should still
+      // count. Being made to line up a crosshair on a wandering creature is
+      // the opposite of a calm afternoon, and it was the single thing that
+      // made the game hardest to play.
+      let nearest: Creature | null = null
+      let nearestDistance = NUDGE_RANGE
+      for (const c of this.sim.creatures) {
+        const distance = Math.hypot(c.x - eye.x, c.z - eye.z)
+        if (distance > nearestDistance) continue
+        const facingThem = ((c.x - eye.x) * forward.x + (c.z - eye.z) * forward.z) / (distance || 1)
+        if (facingThem < -0.2) continue
+        nearest = c
+        nearestDistance = distance
+      }
+      best = nearest
+      bestDistance = nearestDistance
     }
 
     if (best) {

@@ -25,8 +25,8 @@ interface Keyframe {
 /** The day, in five keys. Warm at noon, blue and soft at night. */
 const DAY: Keyframe[] = [
   {
-    at: 0, sky: '#141c30', horizon: '#22304a', sun: '#93a9d6', sunIntensity: 0.22,
-    ambient: '#4b5c7d', ambientIntensity: 0.85, fog: '#1b2337', fogDensity: 0.0075,
+    at: 0, sky: '#243252', horizon: '#3d4f70', sun: '#b9cbe8', sunIntensity: 0.8,
+    ambient: '#8496bd', ambientIntensity: 1.9, fog: '#354260', fogDensity: 0.006,
   },
   {
     at: 0.24, sky: '#7fa3c4', horizon: '#e8b98a', sun: '#ffcf9a', sunIntensity: 0.95,
@@ -41,8 +41,8 @@ const DAY: Keyframe[] = [
     ambient: '#a2b3cc', ambientIntensity: 1.2, fog: '#c9a98d', fogDensity: 0.006,
   },
   {
-    at: 1, sky: '#141c30', horizon: '#22304a', sun: '#93a9d6', sunIntensity: 0.22,
-    ambient: '#4b5c7d', ambientIntensity: 0.85, fog: '#1b2337', fogDensity: 0.0075,
+    at: 1, sky: '#243252', horizon: '#3d4f70', sun: '#b9cbe8', sunIntensity: 0.8,
+    ambient: '#8496bd', ambientIntensity: 1.9, fog: '#354260', fogDensity: 0.006,
   },
 ]
 
