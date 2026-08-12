@@ -13,7 +13,7 @@ import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
 import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, recordSale, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
-import { think, reward } from './brain'
+import { BRAIN_ACTIONS, brainCertainty, rewardSync, thinkSync } from './brain'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
@@ -1233,7 +1233,7 @@ function decide(sim: Sim, c: Creature): void {
   // Re-score and pick a fresh action (mind + free will).
   const scores = scoreActions(sim, c)
   // The creature's own brain (learned experience) biases the action choice.
-  blendBrainFromCache(c, scores)
+  blendBrain(sim, c, scores)
   // Habits: what this creature keeps doing gets a little easier to choose.
   for (const name of Object.keys(scores) as ActionName[]) {
     scores[name] += habitBias(c.habits, name)
@@ -1243,8 +1243,8 @@ function decide(sim: Sim, c: Creature): void {
   c.intentionTicks = COMMITMENT_TICKS
   reinforceHabit(c.habits, chosen, 0.02 * learningRateFor(c.stage))
   execute(sim, c, chosen)
-  // Learning: the outcome of this action teaches the brain a little (async).
-  void learnFromOutcome(sim, c, chosen)
+  // Learning: the outcome of this action teaches the brain a little.
+  learnFromOutcome(sim, c, chosen)
 }
 
 /**
@@ -2952,47 +2952,67 @@ function brainContext(sim: Sim, c: Creature): number[] {
   ]
 }
 
-/** Action indices for the brain's preference vector (aligned with ActionName order). */
-const BRAIN_ACTIONS = ['food', 'work', 'sleep', 'heal', 'drink', 'den', 'school', 'farm', 'park', 'play', 'social', 'steal', 'share', 'fight', 'wander', 'idle', 'deposit', 'withdraw'] as const
+/**
+ * Ask the creature's own brain what it feels like doing, and fold that into
+ * the utility scores.
+ *
+ * This is the part that makes two Luma with identical genomes and identical
+ * needs diverge: the rules in `mind.ts` are the same for everybody, and the
+ * brain is not. It is weighted deliberately below the rules — a starving
+ * creature still goes for food — but it is enough to give an individual
+ * settled preferences about where to go and who to be near.
+ */
+function blendBrain(sim: Sim, c: Creature, scores: Record<string, number>): void {
+  const prefs = thinkSync(c.brain, brainContext(sim, c))
+  c.brainPrefs = prefs
 
-/** Blend the creature's learned brain preferences (cached async) into scores. */
-function blendBrainFromCache(c: Creature, scores: Record<string, number>): void {
-  const prefs = c.brainPrefs
-  if (!prefs) return
+  // an even spread means the brain has no opinion yet, and should not get one
+  const certainty = brainCertainty(prefs)
+  if (certainty < 0.02) return
+  const weight = Math.min(0.55, 0.15 + certainty * 1.6)
+
+  let best = 0
+  for (const p of prefs) if (p > best) best = p
+  if (best <= 0) return
+
   for (let i = 0; i < BRAIN_ACTIONS.length && i < prefs.length; i++) {
     const name = BRAIN_ACTIONS[i]
-    if (name in scores) {
-      scores[name] = scores[name] * 0.7 + prefs[i] * 2.2 // learned bias, scaled
-    }
+    if (!(name in scores)) continue
+    // scale to the range the utility scores live in, then lerp toward it
+    const learned = (prefs[i] / best) * 1.6
+    scores[name] = scores[name] * (1 - weight) + learned * weight
   }
 }
 
-/** Refresh a creature's brain preference cache (async, throttled by sim). */
-export async function refreshBrain(sim: Sim, c: Creature): Promise<void> {
-  try {
-    c.brainPrefs = await think(c.brain, brainContext(sim, c))
-  } catch {
-    c.brainPrefs = null
-  }
+/** Refresh a creature's cached preferences without making a decision. */
+export function refreshBrain(sim: Sim, c: Creature): void {
+  c.brainPrefs = thinkSync(c.brain, brainContext(sim, c))
 }
 
-/** Reward the brain after an action based on how it changed needs. */
-async function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): Promise<void> {
-  try {
-    // skip low-value/no-op actions — reward only meaningful experiences so
-    // tfjs work is minimal on mobile (wander/idle/collect teach nothing)
-    if (action === 'wander' || action === 'idle' || action === 'collect') return
-    const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
-    if (idx < 0) return
-    // reward = how much better the creature feels right now (needs satisfied)
-    const pleasureNow = c.chem.pleasure
-    const hungerNow = c.chem.hunger
-    const r = 0.3 + pleasureNow * 0.5 + hungerNow * 0.3 + (c.wallet > 0 ? 0.1 : 0)
-    await reward(c.brain, brainContext(sim, c), idx, Math.min(1, r))
-    learnLanguageFromAction(sim, c, action)
-  } catch {
-    // learning failure must never break the sim
-  }
+/**
+ * Teach the brain from what just happened.
+ *
+ * The reward is how the creature feels *now*, compared with a neutral middle,
+ * so an action that left it hungrier and poorer is punished rather than merely
+ * un-rewarded. Without the negative half it learned that everything was
+ * roughly fine.
+ */
+function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): void {
+  if (action === 'wander' || action === 'idle' || action === 'collect') return
+  const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
+  if (idx < 0) return
+
+  const wellbeing =
+    c.chem.hunger * 0.3
+    + c.chem.energy * 0.15
+    + c.chem.pleasure * 0.2
+    + c.chem.social * 0.1
+    + c.chem.health * 0.15
+    + (1 - c.chem.fear) * 0.1
+  // -1 .. 1, so a bad outcome moves the weights the other way
+  const signal = (wellbeing - 0.5) * 2
+  rewardSync(c.brain, brainContext(sim, c), idx, Math.max(-0.8, Math.min(1, signal)))
+  learnLanguageFromAction(sim, c, action)
 }
 
 /** Language: doing things teaches words; being near others spreads them. */

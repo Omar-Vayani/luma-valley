@@ -51,8 +51,10 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     // the hearths are a walk from the commons hall, so give them time to nest
     for (let i = 0; i < 320; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
-    // the first one born to this couple, not whoever wandered in afterwards
-    const child = s.creatures[before]
+    // the one born to this couple, not whoever wandered into Haven meanwhile
+    const child = s.creatures.find((x) => x.parentIds.includes(a.id) && x.parentIds.includes(b.id))
+    expect(child, 'the couple had no child').toBeDefined()
+    if (!child) return
     // child's genome came from the parents: aggression is high, not random-low
     expect(child.genome.aggression).toBeGreaterThan(0.5)
     expect(child.genome.curiosity).toBeGreaterThan(0.5)
