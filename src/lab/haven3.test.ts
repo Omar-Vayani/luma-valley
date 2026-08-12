@@ -179,7 +179,7 @@ describe('care, widowhood, and newcomers keep a society alive', () => {
     expect(closed.creatures.length).toBe(startClosed)
   })
 
-  it('a small settlement survives a long run instead of dying out', () => {
+  it('a small settlement survives a long run instead of dying out', { timeout: 30_000 }, () => {
     const s = createSim(99)
     s.settings.lodNear = 200
     s.settings.aiBatchSize = 8

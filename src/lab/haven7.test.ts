@@ -184,8 +184,8 @@ describe('per-system profiling', () => {
 })
 
 describe('the settlement holds together over a long run', () => {
-  // a deliberate long soak: four seeds x 7000 ticks, so it needs room to run
-  it('keeps a living population across several seeds', { timeout: 30000 }, () => {
+  // Soak tests: many ticks × several seeds — well past the 5s Vitest default on CI.
+  it('keeps a living population across several seeds', { timeout: 60_000 }, () => {
     for (const seed of [7, 42, 99, 2026]) {
       const s = createSim(seed)
       s.settings.lodNear = 200
@@ -203,7 +203,7 @@ describe('the settlement holds together over a long run', () => {
     }
   })
 
-  it('an hour of play stays varied rather than repeating one kind of event', () => {
+  it('an hour of play stays varied rather than repeating one kind of event', { timeout: 30_000 }, () => {
     const s = createSim(2026)
     s.settings.lodNear = 200
     s.settings.aiBatchSize = 8

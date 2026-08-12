@@ -58,8 +58,15 @@ the `node` user with a health check on `/`.
 ### GitHub Pages
 
 Already wired: [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
-builds and publishes on every push to `main`. Enable it once under
-**Settings → Pages → Source: GitHub Actions**.
+builds on every push to `main`. **Publishing needs one owner click** (the
+Actions token cannot turn Pages on for you):
+
+1. Open **Settings → Pages**
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**
+3. Re-run **Publish Luma Haven**, or push to `main`
+
+Until that is done, the workflow still runs tests and produces a build; it
+just skips the deploy step instead of failing.
 
 ## After a deploy
 
