@@ -93,7 +93,7 @@ describe('socialbond — multidimensional edges', () => {
 
 describe('lod — time-sliced AI', () => {
   it('bands distant creatures as mid/far', () => {
-    const c = createCreature(1, 'A', GEN(), 80, 0)
+    const c = createCreature(1, 'A', GEN(), DEFAULT_SETTINGS.lodFar + 20, 0)
     expect(bandFor(c, 0, 0, DEFAULT_SETTINGS)).toBe('far')
     c.pos.x = 10
     expect(bandFor(c, 0, 0, DEFAULT_SETTINGS)).toBe('near')

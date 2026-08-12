@@ -145,6 +145,11 @@ export function itemWeight(id: ItemId): number {
   return ITEM_CATALOG[id]?.weight ?? 0.5
 }
 
+/** The name to show a player, rather than the id the code uses. */
+export function itemName(id: ItemId): string {
+  return ITEM_CATALOG[id]?.name ?? id
+}
+
 export function itemBaseValue(id: ItemId): number {
   return ITEM_CATALOG[id]?.value ?? 1
 }

@@ -50,17 +50,21 @@ export interface ScatterResult {
   nodes: ResourceNode[]
 }
 
-/** How many model files each kind can pick from. */
+/**
+ * How many model files each kind can pick from. Must match the manifest in
+ * `src/render/assets.ts` — few enough variants that first load stays quick,
+ * enough that a forest does not look stamped.
+ */
 export const PROP_VARIANTS: Record<PropKind, number> = {
-  pine: 5, pineSnow: 5, tree: 5, treeAutumn: 5, birch: 5, willow: 5, deadTree: 5,
-  bush: 2, berryBush: 2, rock: 7, mossRock: 7, snowRock: 7,
-  stump: 2, log: 2, grass: 3, flower: 1, plant: 5, wheat: 1, corn: 2, lily: 2,
+  pine: 3, pineSnow: 2, tree: 3, treeAutumn: 2, birch: 3, willow: 2, deadTree: 2,
+  bush: 2, berryBush: 2, rock: 4, mossRock: 3, snowRock: 2,
+  stump: 2, log: 2, grass: 3, flower: 1, plant: 3, wheat: 1, corn: 2, lily: 1,
 }
 
 /** Keep the ground clear where the settlement needs it. */
 function blockedBySettlement(x: number, z: number): boolean {
   for (const t of TOWERS) {
-    const pad = t.kind === 'grove' || t.kind === 'graveyard' ? 3 : t.radius * 0.5 + 5
+    const pad = t.kind === 'grove' || t.kind === 'graveyard' ? 3 : t.radius * 0.4 + 3
     if (Math.hypot(t.x - x, t.z - z) < t.radius + pad) return true
   }
   for (const l of LANDMARKS) {
@@ -164,12 +168,15 @@ const PALETTE: Record<SurfaceKind, { density: number; picks: Pick[] }> = {
   },
 }
 
-/** Trees near the eastern grove are birch; the north is pine country. */
+/**
+ * Trees have regional character: pine country to the north, birch out by the
+ * old grove, and a band of turned leaves on the southern slopes.
+ */
 function regionalSwap(kind: PropKind, x: number, z: number): PropKind {
   if (kind === 'tree' || kind === 'pine' || kind === 'birch') {
     if (z < -70) return kind === 'birch' ? 'pine' : kind
     if (x > 40 && z < 20) return kind === 'pine' ? 'birch' : kind
-    if (z > 60) return kind === 'pine' ? 'treeAutumn' : kind
+    if (z > 110 && x < 0) return kind === 'pine' ? 'treeAutumn' : kind
   }
   return kind
 }

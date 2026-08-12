@@ -49,9 +49,10 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     b.age = 700
     const before = s.creatures.length
     // the hearths are a walk from the commons hall, so give them time to nest
-    for (let i = 0; i < 200; i++) s.tick()
+    for (let i = 0; i < 320; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
-    const child = s.creatures[s.creatures.length - 1]
+    // the first one born to this couple, not whoever wandered in afterwards
+    const child = s.creatures[before]
     // child's genome came from the parents: aggression is high, not random-low
     expect(child.genome.aggression).toBeGreaterThan(0.5)
     expect(child.genome.curiosity).toBeGreaterThan(0.5)

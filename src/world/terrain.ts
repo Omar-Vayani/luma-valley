@@ -127,13 +127,13 @@ export const LAKE = { x: 168, z: 96, r: 70 }
  */
 export const ROADS: Point[][] = [
   // north way: plaza past the coinhouse and out through the gorge
-  [{ x: 0, z: 0 }, { x: -4, z: -42 }, { x: -12, z: -86 }, { x: -26, z: -140 }, { x: -42, z: -200 }],
+  [{ x: 0, z: 0 }, { x: -4, z: -42 }, { x: -12, z: -86 }, { x: -26, z: -140 }, { x: -38, z: -178 }],
   // south road: the way travellers arrive
-  [{ x: 0, z: 0 }, { x: 2, z: 46 }, { x: 10, z: 92 }, { x: 18, z: 140 }, { x: 26, z: 200 }],
+  [{ x: 0, z: 0 }, { x: 2, z: 46 }, { x: 10, z: 92 }, { x: 18, z: 140 }, { x: 24, z: 176 }],
   // east lane: out past the grove, over the Coldrun at the Old Bridge
-  [{ x: 0, z: 0 }, { x: 40, z: -6 }, { x: 80, z: -18 }, { x: 112, z: -30 }, { x: 150, z: -40 }, { x: 196, z: -46 }],
+  [{ x: 0, z: 0 }, { x: 40, z: -6 }, { x: 80, z: -18 }, { x: 112, z: -30 }, { x: 150, z: -40 }, { x: 180, z: -44 }],
   // west track: out to the fields and the standing stones
-  [{ x: 0, z: 0 }, { x: -42, z: -2 }, { x: -84, z: 4 }, { x: -130, z: -14 }, { x: -186, z: -46 }],
+  [{ x: 0, z: 0 }, { x: -42, z: -2 }, { x: -84, z: 4 }, { x: -130, z: -14 }, { x: -180, z: -50 }],
   // the hearths lane, curling north-west off the plaza
   [{ x: 0, z: 0 }, { x: -22, z: -16 }, { x: -42, z: -26 }, { x: -58, z: -32 }, { x: -72, z: -44 }],
   // the workyard lane, south-east
@@ -181,7 +181,12 @@ export function distToRoad(x: number, z: number): number {
 
 /** 1 on the packed dirt of a road, falling to 0 on the verge. */
 export function roadStrength(x: number, z: number): number {
-  return 1 - smoothstep(3.4, 7.5, distToRoad(x, z))
+  return 1 - smoothstep(2.1, 4.0, distToRoad(x, z))
+}
+
+/** The paved square around the well, where five ways meet. */
+export function plazaStrength(x: number, z: number): number {
+  return 1 - smoothstep(11, 15.5, Math.hypot(x, z))
 }
 
 /** Distance to the river's centre line. */
@@ -200,7 +205,30 @@ function riverWidth(z: number): number {
  * Ground height at a world position. This is the authority: the mesh, the
  * player's feet, and every scattered prop all read it.
  */
-export function heightAt(x: number, z: number): number {
+/**
+ * Where each landmark needs level ground, and how much of it. Kept here rather
+ * than read from `lore.ts` so the height field has no dependency on the
+ * storytelling — the numbers are about standing up, not about meaning.
+ */
+const LANDMARK_PADS: { id: string; x: number; z: number; r: number }[] = [
+  { id: 'stones', x: -178, z: -58, r: 12 },
+  { id: 'watchtower', x: -124, z: 128, r: 9 },
+  { id: 'wreck', x: 118, z: 62, r: 7 },
+  { id: 'waystone', x: 20, z: 138, r: 5 },
+  { id: 'cairn', x: -70, z: -114, r: 5 },
+  { id: 'arch', x: -32, z: -138, r: 10 },
+  { id: 'orchard', x: -104, z: 44, r: 14 },
+  { id: 'hollowtree', x: 78, z: -52, r: 7 },
+  { id: 'mill', x: -98, z: -34, r: 6 },
+  { id: 'shrine', x: -140, z: 74, r: 5 },
+]
+
+/**
+ * Ground height before the landmarks are given somewhere level to stand.
+ * Split out so a pad can ask what the height *would* be at its own centre
+ * without asking itself.
+ */
+function baseHeight(x: number, z: number): number {
   // rolling country
   let h = fbm(x * 0.0052, z * 0.0052, 4) * 26 + fbm(x * 0.016, z * 0.016, 3) * 4.5
 
@@ -246,11 +274,45 @@ export function heightAt(x: number, z: number): number {
     h = lerp(h, -5.2, channel * channel * (3 - 2 * channel))
   }
 
-  // roads: cut and filled flat, the way roads are
+  // Roads are cut and filled flat, the way roads are — but only across ground
+  // a road would plausibly be built on. Without the taper, the way out of the
+  // valley carves a hundred-metre slot straight through the rim. They keep a
+  // little of the ground's own roll, or they read as painted stripes.
   const road = roadStrength(x, z)
   if (road > 0) {
-    const along = fbm(x * 0.01, z * 0.01, 2) * 1.2
-    h = lerp(h, along, road * 0.86)
+    const buildable = 1 - smoothstep(16, 38, h)
+    const along = fbm(x * 0.01, z * 0.01, 2) * 1.4
+    h = lerp(h, along, road * 0.74 * buildable)
+  }
+
+  // the market square is levelled, the way a market square is
+  const plaza = plazaStrength(x, z)
+  if (plaza > 0) h = lerp(h, 0.15, plaza * 0.95)
+
+  return h
+}
+
+/** Cached ground height at each landmark, so its pad can level to itself. */
+const padHeights = new Map<string, number>()
+
+/**
+ * Ground height at a world position. This is the authority: the mesh, the
+ * player's feet, and every scattered prop all read it.
+ */
+export function heightAt(x: number, z: number): number {
+  let h = baseHeight(x, z)
+
+  // Give every landmark a level footing. Without this the standing stones lean
+  // out of a hillside and the arch has one leg in the air.
+  for (const l of LANDMARK_PADS) {
+    const d = Math.hypot(l.x - x, l.z - z)
+    if (d > l.r * 1.9) continue
+    let base = padHeights.get(l.id)
+    if (base === undefined) {
+      base = baseHeight(l.x, l.z)
+      padHeights.set(l.id, base)
+    }
+    h = lerp(h, base, (1 - smoothstep(l.r, l.r * 1.9, d)) * 0.92)
   }
 
   return h
@@ -306,6 +368,7 @@ export type SurfaceKind =
  * and what the scatter pass is willing to plant.
  */
 export function surfaceAt(x: number, z: number, h = heightAt(x, z)): SurfaceKind {
+  if (plazaStrength(x, z) > 0.4) return 'road'
   if (roadStrength(x, z) > 0.55) return 'road'
   if (h < WATER_LEVEL + 1.4) return 'sand'
   const slope = slopeAt(x, z)

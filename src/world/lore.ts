@@ -173,7 +173,7 @@ export const LANDMARKS: Landmark[] = [
     id: 'arch',
     name: 'The Fallen Arch',
     kind: 'arch',
-    x: -24, z: -168, radius: 18,
+    x: -32, z: -138, radius: 18,
     short: 'The gate of a settlement that was never built.',
     text:
       'In the gorge, a stone arch standing alone with nothing on either side of it. It predates the ' +
