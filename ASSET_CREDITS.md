@@ -1,27 +1,25 @@
 # Asset credits
 
-Luma Valley ships only with assets that permit redistribution.
-
-## Kenney Cube Pets
-
-- Source: user's licensed Google Drive asset library
-- Creator: [Kenney](https://kenney.nl/)
-- Pack: Cube Pets
-- License: CC0 1.0 Universal
-- Runtime subset: cat, dog, fox, bunny, panda, penguin, pig, deer, bee, and cow GLB models
-
-## Kenney Nature Kit
-
-- Source: [Kenney Nature Kit](https://kenney.nl/assets/nature-kit)
-- Creator: Kenney
-- License: CC0 1.0 Universal
-- Runtime subset: wooden bridge, lilies, rocks, and grass OBJ/MTL models
+Luma Haven ships only with assets that permit redistribution.
 
 ## Quaternius Ultimate Nature Pack
 
-- Source: user's licensed Google Drive asset library and [Quaternius](https://quaternius.com/packs/ultimatenature.html)
+- Source: [Quaternius](https://quaternius.com/packs/ultimatenature.html)
 - Creator: Quaternius
 - License: CC0 1.0 Universal
-- Runtime subset: trees, bushes, rocks, logs, stumps, flowers, and grass OBJ/MTL models
+- Runtime subset: pine, common, birch, willow and dead trees; bushes and berry
+  bushes; rocks, mossy rocks and snow rocks; logs, stumps, grass, flowers,
+  plants, wheat, corn and lily pads, as OBJ/MTL
 
-CC0 does not require attribution; these credits are retained to document provenance and thank the creators.
+Everything man-made in the valley — buildings, fences, market stalls, lanterns,
+the well, the bridge, the landmarks and the Luma themselves — is generated in
+code, so the settlement shares one look with the nature models rather than
+sitting beside them.
+
+Earlier builds also shipped the Kenney Cube Pets, Kenney Nature Kit and a
+village prop pack. Nothing loads them any more, and carrying seventeen
+megabytes of unused GLB into every deploy was not worth the option value, so
+they have been removed.
+
+CC0 does not require attribution; these credits are retained to document
+provenance and thank the creators.

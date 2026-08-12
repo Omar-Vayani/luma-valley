@@ -1,105 +1,170 @@
 # Luma Haven
 
-A first-person artificial-life game — a spiritual successor to the *idea* of *Creatures* (1996), not a copy. You live among **Luma**, autonomous beings with genetics, needs, emotions, memories, relationships, jobs, and a small functioning settlement.
+A first-person artificial-life game. You live in a valley with the **Luma** —
+autonomous beings with genetics, needs, emotions, memories, families, jobs and
+grudges — in a settlement that keeps going whether or not you are watching.
 
-**Offline-first.** Runs in any modern browser. No account, no mandatory cloud AI.
+It is a spiritual successor to the *idea* of *Creatures* (1996): the depth is in
+the minds, not the scripts. Nothing here is on rails, and nothing waits for you.
 
-## Play it
+**Runs in any modern browser, offline, with no account.**
 
 ```bash
 npm install
-npm run play        # builds, then serves at http://localhost:4173
+npm run play          # builds, then serves at http://localhost:4173
 ```
 
-That is the whole setup. [`PLAY.md`](PLAY.md) covers the other ways in
-(hot-reloading dev server, publishing to GitHub Pages, installing it on a
-phone) and walks through a first session.
+[`PLAY.md`](PLAY.md) walks through a first session. [`HOSTING.md`](HOSTING.md)
+covers putting it on the web.
 
-```bash
-npm run dev         # same game, hot reload, http://localhost:5173
-npm test            # simulation + UI contract tests
-npm run bench       # measure simulation cost on your machine
-npm run verify:hud  # headless check that the HUD is usable (needs the dev server)
-npm run build       # production build → dist/
-```
+---
 
-Or open a Netlify deploy of this repo. On first launch you wake in the plaza of **Haven** with a handful of Luma already living their lives.
+## What it is to play
 
-### Controls
+You arrive on the South Road with a loaf, a flask and something worth giving
+away. Ahead is Haven: a plaza around a well, shops along Market Row, cottages
+on their own lane, a smithy and a workyard downwind, fields to the west and a
+resting ground east of the green.
 
-| Input | Action |
-|---|---|
-| WASD / left touch zone | Move |
-| Mouse look / right touch zone | Look |
-| Click lock button | Pointer lock (desktop) |
-| Tap a Luma | Select + open talk |
-| 🗨️ Talk | Type natural language (greet, ask, request, flirt, apologize…) |
-| 🧠 Inspector | Why did they do that? needs, scores, beliefs, bonds, family |
-| 🏘️ Society | Norms, who is respected, work roles, overheard talk, chronicle |
-| ⚙️ Settings | Quality, population cap, AI batch, gentle mode, saves, export/import |
-| F3 | Performance overlay (frame time, sim time, population) |
-| Furniture buttons | Rest in a bed, open a door, take from or store in a chest |
-| Dock tools | Spawn, drop bread/coins, comfort/heal/gift, poke/hit/scare/rob |
-| 💬 Teach | Associate a word with a concept nearby Luma can learn |
+Around it is a valley of about half a kilometre across — woods, a river, a lake,
+a burned watchtower, standing stones — with two centuries of history attached to
+it, most of which the Luma will tell you about if you ask.
 
-Saves autosave to the browser (~every 20s) with a one-deep backup, plus three
-manual slots and `.luma.json` export/import. Use `?fresh=1` to start clean.
+- **Walk, sprint, jump, crouch, swim.** The controls are the ones you already
+  know. The crosshair tells you what you are pointing at and what pressing E
+  would do to it.
+- **Take things out of the valley.** Hold E to pick berries, cut grain, chop
+  fallen wood, break stone, gather herbs, fish the shallows. Everything grows
+  back on its own clock.
+- **Make things.** Bake at a hearth, mix remedies at the apothecary, forge a
+  lantern at the smithy. Most recipes need a workshop, which means standing in
+  a building while somebody works in it.
+- **Be asked for things.** The notice board in the plaza carries what Haven
+  actually needs right now, read off the live simulation: somebody hungry and
+  broke, a fever with the infirmary a walk away, an empty shelf because the
+  farmer died, two neighbours who have stopped speaking. Ignore them and the
+  underlying problem goes on being a problem.
+- **Build a little.** Set lanterns, fence posts and stone markers down anywhere,
+  and pick them back up.
+- **Find the twelve places.** Each one enters your journal with what it means.
 
-## What is alive (not scripted)
+## What is alive, and not scripted
 
-- **Minds** — utility scoring, a tiny neural net, psyche, and habits decide what to do
-- **Beliefs** — creatures learn by seeing or being told, can be wrong, and change their minds under evidence
-- **Deception** — a desperate or spiteful Luma may lie; a suspicious, familiar listener may catch it
-- **Feelings** — pride, shame, guilt, gratitude, hope, envy and grief arise from what happens and shift risk-taking
-- **Relationships** — asymmetric trust, affection, attraction, respect, resentment; courtship, rejection, partnership, separation, reconciliation, widowhood
-- **Families** — households claim houses, adults feed (or neglect) children, culture passes to the next generation
-- **Work** — shopkeepers, healers, bartenders, farmers, porters and teachers staff the institutions; their shifts restock the shelves
-- **Economy** — scarcity pricing, subjective value, haggling, refusal of known thieves, debts, inequality
-- **Supply chains** — the farmer grows the grain the baker needs, so a death upstream empties a shelf downstream
-- **Obligations** — a healer treats someone who cannot pay, and that debt follows both of them
-- **Social moves** — mentoring the young, stepping between two fighters, flattery that gets seen through, alliances built from mutual help
-- **Consequences** — theft changes ownership, memory, trust, reputation, prices, and the settlement's own norms
+The simulation is the part that was already good, and it is untouched by the
+rebuild:
 
-## Why did that creature do that?
+- **Minds** — utility scoring, a small neural net, psyche and habits decide what
+  each Luma does next
+- **Beliefs** — they learn by seeing or being told, can be wrong, and change
+  their minds under evidence
+- **Deception** — a desperate or spiteful Luma may lie; a suspicious, familiar
+  listener may catch it
+- **Feelings** — pride, shame, guilt, gratitude, hope, envy and grief arise from
+  what happens, and shift how much risk they will take
+- **Relationships** — asymmetric trust, affection, attraction, respect,
+  resentment; courtship, rejection, partnership, separation, reconciliation
+- **Families** — households claim houses, adults feed or neglect children,
+  culture passes down
+- **Work** — shopkeepers, healers, bartenders, farmers, porters and teachers
+  staff the institutions and keep their own tills
+- **Economy** — scarcity pricing, subjective value, haggling, refusal of known
+  thieves, debts, inequality
+- **Supply chains** — the farmer grows the grain the baker needs, so a death
+  upstream empties a shelf downstream
+- **Consequences** — theft changes ownership, memory, trust, reputation, prices,
+  and the settlement's own norms
 
-Open the 🏘️ panel and Haven tells you what people are talking about, each line
-with the reason behind it:
+## Why did they do that?
+
+Look at a Luma and press **I**. You get the actual state the decision came out
+of: current needs, the top action scores, the reasoning in plain language,
+beliefs with how sure they are and where they came from, relationships
+dimension by dimension, family, debts, promises made to them, and their life
+so far.
+
+Press **H** for the settlement's own chronicle, where every line carries its
+cause:
 
 > *Ruxster stole 2 coins from NaxVee — starving*
-> *AxeGot stole 2 coins from TukEum, who trusted them — takes what they want*
 > *NioFen the farmer died, leaving FloPip — failing health*
 > *no bread: no shopkeeper in Haven*
 
-Select a Luma and open the 🧠 inspector for the rest: needs, the top action
-scores, plain-language reasoning, relationships, family, habits, beliefs (with
-how sure they are and where they came from), debts, promises made to them, and
-their life so far.
+## Controls
 
-## Performance (G14 / RTX 5070 laptop class)
+| Input | Action |
+|---|---|
+| W A S D | Move |
+| Mouse | Look |
+| Shift / Ctrl / Space | Sprint / crouch / jump |
+| E | Interact — hold for the slow jobs |
+| Left click | Give what you hold to whoever you are looking at, or use it |
+| Right click | Set it down in the world |
+| Q | Drop it |
+| 1–9, scroll | Hotbar |
+| Tab | Pack and crafting |
+| R | Notice board |
+| J | Journal — places, history, what you have done |
+| H | Haven — chronicle, norms, work, trade |
+| I | Mind of whoever you are looking at |
+| M | Map |
+| O | Settings |
+| P | Pause · `,` `.` speed |
+| F3 | Performance overlay |
+| Esc | Close anything |
 
-Defaults: medium quality, population cap 16, AI batch 4, sim 6 Hz, pixel-ratio cap 1.5. Distant and sleeping Luma update less often.
+## Performance
 
-`npm run bench` measures the simulation on your own machine. On the development machine, 16 Luma at medium cost 0.22 ms per tick — under 8% of a 60 FPS frame budget — so rendering, not thinking, is what you tune. F3 shows the live cost in game.
+Built for a gaming laptop; the default preset is **high**. Four presets trade
+shadow resolution, draw distance, ground cover and anti-aliasing. The world is
+one flat-shaded terrain mesh, a few thousand instanced plants in chunks that
+cull, and eighteen buildings merged down to one mesh per material — roughly
+500–1000 draw calls and 1.5–2.5M triangles at high, well inside a modern GPU.
+
+The simulation runs at 6 Hz independently of the frame rate, with level-of-detail
+and time-slicing so distant and sleeping Luma cost almost nothing.
+
+## Development
+
+```bash
+npm run dev        # hot-reloading dev server
+npm test           # 500+ unit tests over the simulation, world and gameplay
+npm run playtest   # drives a real browser: walks, gathers, crafts, talks, gives
+npm run gallery    # screenshots of the valley at three times of day
+npm run perf       # draw calls and triangles per quality preset
+npm run bench      # simulation cost
+npm run balance    # simulated hours across seeds: survival, pacing, variety
+npm run lint
+npm run build
+```
+
+`npm run playtest`, `gallery` and `perf` need `npm run dev` running in another
+terminal.
+
+## Layout
+
+| Path | What lives there |
+|---|---|
+| `src/lab/` | The simulation. Minds, bodies, society, economy, saves. No rendering. |
+| `src/world/` | The valley: one deterministic height function, its history, and what grows where. |
+| `src/game/` | Being a player in it: movement, input, targeting, gathering, crafting, requests, progress. |
+| `src/render/` | Three.js. Terrain, water, sky, architecture, creature rigs, effects, the loop. |
+| `src/ui/` | React. The HUD and nine panels. Never touches the scene. |
+
+Documentation: [vision](docs/VISION.md) · [architecture](docs/ARCHITECTURE.md) ·
+[task board](docs/tasks/README.md)
 
 ## Honest limitations
 
-Dialogue is rule-based and offline; there is no language model per creature, and you can point the game at your own service if you want richer wording. Buildings are exterior shells with usable furniture rather than interiors. Institutions have no opening hours. There is no verticality, so no jumping or climbing. Benchmarks come from the development machine, not from a G14. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the [task board](docs/tasks/README.md) for what remains.
+- The valley is hand-designed and always the same one. Only the Luma vary.
+- Buildings have exteriors, not interiors. You interact at doors and counters.
+- There is no combat system worth the name, on purpose.
+- Sound is synthesised from a few oscillators. There is no music.
+- Nothing is voice-acted, and the optional cloud dialogue service is exactly
+  that — optional, off by default, and never required.
 
-## Hosting it
+## Credits
 
-It is a static bundle with no backend: `npm ci && npm run build` writes `dist/`,
-and `npm start` serves it with nothing but Node. [`HOSTING.md`](HOSTING.md) has
-the details, including Docker, GitHub Pages, and the two caching rules that
-matter after a deploy.
-
-## Docs
-
-- [`HOSTING.md`](HOSTING.md) — putting it on the web
-- [`docs/VISION.md`](docs/VISION.md) — full product vision prompt
-- [`docs/tasks/README.md`](docs/tasks/README.md) — task board (one system per file)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack choice, systems, limits
-- [`DESIGN.md`](DESIGN.md) — visual direction
-
-## License
-
-MIT
+Nature and prop models from the low-poly packs listed in
+[`ASSET_CREDITS.md`](ASSET_CREDITS.md). Everything man-made in the valley —
+buildings, fences, lanterns, the bridge, the creatures themselves — is generated
+in code.

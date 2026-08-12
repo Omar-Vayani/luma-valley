@@ -1,4 +1,4 @@
-/* Luma Valley service worker (dependency-free, no build step).
+/* Luma Haven service worker (dependency-free, no build step).
  *
  * Registered ONLY from production builds (src/main.tsx guards with
  * import.meta.env.PROD), so Vite dev/HMR traffic never touches this worker.
@@ -16,7 +16,7 @@
  *   - never cache dev-server URLs, cross-origin requests, or non-GET methods.
  */
 
-const VERSION = 'v3'
+const VERSION = 'v4'
 const SHELL_CACHE = `luma-shell-${VERSION}`
 const RUNTIME_CACHE = `luma-runtime-${VERSION}`
 const KEEP_CACHES = [SHELL_CACHE, RUNTIME_CACHE]

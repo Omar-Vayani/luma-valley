@@ -1,124 +1,120 @@
 # Playing Luma Haven
 
-Three ways in, easiest first. You need [Node.js](https://nodejs.org) 20 or newer
-for the first two; nothing else, and no account.
+You need [Node.js](https://nodejs.org) 20 or newer. Nothing else, and no account.
 
-## 1. Just play it
+## Start it
 
 ```bash
 npm install
 npm run play
 ```
 
-Open the address it prints (usually <http://localhost:4173>). That is the real
-build — the same files that would go on a web server.
+Open the address it prints, usually <http://localhost:4173>. That is the real
+build — the same files that would go on a web server. It also serves on your
+local network, so the address ending in your machine's LAN IP works from a
+phone or tablet on the same Wi-Fi.
 
-`npm run play` also serves on your local network, so the address ending in your
-machine's LAN IP works from a phone or tablet on the same Wi‑Fi.
-
-## 2. Play while changing things
+While you are changing things:
 
 ```bash
-npm install
-npm run dev
+npm run dev        # hot reload, http://localhost:5173
 ```
 
-Same game at <http://localhost:5173>, but edits to the code appear immediately.
-Handy URLs:
+Add `?fresh=1` to the address to start a new valley and throw away the save.
 
-| URL | What it does |
-|---|---|
-| `?fresh=1` | start a brand new Haven, ignoring the saved one |
-| `?seed=1234` | generate a specific world |
+## The first ten minutes
 
-## 3. Put it on the web
+**Click once** to take the mouse. Escape gives it back.
 
-(If somebody else is deploying it for you, point them at
-[`HOSTING.md`](HOSTING.md) — it is a static site with no backend.)
+1. **Walk down into Haven.** You start on the South Road above the settlement.
+   Sprint with Shift. The place name in the top-left changes as you cross into
+   somewhere new.
 
-The repository ships a workflow that publishes the game to GitHub Pages.
+2. **Read the notice board** in the plaza — the wooden frame beside the well, or
+   just press **R**. Everything on it was read off the settlement a moment ago:
+   somebody is genuinely hungry, a shelf is genuinely empty. Take one.
 
-1. On GitHub, open **Settings → Pages**.
-2. Under **Source**, choose **GitHub Actions**.
-3. Push to `main` (or run the "Publish Luma Haven" workflow by hand).
+3. **Pick some berries.** The hedges around the edge of the basin are berry
+   bushes. Point at one and *hold* **E** — the crosshair fills while you work.
+   Grain grows in the western fields, herbs in the woods, fallen wood in the
+   Northwood, stone in the rocky ground, fish in the lake shallows.
 
-You will get a link like `https://<you>.github.io/luma-valley/` that works on
-any device. The game is a PWA: open that link on a phone, choose "Add to home
-screen", and it runs offline afterwards.
+4. **Bake something.** Press **Tab**, then Crafting. Two grain make a loaf, but
+   only at a hearth — the Commons Hall, the tavern, Market Row or a cottage.
+   Remedies need the apothecary. Lanterns need the smithy.
 
-## Your first ten minutes
+5. **Give it to somebody.** Look at a Luma and **left click** with the loaf in
+   your hand. They will remember it. If they were the one who asked, that closes
+   the request and Haven thinks a little better of you.
 
-You wake in the plaza with two loaves, some water, a trinket, and a few coins.
-Somebody is standing nearby.
+6. **Talk.** Look at someone and press **E**. Type in ordinary language: greet
+   them, ask how they are, ask where the bread is, warn them about somebody,
+   offer help. They answer out of what they actually know and feel, and they can
+   refuse you or lie to you. (Typing is typing — the keys do not move you.)
 
-1. **Say hello.** Press **T**, type `hello`, press Enter. Then try
-   `how are you feeling?` — the answer depends on whether they are hungry,
-   frightened, or in love.
-2. **Ask to buy something.** `can i buy bread` — the price depends on how much
-   they need it, how wealthy they are, and what they think of you. Being
-   refused is a normal outcome.
-3. **Give something away.** Walk up to a hungry Luma and press 🤝 next to the
-   bread. They will eat it and remember you did that.
-4. **Ask why.** Press **I** to open the mind inspector on the nearest Luma:
-   what they need, what they are choosing between, who they trust, what they
-   believe, and the events that shaped them.
-5. **Read the town.** Press **H**. Haven tells you what people are talking
-   about, each line with the reason behind it, plus norms, work roles, and
-   shortages with the name of whoever is missing.
-6. **Leave and come back.** The world autosaves. Next time you open **H** it
-   summarises what changed while you were away.
+7. **Ask why.** Still looking at them, press **I**. That is the state their last
+   decision came out of: needs, the scores the utility function produced, their
+   beliefs and how sure they are, who they trust.
+
+8. **Walk out of the valley.** There are twelve places with a story attached.
+   The Founders' Stones on the western plateau, the Burned Beacon on the hill
+   south-west, the Old Bridge over the Coldrun, a sunken boat in Mirror Lake.
+   Getting close writes each one into your journal (**J**).
+
+9. **Stay out after dark.** The shops shut, the windows light, the lamps come
+   on, and the Luma go home. A day is about three and a half minutes.
 
 ## Controls
 
 | Input | Action |
 |---|---|
-| **W A S D** | walk |
-| **🔒 button** | capture the mouse for looking (desktop) |
-| left / right half of the screen | move / look (touch) |
-| click a Luma | select them |
-| **T** | talk |
-| **I** | inspect the nearest (or selected) Luma |
-| **H** | Haven: stories, norms, work, shortages |
-| **M** | market prices |
-| **G** | settings and saves |
-| **?** | controls card |
-| **Space** | pause · **1 2 3** speed · **Esc** close panels |
-| **F3** | performance overlay |
-| 🤝 ⤵️ | hand an item over · drop it |
-| 😴 🚪 🫳 📦 | appear when a bed, door, or chest is in reach |
+| W A S D | Move |
+| Mouse | Look |
+| Shift | Sprint |
+| Space | Jump |
+| Ctrl or C | Crouch |
+| E | Interact. Hold it for chopping, mining and fishing |
+| Left click | Give what you are holding to whoever you look at, or use it yourself |
+| Right click | Set a lantern, fence post or stone marker down |
+| Q | Drop what you are holding |
+| 1–9 or scroll | Choose a hotbar slot |
+| Tab | Pack and crafting |
+| R | Notice board |
+| J | Journal |
+| H | Haven — chronicle, norms, work, trade |
+| I | Mind of whoever you are looking at |
+| M | Map |
+| O | Settings |
+| P | Pause · `,` and `.` for speed |
+| F3 | Performance overlay |
+| Esc | Close anything, or release the mouse |
+
+## Making it run well
+
+Settings (**O**) has four quality presets. **High** is the default and is aimed
+at a gaming laptop; **medium** will hold sixty frames on most integrated
+graphics; **low** turns off shadows and post-processing. The population cap and
+how many minds get a full re-think per tick are in there too — those cost CPU
+rather than GPU.
+
+If the frame rate is fine but the settlement feels sluggish, raise *minds per
+tick*. If the frame rate is poor, drop the quality preset first.
 
 ## Saves
 
-Autosaves to the browser every twenty seconds, with a backup in case a save is
-interrupted. In **settings** there are three manual slots plus **export to a
-file** and **import a file** — that is how you move a world to another machine.
+The world autosaves to your browser every twenty seconds, with a one-deep
+backup, plus three manual slots and export/import to a `.luma.json` file
+(Settings). Your own progress — what you have found, made and been thanked for —
+is saved alongside it.
 
-Different browsers keep separate worlds. Clearing site data deletes them, so
-export anything you want to keep.
+Nothing leaves your machine. There is no server.
 
 ## If something looks wrong
 
-- **Everything is dark / nothing renders** — your browser needs WebGL. Chrome,
-  Edge, Firefox and Safari all support it; a very old integrated GPU with
-  hardware acceleration turned off may not.
-- **It feels heavy** — press **G** and drop quality to *low*, or lower the
-  population cap. **F3** shows where the time is going.
-- **You want a clean start** — add `?fresh=1` to the URL.
-
-## Watching a whole day
-
-Haven runs on a day/night cycle: the market opens in the morning, the tavern
-fills in the evening, and after dark the doors shut and the lamps go out. Press
-**3** for 10× speed to watch a day go by in a couple of minutes — and keep an
-eye on the till, because a closed shop can be burgled.
-
-## Tuning it for your machine
-
-```bash
-npm run bench                       # simulation cost at several populations
-npm run bench -- --pops 8,16,32     # widen the sweep
-npm run balance                     # is a simulated hour survivable and varied?
-```
-
-The defaults (medium, 16 Luma) are chosen so the simulation stays well under a
-sixtieth of a second per frame, leaving the rest for drawing.
+- **Everything is black on load.** Give it a moment: the valley builds its
+  terrain and loads its models before it starts.
+- **The mouse will not lock.** Click the world once. Some browsers refuse
+  pointer lock until you have interacted with the page.
+- **It runs slowly.** Settings → quality → medium or low. Then check F3: if
+  *sim* is the large number rather than *frame*, lower the population cap.
+- **You want to start over.** Add `?fresh=1` to the address.
