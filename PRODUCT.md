@@ -1,37 +1,37 @@
 # Luma Haven
 
-A first-person artificial-life game inspired by the spirit of *Creatures*
-(1996): autonomous Luma with genetics, biochemistry-style needs, heritable
-temperament, multidimensional relationships and a working settlement — in a
-valley you can walk out of, with two centuries of history attached to it.
+A first-person artificial-life game in the spirit of *Creatures* (1996): six
+creatures in a quiet valley, each run by a small neural network you can open
+up and watch learn.
 
 Runs offline in the browser. See [`README.md`](README.md) to play,
+[`PLAY.md`](PLAY.md) for a first session,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how it is put together and
 [`DESIGN.md`](DESIGN.md) for the visual direction.
 
-## The simulation (pure TypeScript, tested)
+## What it is
 
-- **Mind** — utility scoring, a small TF.js net, and a psyche of stress,
-  belonging and values
-- **Social** — asymmetric trust, affection, attraction and resentment;
-  households, courtship, gossip, mediation
-- **Dialogue** — semantic intents plus offline natural language for the player;
-  compact chatter between Luma
-- **Genetics and life** — crossover and mutation, aging, life stages,
-  reproduction under population caps
-- **Economy** — scarcity pricing, wages, tills per institution, debt, theft with
-  consequences, supply chains between trades
-- **Persistence** — versioned saves with migrations, autosave, graceful recovery
-- **Performance** — simulation level-of-detail and AI time-slicing, independent
-  of frame rate
+- **Six minds, no scripts.** Perception, concept and decision lobes; Hebbian
+  association; reinforcement with eligibility traces so a reward can arrive
+  after the action that earned it. Instincts are trained in at birth, and
+  experience can overwrite them.
+- **Learning you can cause.** Feeding builds trust, a swat builds fear, and
+  both show up in the weights within seconds. A creature that has been hit
+  keeps its distance long afterwards.
+- **Words that are learned, not looked up.** Anything you say binds to whatever
+  the mind was doing when it heard it. The interface tells you what a creature
+  thinks a word means by asking the network.
+- **A neural interface.** Every lobe, live, at ten frames a second.
+- **A place rather than a task list.** A timber hamlet, a pond, woods, and a
+  twenty-minute day. Nothing is failable and nobody dies.
 
-## The game on top of it
+## What it deliberately is not
 
-- A half-kilometre valley: woods, a river, a lake, mountains that close it in,
-  and twelve landmarks that are the evidence of its history
-- First-person movement with the controls everyone already has: sprint, jump,
-  crouch, swim, hold to work
-- Gathering, crafting that needs a workshop, and small-scale building
-- Requests read off live need rather than a quest script
-- A journal, a map, a chronicle, and an inspector that shows the state any
-  decision came out of
+An earlier version of this repository had an economy with scarcity pricing, a
+job board, opening hours and tills, courtship and partnership state machines,
+gossip and reputation networks, addiction and withdrawal, emergent cultural
+norms, inheritance, a crafting tree, a quest board and a chronicle — around
+28,000 lines of simulation, most of which the player could not see and none of
+which made a creature more interesting to meet.
+
+It is now about 6,000, and the creatures are the game.

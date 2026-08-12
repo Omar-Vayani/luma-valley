@@ -1,224 +1,96 @@
 # Architecture
 
-Four layers, and one rule between each pair: the layer below never knows the
-layer above exists.
+Four layers, and one rule about which may import which.
 
 ```
-src/lab/      the simulation      minds, bodies, society, economy, saves
-src/world/    the place           terrain, history, what grows where
-src/game/     being in it         movement, input, targeting, gathering, requests
-src/render/   the picture         three.js: terrain, water, sky, buildings, rigs
-src/ui/       the interface       react: HUD and panels
+src/sim      pure TypeScript. The world, the creatures, the brains.
+             Imports nothing from render, game, ui or three.js.
+src/render   three.js. Draws what sim describes, and owns the game loop.
+src/game     input and the first-person controller.
+src/audio    a procedural mixer.
+src/ui       React. Reads a snapshot; never touches the scene graph.
 ```
 
-`src/lab` has no imports from any of the others. `src/render` never imports
-React. `src/ui` never imports three. If those three statements stop being true,
-the seams have gone.
+`src/sim` not knowing that a renderer exists is what makes the simulation
+testable at a thousand times real speed, and is why the tests can run a
+fifteen-minute day in two seconds.
 
----
+## src/sim
 
-## The simulation — `src/lab/`
+| File | What it is |
+|---|---|
+| `brain.ts` | The neural network: perception, concept and decision lobes, Hebbian association, reinforcement with eligibility traces, the word lobe, instincts, and the snapshot the interface draws. |
+| `drives.ts` | Eight drives, how fast each rises, and the weighting that turns them into one number for the reward. |
+| `creature.ts` | A Luma: a genome, a body, a brain, and the state of whatever it is currently doing. |
+| `sim.ts` | The tick. Sense, decide, move, act, learn — plus everything the player can do to a creature. |
+| `village.ts` | The hamlet, described once: buildings, doors, furniture, places and solids. |
+| `terrain.ts` | One height function. Everything else asks it where the ground is. |
+| `collision.ts` | A uniform grid of circles and boxes, shared by the player and the creatures. |
+| `speech.ts` | Reading a line of English, and answering it out of live state. Synchronous. |
+| `save.ts` | The world and the conversation log, in two keys with different write rates. |
 
-Plain, JSON-safe data with a single entry point: `sim.tick()`. One tick advances
-the settlement by one step; the renderer calls it at 6 Hz regardless of frame
-rate. Within a tick, work is phased (`minds`, `bodies`, `economy`, `social`,
-`world`) and each phase is timed, which is what the F3 overlay reports.
+### The tick
 
-Level of detail is by distance from the player: near Luma get a full utility
-re-score every tick, mid ones get one every few ticks, far ones only age and
-metabolise. `settings.aiBatchSize` caps how many full re-scores happen per tick,
-so the cost is bounded no matter the population.
+```
+for each creature:
+  drives rise, fear responds to whether you are close
+  senses are gathered and pushed through the concept lobe
+  Hebbian association runs
+  if the current action is finished (or fear interrupts):
+      the last action is paid its reward — the change in discomfort
+      a new action is chosen from concept × learned weights + words + reflexes
+  the body moves along its route and resolves against the collision grid
+  the action does its work
+```
 
-### The brains
+Two details in there are load-bearing and were bugs before they were details.
 
-Every creature has a small neural network: sixteen inputs of context, twelve
-hidden units, one output per action, softmaxed. It is trained by reward after
-each action, and its preferences are folded into the utility scores before a
-choice is made — which is what lets two Luma with identical genomes and
-identical needs develop different habits.
+**A journey is not a decision.** The dwell timer starts when the walking
+finishes, not when the action is chosen. Counting travel against it meant no
+errand longer than one deliberation could ever be completed: a creature would
+set off for a bed on the far side of the green and change its mind halfway,
+for ever.
 
-It runs on plain arrays. It used to run on TensorFlow.js, which meant a WebGL
-round trip and an async boundary to do six hundred multiply-adds, and because
-the forward pass was async, inference was never actually wired into the
-decision. Every brain in the settlement trained and none of them were ever
-asked. Two other faults were hiding behind that: the cached weight tensors
-were never rebuilt after training mutated the arrays, and reward was
-non-negative, so an action that left a creature hungrier and poorer was merely
-un-rewarded rather than punished.
+**The reward snapshot is taken after the cause, not before.** When a creature
+is struck, the pain lands first and the "how bad are things" reading is taken
+second, so running away is judged on the fear that follows rather than blamed
+for the blow that preceded it. Getting this backwards taught them that fleeing
+was the worst thing they could possibly do.
 
-The brain's authority ramps in with lived experience. A newborn's weights are
-random, and random opinions held confidently are worse than none.
+### Getting about
 
-### Substances
+There is no navmesh. Buildings are convex and there are six of them, so routing
+is three rules:
 
-Four of them, and the parts that make a habit behave like a habit rather than
-a potion: tolerance tracked separately from dependence (so the payoff of a
-dose shrinks while the damage does not), intoxication as a state with
-consequences for movement and judgement, withdrawal that outbids ordinary
-needs, and recovery where dependence fades faster than tolerance. Sparkdust
-and beer differ socially as much as chemically — being seen on the hard stuff
-costs standing and moves the settlement's own sobriety norm.
+1. A trip that crosses a wall is broken into legs that go via the doorway —
+   outside step, threshold, inside step — because the threshold waypoint is
+   what lines a creature up with a 1.2 m gap.
+2. A leg that passes through a building is bent around it, treating the
+   building as a circle.
+3. Contact makes a body slide along the surface rather than stop against it,
+   and a body that has been trying to move and has not for a second gives up
+   and steps around.
 
-## The place — `src/world/`
+## src/render
 
-**`terrain.ts`** is one deterministic height function and the authority on the
-shape of the valley. The renderer tessellates it, the player's feet read it, and
-the scatter pass asks it where a tree can stand. There is no seed: this is *the*
-valley, the same one on every machine, which is what lets the history refer to
-specific ground.
+`view.ts` owns the loop: player, then a fixed-step simulation, then the world,
+then the frame. It publishes a small HUD snapshot ten times a second, which is
+the only thing React sees.
 
-It composes, outward from the plaza: a flattened basin, rolling hills, mountains
-at the rim that hide the world's edge, the Coldrun carved down the east side
-into Mirror Lake, roads cut and filled but only across ground a road would
-plausibly be built on, and a level pad under every landmark. A final rule keeps
-the settlement's own ground above the water line, because a valley floor that
-grows ponds looks like a bug.
+`buildings.ts` generates the hamlet from `sim/village.ts` in the same local
+frame the collision boxes were computed in, then merges each building into one
+mesh per material. The merge matters: a building is honestly described as a
+couple of hundred planks, and drawing it that way cost a draw call each.
 
-**`lore.ts`** is two centuries of history and the twelve landmarks that are its
-evidence. **`scatter.ts`** places several thousand plants and rocks
-deterministically, refusing water, roads, steep ground and building footprints,
-and promotes some of them into the resource nodes the player harvests.
+`luma-view.ts` is the creature rig. Nothing is keyframed; every pose is
+computed from simulation state. Knees fold backwards, which with the shin
+hanging down −Y and the face looking down +Z is a *positive* rotation about X.
+There is a test for it.
 
-## Being in it — `src/game/`
+## Tests
 
-**`input.ts`** is the only place that decides whether a key means "walk forward"
-or the letter W. When a text field has focus or a panel owns the screen, the
-world gets no keys at all, and anything held down is released rather than left
-stuck.
-
-**`controller.ts`** is the feel: acceleration and stopping, gravity, a
-one-metre jump with coyote time, sprint with a field-of-view kick, crouch,
-swimming, head bob, footsteps that know what ground you are on, and a slope
-limit that makes the rim a wall.
-
-**`collision.ts`** is a uniform grid of every solid thing in the valley —
-walls, trunks, boulders, stall posts, barrels, gateposts, and whatever you
-have set down — filed into eight-metre cells at load and queried in constant
-time. Solids carry a height, so a jump clears a fence. There is no physics
-engine, and skipping one leaves the frame budget for the world.
-
-**`targeting.ts`** casts a short cylinder down the middle of the screen and
-takes the first thing it hits. This replaced picking whoever was nearest, which
-is why talking to a crowd used to answer with the same Luma however you turned.
-
-**`gather.ts`**, **`craft.ts`**, **`requests.ts`** and **`progress.ts`** are the
-player's own loop: hold-to-gather with regrowth, recipes that mostly need a
-workshop, requests read off live need rather than a quest script, and the
-standing, discoveries and built things that belong to your particular visit.
-
-Requests are the interesting one. Nothing is authored: a scan every ten seconds
-of game time looks for somebody hungry and unable to pay, a fever, an empty
-shelf with a cause, a grieving neighbour nobody has visited, two Luma whose
-mutual resentment has crossed a line. Completing one changes the real
-underlying state; letting it expire leaves the problem in place.
-
-## The picture — `src/render/`
-
-**`engine.ts`** owns the renderer, an ACES tone curve, optional MSAA, bloom and
-a warm grade with the blacks lifted, behind four quality presets that trade
-shadow resolution, draw distance and ground cover.
-
-**`atmosphere.ts`** is the sky dome, the sun's arc, the moon on the other side
-of it, stars, drifting clouds, and a keyframed light rig. The settlement already
-kept hours; this makes them visible. Dusk carries a lot of fill light on
-purpose — a low sun lights almost nothing that faces upward, and a valley you
-cannot read is not atmospheric.
-
-**`assets.ts`** bakes the low-poly nature packs into instanceable geometry:
-merge the sub-meshes, bake each material's colour into vertex colours *per
-geometry group* (doing it per mesh is how every tree ended up the colour of
-bark), lift the very dark authored greens with a gamma knee, and normalise
-height so a pine is a pine whichever file it came from.
-
-**`scatter-view.ts`** draws those instances in chunks that frustum-cull, with a
-one-sine wind in the vertex shader phase-shifted by world position.
-
-Furniture is registered where it is drawn. The simulation used to invent its
-own fixture positions from a tower's radius, which was fine when buildings were
-solid blocks and hopeless once they had insides — you would aim at a bench you
-could see and the game would offer you a door two metres underground. Each
-building now reports the bed, bench, counter, chest and doorway it actually
-built, and the renderer installs that list as the settlement's fixtures.
-
-**`architecture.ts`** generates every building from a kit of parts. Each is a
-real shell: four walls with a gap for the doorway, a floor, a roof, furniture
-inside, and a collider for every wall run — so you can walk into the Coinhouse
-and cannot cut the corner through the smithy. Eight outbuildings beyond the
-institutions carry the valley's history, and each is merged down The plaza, lamp posts, the Old Bridge and the
-twelve landmarks are built the same way, so the settlement shares one look with
-the nature models: flat-shaded and untextured.
-
-**`luma.ts`** builds the creatures to human proportions — pelvis, spine, chest,
-neck, head, two-segment arms and legs so elbows and knees bend — and poses them
-every frame from what the mind is already doing. Nothing is keyframed, so the
-animation cannot drift out of sync with the state driving it.
-
-The other half of that file is smoothness. The simulation moves bodies six
-times a second and the screen redraws sixty; reading positions straight into
-the transform is what made everybody look like they were teleporting, and
-measuring gait by dividing that jerk by the frame time made the legs blur.
-Positions are followed with a damped spring, and cadence is measured along the
-path actually drawn, so one stride is about three quarters of a metre whatever
-the frame rate.
-
-**`world-view.ts`** is the loop. It owns the player, drives the simulation
-clock, resolves interactions, and hands React a HUD snapshot ten times a second.
-
-## The interface — `src/ui/`
-
-One HUD and nine panels on one design language. The HUD keeps the middle of the
-screen clear except for the crosshair and what the crosshair is telling you;
-anything that needs reading is a panel. Icons are drawn in SVG rather than
-borrowed from an emoji font, so the interface is the same shape everywhere.
-
-Opening a panel releases the pointer lock and stops the world hearing the
-keyboard. It does **not** pause the simulation — the valley does not wait while
-you read about it.
-
-## Persistence
-
-The world saves through `src/lab/save.ts` (versioned, with migrations) into
-local storage, with a one-deep backup, three manual slots, and export/import.
-The player's own progress saves separately and merges over defaults on load, so
-an older save opens rather than breaking.
-
-## Testing
-
-- **`npm test`** — 500-odd unit tests. The simulation's own suite, plus the
-  terrain (determinism, drainage, buildable ground, road gradients), the scatter
-  (nothing in the lake or on a road), gathering, crafting, requests, progress,
-  the controller (walk, sprint, jump, swim, slopes, bounds) and targeting.
-- **`npm run playtest`** — drives a real browser through a real session: loads,
-  walks, opens a conversation, types without walking into a wall, checks the
-  crosshair picks who you point at, gathers a bush, bakes a loaf, gives it away,
-  sets a lantern down, finds a landmark, and opens every panel. This catches the
-  class of bug a unit test cannot: an element that renders but has no size, a
-  key that is swallowed, an interaction that fires on the wrong target.
-- **`npm run perf`** — draw calls and triangles per preset from five viewpoints.
-- **`npm run balance`** — simulated hours across seeds, judging survival,
-  pacing, variety and cause of death.
-
-## Measured
-
-On the software rasteriser used in CI, frame times are meaningless; draw calls
-and triangles are not, and they are the same on any GPU:
-
-| Preset | Draw calls | Triangles |
-|---|---|---|
-| low | 110–560 | 0.7–1.5 M |
-| medium | 200–750 | 1.2–2.2 M |
-| high | 520–1000 | 1.5–2.5 M |
-| ultra | 370–1130 | 1.5–2.8 M |
-
-The simulation costs roughly 1–3 ms per tick at 20 living Luma with the default
-batch size, six times a second, independent of the frame rate.
-
-## Genuine limitations
-
-- The valley is hand-designed and always the same. Only the Luma vary.
-- Buildings have exteriors only; you interact at doors and counters.
-- Shadows come from a single directional light with one cascade, so very long
-  dawn shadows lose resolution at the far edge of the map.
-- The creature rig is procedural, which keeps it in sync with the mind but caps
-  how expressive it can get. Hand-authored animation would go further.
-- Sound is a handful of oscillators. There is no music.
+`npm test` runs the simulation, the rig and the audio rules. `npm run playtest`
+loads the built page in a real browser, takes hold of the same `Sim` and
+`WorldView` the player is using through `window.luma`, and plays through a
+first session: walk up to a creature, talk to it, teach it a word, frighten it,
+and check the brain changed in the way it should have.
