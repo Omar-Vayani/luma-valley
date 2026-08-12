@@ -193,7 +193,7 @@ export async function loadPropGeometries(
 
   const geometries = new Map<PropKind, THREE.BufferGeometry[]>()
   for (const [kind, names] of Object.entries(PROP_FILES) as [PropKind, string[]][]) {
-    geometries.set(kind, new Array(names.length))
+    geometries.set(kind, Array.from({ length: names.length }))
   }
 
   let done = 0

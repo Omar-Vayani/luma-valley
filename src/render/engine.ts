@@ -21,6 +21,8 @@ export interface QualityProfile {
   shadowDistance: number
   bloom: boolean
   bloomStrength: number
+  /** whether undergrowth casts shadows */
+  smallShadows?: boolean
   msaa: number
   /** how far scattered props are drawn */
   propDistance: number
@@ -35,16 +37,18 @@ export const QUALITY: Record<QualityPreset, QualityProfile> = {
     bloom: false, bloomStrength: 0, msaa: 0, propDistance: 150, groundCover: 0.25, grade: false,
   },
   medium: {
-    pixelRatio: 1.25, shadows: true, shadowMapSize: 2048, shadowDistance: 90,
+    pixelRatio: 1.25, shadows: true, shadowMapSize: 2048, shadowDistance: 80,
     bloom: true, bloomStrength: 0.22, msaa: 0, propDistance: 240, groundCover: 0.6, grade: true,
   },
   high: {
-    pixelRatio: 1.5, shadows: true, shadowMapSize: 3072, shadowDistance: 130,
-    bloom: true, bloomStrength: 0.3, msaa: 4, propDistance: 340, groundCover: 1, grade: true,
+    pixelRatio: 1.5, shadows: true, shadowMapSize: 3072, shadowDistance: 105,
+    bloom: true, bloomStrength: 0.3, msaa: 4, propDistance: 330, groundCover: 1, grade: true,
+    smallShadows: true,
   },
   ultra: {
-    pixelRatio: 2, shadows: true, shadowMapSize: 4096, shadowDistance: 170,
-    bloom: true, bloomStrength: 0.34, msaa: 4, propDistance: 460, groundCover: 1, grade: true,
+    pixelRatio: 2, shadows: true, shadowMapSize: 4096, shadowDistance: 140,
+    bloom: true, bloomStrength: 0.34, msaa: 4, propDistance: 440, groundCover: 1, grade: true,
+    smallShadows: true,
   },
 }
 
@@ -142,6 +146,9 @@ export class Engine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.06
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    // every post pass calls render() again, and each call would zero the
+    // counters; reset once a frame so the overlay reports the whole frame
+    this.renderer.info.autoReset = false
 
     this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1400)
     this.camera.rotation.order = 'YXZ'
@@ -210,6 +217,7 @@ export class Engine {
   }
 
   render(): void {
+    this.renderer.info.reset()
     if (this.gradePass) {
       this.gradePass.uniforms.night.value = this.nightAmount
     }

@@ -51,8 +51,10 @@ function buildBase(): HTMLCanvasElement {
       } else {
         const hex = SURFACE_COLOR[surfaceAt(x, z, h)] ?? '#5f8f43'
         const n = parseInt(hex.slice(1), 16)
-        // fake relief with a north-west light
-        const shade = 0.72 + Math.max(-0.4, Math.min(0.4, (h - heightAt(x - 3, z - 3)) * 0.16))
+        // relief from a north-west light, gently: a hard one turns the rim
+        // mountains into television static at this resolution
+        const rise = h - heightAt(x - 4, z - 4)
+        const shade = 0.8 + Math.max(-0.22, Math.min(0.26, rise * 0.05))
         r = ((n >> 16) & 255) * shade
         g = ((n >> 8) & 255) * shade
         b = (n & 255) * shade

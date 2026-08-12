@@ -33,7 +33,16 @@ const THIN: Partial<Record<PropKind, boolean>> = {
   bush: true, berryBush: true,
 }
 
-const CHUNK = 110
+// Bigger chunks mean fewer draw calls but coarser culling. 150 m keeps the
+// whole valley under a few hundred batches while still throwing away most of
+// what is behind you.
+/** Undergrowth: shadow casting here is optional. */
+const SMALL: Partial<Record<PropKind, boolean>> = {
+  bush: true, berryBush: true, stump: true, log: true, rock: true,
+  mossRock: true, snowRock: true,
+}
+
+const CHUNK = 130
 
 function chunkKey(x: number, z: number): string {
   return `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`
@@ -105,6 +114,8 @@ export class ScatterView {
   private nodeList: ResourceNode[] = []
   private lastNodeCheck = -1
   private drawDistance = 340
+  private smallShadows = true
+  private kinds = new Map<THREE.InstancedMesh, PropKind>()
 
   constructor(scatter: ScatterResult, geo: PropGeometrySet) {
     this.group.name = 'scatter'
@@ -139,6 +150,7 @@ export class ScatterView {
       )
       mesh.castShadow = SHADOWS[propKind] ?? false
       mesh.receiveShadow = true
+      this.kinds.set(mesh, propKind)
 
       let cx = 0
       let cz = 0
@@ -155,8 +167,9 @@ export class ScatterView {
       mesh.instanceMatrix.needsUpdate = true
       mesh.computeBoundingSphere()
 
+      // the batch's real extent, so the draw-distance cut is honest
       const centre = new THREE.Vector3(cx / list.length, 0, cz / list.length)
-      this.batches.push({ mesh, centre, radius: CHUNK })
+      this.batches.push({ mesh, centre, radius: mesh.boundingSphere?.radius ?? CHUNK })
       this.group.add(mesh)
     }
   }
@@ -187,6 +200,7 @@ export class ScatterView {
       )
       mesh.castShadow = SHADOWS[propKind] ?? false
       mesh.receiveShadow = true
+      this.kinds.set(mesh, propKind)
 
       let cx = 0
       let cz = 0
@@ -203,13 +217,30 @@ export class ScatterView {
       }
       mesh.instanceMatrix.needsUpdate = true
       mesh.computeBoundingSphere()
-      this.batches.push({ mesh, centre: new THREE.Vector3(cx / list.length, 0, cz / list.length), radius: CHUNK })
+      this.batches.push({
+        mesh,
+        centre: new THREE.Vector3(cx / list.length, 0, cz / list.length),
+        radius: mesh.boundingSphere?.radius ?? CHUNK,
+      })
       this.group.add(mesh)
     }
   }
 
   setDrawDistance(d: number): void {
     this.drawDistance = d
+  }
+
+  /**
+   * Whether undergrowth casts shadows. A bush's shadow is worth about a
+   * pixel and costs a whole extra pass over its geometry.
+   */
+  setSmallShadows(on: boolean): void {
+    if (on === this.smallShadows) return
+    this.smallShadows = on
+    for (const [mesh, kind] of this.kinds) {
+      if (!SMALL[kind]) continue
+      mesh.castShadow = on
+    }
   }
 
   setWind(strength: number): void {

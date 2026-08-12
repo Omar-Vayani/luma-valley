@@ -139,7 +139,7 @@ function Perf({ hud }: { hud: HudSnapshot }): React.ReactElement {
 
 function HudView(props: HudProps): React.ReactElement {
   const { hud, toasts, regionTitle, objectives, standing, showPerf, onOpen, openPanel } = props
-  const dialPos = Math.min(100, Math.max(0, ((hud.day * 0 + timeFraction(hud)) * 100)))
+  const dialPos = Math.min(100, Math.max(0, timeFraction(hud) * 100))
 
   return (
     <div className="hud" data-hud>

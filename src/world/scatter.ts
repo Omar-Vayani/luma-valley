@@ -314,6 +314,7 @@ function scatterShoreline(
     if (Math.abs(x) > TERRAIN_HALF - 6 || Math.abs(z) > TERRAIN_HALF - 6) continue
     const h = heightAt(x, z)
     if (h < WATER_LEVEL - 0.2 || h > WATER_LEVEL + 2.4) continue
+    if (distToRoad(x, z) < 4.2) continue
     const roll = rng()
     if (roll < 0.3) {
       props.push({
@@ -343,6 +344,7 @@ function scatterShoreline(
       if (!x) continue
       const h = heightAt(x, z)
       if (h > WATER_LEVEL + 2) continue
+      if (distToRoad(x, z) < 4.2) continue
       const roll = rng()
       if (roll < 0.35) {
         props.push({

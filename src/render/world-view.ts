@@ -275,6 +275,7 @@ export class WorldView {
     this.atmosphere.setShadowMapSize(profile.shadowMapSize)
     this.atmosphere.sun.castShadow = profile.shadows
     this.scatterView?.setDrawDistance(profile.propDistance)
+    this.scatterView?.setSmallShadows(profile.smallShadows ?? false)
     this.handleResize()
   }
 
@@ -305,6 +306,16 @@ export class WorldView {
   lookAt(x: number, z: number, pitch = -0.05): void {
     this.controller.lookTowards(x, z)
     this.controller.pitch = pitch
+  }
+
+  /** Aim exactly at a point in space, height included. */
+  aimAt(x: number, y: number, z: number): void {
+    const eye = this.controller.eyePosition(new THREE.Vector3())
+    const dx = x - eye.x
+    const dy = y - eye.y
+    const dz = z - eye.z
+    this.controller.yaw = Math.atan2(-dx, -dz)
+    this.controller.pitch = Math.atan2(dy, Math.hypot(dx, dz))
   }
 
   private handleResize = (): void => {
@@ -408,16 +419,21 @@ export class WorldView {
     while (this.simAccum >= step && steps < 8) {
       this.simAccum -= step
       steps++
-      // the sim resolves bodies including the player's; carry any shove back
+      // The sim resolves bodies including the player's, so a Luma walking into
+      // you should push you. But the sim also clamps everything to the
+      // settlement's roaming bounds, and applying that to the player pinned
+      // them inside the village. Take small shoves, ignore the leash.
       const beforeX = this.sim.player.pos.x
       const beforeZ = this.sim.player.pos.z
       this.sim.tick()
       const dx = this.sim.player.pos.x - beforeX
       const dz = this.sim.player.pos.z - beforeZ
-      if (dx || dz) {
+      if (Math.abs(dx) < 1.2 && Math.abs(dz) < 1.2 && (dx || dz)) {
         this.controller.position.x += dx
         this.controller.position.z += dz
       }
+      this.sim.player.pos.x = this.controller.position.x
+      this.sim.player.pos.z = this.controller.position.z
       this.consumeEvents()
     }
     if (steps) this.simMs = performance.now() - start

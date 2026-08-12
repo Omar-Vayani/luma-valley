@@ -127,13 +127,13 @@ export const LAKE = { x: 168, z: 96, r: 70 }
  */
 export const ROADS: Point[][] = [
   // north way: plaza past the coinhouse and out through the gorge
-  [{ x: 0, z: 0 }, { x: -4, z: -42 }, { x: -12, z: -86 }, { x: -26, z: -140 }, { x: -38, z: -178 }],
+  [{ x: 0, z: 0 }, { x: -4, z: -42 }, { x: -12, z: -86 }, { x: -26, z: -136 }, { x: -32, z: -152 }],
   // south road: the way travellers arrive
-  [{ x: 0, z: 0 }, { x: 2, z: 46 }, { x: 10, z: 92 }, { x: 18, z: 140 }, { x: 24, z: 176 }],
+  [{ x: 0, z: 0 }, { x: 2, z: 46 }, { x: 10, z: 92 }, { x: 18, z: 136 }, { x: 21, z: 152 }],
   // east lane: out past the grove, over the Coldrun at the Old Bridge
-  [{ x: 0, z: 0 }, { x: 40, z: -6 }, { x: 80, z: -18 }, { x: 112, z: -30 }, { x: 150, z: -40 }, { x: 180, z: -44 }],
+  [{ x: 0, z: 0 }, { x: 40, z: -6 }, { x: 80, z: -18 }, { x: 112, z: -30 }, { x: 148, z: -40 }, { x: 164, z: -43 }],
   // west track: out to the fields and the standing stones
-  [{ x: 0, z: 0 }, { x: -42, z: -2 }, { x: -84, z: 4 }, { x: -130, z: -14 }, { x: -180, z: -50 }],
+  [{ x: 0, z: 0 }, { x: -42, z: -2 }, { x: -84, z: 4 }, { x: -130, z: -14 }, { x: -160, z: -42 }],
   // the hearths lane, curling north-west off the plaza
   [{ x: 0, z: 0 }, { x: -22, z: -16 }, { x: -42, z: -26 }, { x: -58, z: -32 }, { x: -72, z: -44 }],
   // the workyard lane, south-east
@@ -245,7 +245,9 @@ function baseHeight(x: number, z: number): number {
   const dc = Math.hypot(x, z)
   const basin = 1 - smoothstep(BASIN_RADIUS, 178, dc)
   if (basin > 0) {
-    const gentle = fbm(x * 0.014, z * 0.014, 3) * 2.1 + fbm(x * 0.05, z * 0.05, 2) * 0.5
+    // sits above the water line by design: the valley floor drains, and a
+    // settlement with ponds appearing in it looks like a bug because it is one
+    const gentle = 1.7 + fbm(x * 0.014, z * 0.014, 3) * 1.9 + fbm(x * 0.05, z * 0.05, 2) * 0.45
     h = lerp(h, gentle, basin * basin * (3 - 2 * basin))
   }
 
@@ -280,14 +282,22 @@ function baseHeight(x: number, z: number): number {
   // little of the ground's own roll, or they read as painted stripes.
   const road = roadStrength(x, z)
   if (road > 0) {
-    const buildable = 1 - smoothstep(16, 38, h)
-    const along = fbm(x * 0.01, z * 0.01, 2) * 1.4
-    h = lerp(h, along, road * 0.74 * buildable)
+    const buildable = 1 - smoothstep(34, 70, h)
+    // follow most of the ground's own roll rather than levelling to a datum,
+    // so a road climbing out of the valley climbs instead of trenching
+    const along = h * 0.55 + 1.0 + fbm(x * 0.01, z * 0.01, 2) * 1.1
+    h = lerp(h, along, road * 0.8 * buildable)
   }
 
   // the market square is levelled, the way a market square is
   const plaza = plazaStrength(x, z)
-  if (plaza > 0) h = lerp(h, 0.15, plaza * 0.95)
+  if (plaza > 0) h = lerp(h, 1.75, plaza * 0.95)
+
+  // Nothing inside the settlement's own ground is allowed to be underwater.
+  // The lake and the river are carved deliberately and sit outside this.
+  if (dc < 150 && lake <= 0.001 && rd > w + 12) {
+    h = Math.max(h, WATER_LEVEL + 1.0)
+  }
 
   return h
 }

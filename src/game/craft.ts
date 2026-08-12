@@ -121,10 +121,14 @@ export function craft(inv: Inventory, r: Recipe, atStation: boolean): CraftResul
       .map((i) => `${i.n - countItem(inv, i.id)} more ${itemName(i.id)}`)
     return { ok: false, reason: 'materials', message: `You need ${missing.join(' and ')}.` }
   }
+  // Take the materials out first: two logs weigh more than the lantern they
+  // become, and checking capacity before the swap refused recipes that
+  // actually make your pack lighter.
+  for (const i of r.inputs) removeItem(inv, i.id, i.n)
   if (!canCarry(inv, r.output.id, r.output.n)) {
+    for (const i of r.inputs) addItem(inv, i.id, i.n, 0)
     return { ok: false, reason: 'space', message: 'Your pack is full.' }
   }
-  for (const i of r.inputs) removeItem(inv, i.id, i.n)
   addItem(inv, r.output.id, r.output.n, 0)
   return { ok: true, message: `Made ${itemName(r.output.id)}.` }
 }

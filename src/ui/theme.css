@@ -984,9 +984,9 @@ h3.section:first-child { margin-top: 0; }
 
 .atlas {
   position: relative;
-  width: 100%;
+  width: min(100%, 470px);
+  margin: 0 auto;
   aspect-ratio: 1;
-  max-height: 460px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--line);

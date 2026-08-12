@@ -121,7 +121,7 @@ export const ITEM_CATALOG: Record<ItemId, ItemDef> = {
     use: { hunger: 0.16, thirst: 0.06, pleasure: 0.05 },
   },
   stone: {
-    id: 'stone', name: 'river stone', category: 'material', value: 2, weight: 3, rarity: 0.2,
+    id: 'stone', name: 'river stone', category: 'material', value: 2, weight: 2.2, rarity: 0.2,
     acceptance: 1, durability: -1, effect: 'raw building material',
   },
   fish: {

@@ -258,8 +258,12 @@ export default function App(): React.ReactElement {
 
   const [paused, setPaused] = useState(false)
   useEffect(() => {
-    viewRef.current?.setPaused(paused || panel !== null)
-  }, [paused, panel])
+    // Opening a panel does not stop the valley. It used to, which meant you
+    // could read the journal for ten minutes and wonder why nobody had moved,
+    // and it made a conversation a freeze-frame instead of something someone
+    // could walk away from. Pausing is P, and only P.
+    viewRef.current?.setPaused(paused)
+  }, [paused])
 
   useEffect(() => {
     viewRef.current?.setUiCaptured(panel !== null)

@@ -49,13 +49,15 @@ function key(
 // as a pile of silhouettes. The fill here is deliberately generous.
 //   time  zenith    horizon   fog       sunlight  int   ambient   int   night
 key(0.00, '090e24', '182648', '1a2843', '93a8e2', 0.30, '3a4c7d', 0.70, 1.00)
-key(0.08, '1a2f5c', '52527e', '404870', 'c096ac', 0.50, '4d5c8a', 0.78, 0.78)
-key(0.13, '2f4c86', 'f0a06a', 'a98a80', 'ffb478', 1.05, '8a86a4', 0.92, 0.34)
+key(0.08, '1e3565', '5c5c88', '4a5178', 'c79db0', 0.62, '6a78a4', 1.10, 0.74)
+key(0.13, '2f4c86', 'f0a06a', 'a98a80', 'ffb478', 1.25, '95a1c4', 1.40, 0.34)
 key(0.22, '3d78c4', 'c3ddf0', 'c6dbec', 'ffdcae', 1.55, 'b3c8de', 1.05, 0.06)
 key(0.50, '2f7ad6', 'bfe0f6', 'cae3f4', 'fff4e2', 1.70, 'bcd3e8', 1.12, 0.00)
 key(0.78, '3a72c0', 'ccd9ea', 'ccd8e6', 'ffe6bc', 1.50, 'b6c8dd', 1.05, 0.05)
-key(0.88, '30407e', 'ff8d52', 'b8867a', 'ff9b5c', 1.00, '84789a', 0.90, 0.40)
-key(0.95, '141e42', '3e3656', '323852', '9a8bbe', 0.42, '48527c', 0.76, 0.86)
+// dusk carries a lot of the fill: a low sun lights almost nothing that faces
+// upward, and a valley you cannot read is not atmospheric, it is just dark
+key(0.88, '35478a', 'ff8d52', 'c09080', 'ffa268', 1.25, '93a0c6', 1.45, 0.36)
+key(0.95, '19244c', '4a4064', '3a4060', 'a596c4', 0.60, '6a78aa', 1.15, 0.84)
 key(1.00, '090e24', '182648', '1a2843', '93a8e2', 0.30, '3a4c7d', 0.70, 1.00)
 
 function lerpKey(t: number): SkyKey {
@@ -153,6 +155,10 @@ export interface SkyState {
   night: number
   sunDir: THREE.Vector3
   fogColor: THREE.Color
+  /** what the sky looks like near the skyline, for reflections */
+  horizon: THREE.Color
+  /** the colour of the sunlight itself */
+  sunColor: THREE.Color
   /** how brightly windows and lanterns should burn */
   lampLight: number
 }
@@ -166,6 +172,8 @@ export class Atmosphere {
     night: 0,
     sunDir: new THREE.Vector3(0, 1, 0),
     fogColor: new THREE.Color(0xcae3f4),
+    horizon: new THREE.Color(0xbfe0f6),
+    sunColor: new THREE.Color(0xfff2da),
     lampLight: 0,
   }
 
@@ -292,9 +300,11 @@ export class Atmosphere {
     const t = timeOfDay(tick)
     const k = lerpKey(t)
 
-    // the sun climbs from the eastern ridge at 0.1 and sets past the west at 0.9
-    const p = (t - 0.1) / 0.8
-    const altitude = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI) * 1.32 - 0.06
+    // The sun clears the eastern ridge just after the settlement wakes and is
+    // still above the western one at closing time. It used to drop under the
+    // horizon while the sky was still orange, which left dusk unplayably dark.
+    const p = (t - 0.05) / 0.9
+    const altitude = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI) * 1.28 - 0.02
     const azimuth = -1.9 + p * 2.9
     const cosA = Math.cos(altitude)
     const sunDir = new THREE.Vector3(
@@ -347,6 +357,8 @@ export class Atmosphere {
     this.state.night = k.night
     this.state.sunDir.copy(sunDir)
     this.state.fogColor.copy(fog)
+    this.state.horizon.copy(horizon)
+    this.state.sunColor.copy(sunColor)
     this.state.lampLight = Math.min(1, Math.max(0, (k.night - 0.15) / 0.5))
     return this.state
   }

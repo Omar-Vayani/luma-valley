@@ -210,13 +210,15 @@ const WATER_FRAG = /* glsl */ `
     float shallow = 1.0 - clamp(vDepth / 3.2, 0.0, 1.0);
     vec3 base = mix(deepColor, shallowColor, shallow);
 
-    // fresnel: the water is a mirror at a glance and glass underfoot
-    float f = pow(1.0 - clamp(dot(n, viewDir), 0.0, 1.0), 3.0);
-    vec3 col = mix(base, skyColor, clamp(f * 0.85, 0.0, 0.8));
+    // Fresnel: a mirror at a glance, glass underfoot. Capped well short of a
+    // full mirror — at a low sun a full one turns the whole lake into a sheet
+    // of white paper.
+    float f = pow(1.0 - clamp(dot(n, viewDir), 0.0, 1.0), 4.0);
+    vec3 col = mix(base, skyColor * 0.72, clamp(f * 0.6, 0.0, 0.55));
 
     // a hard little sun glint
     vec3 h = normalize(sunDir + viewDir);
-    col += sunColor * pow(max(dot(n, h), 0.0), 90.0) * 1.4;
+    col += sunColor * pow(max(dot(n, h), 0.0), 120.0) * 1.1;
 
     // foam where the swell meets the shore
     float edge = 1.0 - smoothstep(0.0, 0.52, vDepth);
@@ -284,7 +286,13 @@ export class Water {
   update(
     elapsed: number,
     camera: THREE.Vector3,
-    sky: { sunDir: THREE.Vector3; fogColor: THREE.Color; night: number },
+    sky: {
+      sunDir: THREE.Vector3
+      fogColor: THREE.Color
+      horizon: THREE.Color
+      sunColor: THREE.Color
+      night: number
+    },
     fogNear: number,
     fogFar: number,
   ): void {
@@ -292,7 +300,8 @@ export class Water {
     ;(this.uniforms.cameraPosition_.value as THREE.Vector3).copy(camera)
     ;(this.uniforms.sunDir.value as THREE.Vector3).copy(sky.sunDir)
     ;(this.uniforms.fogColor.value as THREE.Color).copy(sky.fogColor)
-    ;(this.uniforms.skyColor.value as THREE.Color).copy(sky.fogColor)
+    ;(this.uniforms.skyColor.value as THREE.Color).copy(sky.horizon)
+    ;(this.uniforms.sunColor.value as THREE.Color).copy(sky.sunColor)
     this.uniforms.fogNear.value = fogNear
     this.uniforms.fogFar.value = fogFar
     const night = sky.night

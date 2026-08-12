@@ -12,7 +12,7 @@ import { speak, makePromise, tickPromises, promisesTo, inEarshot } from './chatt
 import { createCulture, witnessedAct, normPressure, updateInfluence, currentLeader, transmitCulture } from './norms'
 import { createJobBoard, claimJob, openJobsFor, workShiftAt, isStaffed, releaseJob } from './jobs'
 import { createEconomy, valueTo, negotiate, createLedger, addDebt, repayDebt, totalOwedBy, wealthInequality } from './economy'
-import { createInventory, addItem, inventoryWeight, canCarry, tradeItem, ownerOf, holdsStolenGoods } from './inventory'
+import { BASE_CAPACITY, createInventory, addItem, inventoryWeight, canCarry, tradeItem, ownerOf, holdsStolenGoods } from './inventory'
 import { itemDef, isContraband } from './items'
 import { localProvider, createCloudProvider, providerFor } from './dialogue-provider'
 import { saveSim, loadSim, SAVE_VERSION } from './save'
@@ -352,7 +352,7 @@ describe('items and ownership', () => {
     const inv = createInventory()
     const added = addItem(inv, 'timber', 100)
     expect(added).toBeLessThan(100)
-    expect(inventoryWeight(inv)).toBeLessThanOrEqual(12)
+    expect(inventoryWeight(inv)).toBeLessThanOrEqual(BASE_CAPACITY)
     expect(canCarry(inv, 'timber', 5)).toBe(false)
   })
 

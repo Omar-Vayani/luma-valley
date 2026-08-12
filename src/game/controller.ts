@@ -42,8 +42,12 @@ const JUMP_SPEED = 6.4
 const EYE_STAND = 1.68
 const EYE_CROUCH = 1.06
 const RADIUS = 0.42
-/** Anything steeper than this you slide off rather than climb. */
-const MAX_SLOPE = 0.62
+/**
+ * Anything steeper than this you slide off rather than climb — roughly a
+ * forty-five degree face. Hillsides and the passes out of the valley stay
+ * walkable; the cliffs that close it in do not.
+ */
+const MAX_SLOPE = 0.38
 const COYOTE = 0.12
 
 export class PlayerController {
