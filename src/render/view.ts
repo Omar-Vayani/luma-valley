@@ -314,8 +314,11 @@ export class WorldView {
       const dy = heightAt(c.x, c.z) + 0.8 - eye.y
       const length = Math.hypot(dx, dy, dz) || 1
       const dot = (dx * forward.x + dy * forward.y + dz * forward.z) / length
-      // be more forgiving up close, where a creature fills more of the view
-      const threshold = distance < 4 ? 0.86 : 0.955
+      // A creature fills more of the view the closer it is, so the cone has to
+      // widen as it approaches — otherwise standing right next to somebody
+      // loses them entirely, which is the moment you are most likely to want
+      // to talk to them.
+      const threshold = distance < 1.6 ? 0.1 : distance < 4 ? 0.8 : 0.955
       if (dot < threshold) continue
       if (dot > bestScore || best == null) {
         bestScore = dot

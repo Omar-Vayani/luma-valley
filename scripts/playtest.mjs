@@ -82,7 +82,7 @@ const world = await page.evaluate(() => {
 })
 check('the valley has creatures in it', world.creatures === 6, `${world.creatures} Luma`)
 check('the hamlet is built', world.buildings === 6, `${world.buildings} buildings`)
-check('everything solid is registered', world.solids > 400, `${world.solids} solids`)
+check('everything solid is registered', world.solids > 250, `${world.solids} solids`)
 check('a new valley opens in daylight', world.hour >= 8 && world.hour <= 11, `${world.hour}:00`)
 
 // close the guide
@@ -181,6 +181,19 @@ await page.waitForTimeout(700)
 const chatOpen = await page.locator('.chat-input input').count()
 check('E opens the chat', chatOpen === 1)
 
+// Whoever is under the crosshair is who you end up talking to, and it is not
+// necessarily the one this script set out to reach — another may have wandered
+// in front. Take the name off the panel rather than assuming.
+let talkingTo = found
+if (chatOpen === 1) {
+  const name = (await page.locator('.panel.side header h2').innerText()).trim()
+  const id = await page.evaluate(
+    (n) => window.luma.sim.creatures.find((c) => c.name === n)?.id ?? null,
+    name,
+  )
+  if (id != null) talkingTo = { ...found, name, id }
+}
+
 // ---------------------------------------------------------------- talking
 
 if (chatOpen === 1) {
@@ -204,18 +217,7 @@ if (chatOpen === 1) {
   check('both sides are in the transcript', lineCount === 4, `${lineCount} lines`)
   await screenshot('chat')
 
-  // the transcript has to survive the panel closing and reopening
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(400)
-  await page.evaluate(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))
-    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE' }))
-  })
-  await page.waitForTimeout(600)
-  const kept = await page.locator('.chat-line').count()
-  check('the conversation is kept', kept === 4, `${kept} lines after reopening`)
-
-  // and the mind opens from the chat
+  // the mind opens from the chat
   await page.getByRole('button', { name: 'mind' }).click()
   await page.waitForTimeout(700)
   const lobes = await page.locator('.lobe h3').allInnerTexts()
@@ -225,6 +227,47 @@ if (chatOpen === 1) {
     lobes.map((l) => l.split('\n')[0]).join(', '),
   )
   await screenshot('neural-interface')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+
+  // The transcript has to survive a reload, not just a panel close. This is
+  // the whole of the "it does not save chat" complaint: the log used to live
+  // in React state and went with it.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => !!window.luma, null, { timeout: 60_000 })
+  await page.waitForTimeout(4000)
+  await page.evaluate((q) => window.luma.view.setQuality(q), quality)
+  await page.getByRole('button', { name: 'Go outside' }).click()
+  await page.waitForTimeout(600)
+
+  // first: is it on disk at all?
+  const stored = await page.evaluate((id) => {
+    const raw = localStorage.getItem('luma.chat.v3')
+    if (!raw) return 0
+    const log = JSON.parse(raw)
+    return (log[id] ?? []).length
+  }, talkingTo.id)
+  check('the conversation is written to disk', stored === 4, `${stored} lines stored`)
+
+  // then: does it come back on screen? Stand next to them so they appear in
+  // the nearby list, and open the chat from there.
+  await page.evaluate((id) => {
+    const { sim, view } = window.luma
+    const c = sim.creature(id)
+    if (c) view.teleport(c.x + 1.6, c.z + 1.6)
+  }, talkingTo.id)
+  await page.waitForTimeout(1200)
+
+  const reopened = page.locator('.corner.bottom-left .nearby-row', { hasText: talkingTo.name })
+  const rows = await reopened.count()
+  if (rows) {
+    await reopened.first().click()
+    await page.waitForTimeout(800)
+  }
+  const kept = await page.locator('.chat-line').count()
+  check('the conversation comes back on screen', kept === 4,
+    `${kept} lines shown${rows ? '' : ' (no nearby row to click)'}`)
+  await screenshot('chat-after-reload')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
 }

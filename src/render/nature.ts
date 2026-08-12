@@ -36,11 +36,19 @@ const FILES: Record<PropKind, string[]> = {
   flower: ['Flowers'],
 }
 
-/** What each kind is like to walk into. Undergrowth you walk through. */
+/**
+ * What each kind is like to walk into. Undergrowth you walk through.
+ *
+ * The trunk radii are wider than the trunks. That is deliberate: these models
+ * carry their foliage low, and a radius that only fenced off the wood let you
+ * stand with your head inside the canopy, which fills the screen with a solid
+ * brown cone and is the single most disorienting thing that used to happen in
+ * the woods.
+ */
 const SOLIDITY: Partial<Record<PropKind, { r: number; height: number }>> = {
-  pine: { r: 0.4, height: 8 },
-  tree: { r: 0.42, height: 7 },
-  birch: { r: 0.32, height: 8 },
+  pine: { r: 0.8, height: 8 },
+  tree: { r: 0.85, height: 7 },
+  birch: { r: 0.6, height: 8 },
   rock: { r: 0.68, height: 1.3 },
   stump: { r: 0.4, height: 0.8 },
   log: { r: 0.38, height: 0.7 },
@@ -66,9 +74,17 @@ const cache = new Map<string, THREE.BufferGeometry>()
  */
 function lift(c: THREE.Color): THREE.Color {
   const out = c.clone().convertLinearToSRGB()
-  out.r = Math.pow(out.r, 0.58)
-  out.g = Math.pow(out.g, 0.58)
-  out.b = Math.pow(out.b, 0.58)
+  // a gamma knee rather than a multiplier, so the darkest greens come up
+  // without the mid tones blowing out and losing their hue
+  out.r = Math.pow(out.r, 0.45)
+  out.g = Math.pow(out.g, 0.45)
+  out.b = Math.pow(out.b, 0.45)
+  // and a floor, because a black bush is a hole in the valley rather than a
+  // bush, and the fill light is not enough to rescue it on its own
+  const floor = 0.16
+  out.r = floor + out.r * (1 - floor)
+  out.g = floor + out.g * (1 - floor)
+  out.b = floor + out.b * (1 - floor)
   return out.convertSRGBToLinear()
 }
 
@@ -164,13 +180,13 @@ export function scatter(seed = 1): Prop[] {
 
   // woodland: clumps rather than an even sprinkle, which is what makes a
   // treeline look grown rather than generated
-  for (let clump = 0; clump < 150; clump++) {
+  for (let clump = 0; clump < 95; clump++) {
     const angle = rand() * Math.PI * 2
     const radius = 30 + rand() * (HALF - 46)
     const cx = Math.sin(angle) * radius
     const cz = Math.cos(angle) * radius
     const kind: PropKind = rand() < 0.45 ? 'pine' : rand() < 0.7 ? 'tree' : 'birch'
-    const count = 3 + Math.floor(rand() * 6)
+    const count = 2 + Math.floor(rand() * 4)
     for (let i = 0; i < count; i++) {
       tryPlace(
         kind,
@@ -181,23 +197,23 @@ export function scatter(seed = 1): Prop[] {
     }
   }
 
-  for (let i = 0; i < 130; i++) {
+  for (let i = 0; i < 90; i++) {
     const angle = rand() * Math.PI * 2
     const radius = 24 + rand() * (HALF - 36)
     tryPlace('rock', Math.sin(angle) * radius, Math.cos(angle) * radius, 0.6 + rand() * 0.8)
   }
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 55; i++) {
     const angle = rand() * Math.PI * 2
     const radius = 24 + rand() * (HALF - 40)
     tryPlace(rand() < 0.5 ? 'stump' : 'log', Math.sin(angle) * radius, Math.cos(angle) * radius, 0.8 + rand() * 0.5)
   }
-  for (let i = 0; i < 320; i++) {
+  for (let i = 0; i < 190; i++) {
     const angle = rand() * Math.PI * 2
     const radius = 22 + rand() * (HALF - 34)
     tryPlace('bush', Math.sin(angle) * radius, Math.cos(angle) * radius, 0.7 + rand() * 0.6)
   }
   // ground cover comes closer in, because it is walk-through
-  for (let i = 0; i < 1400; i++) {
+  for (let i = 0; i < 750; i++) {
     const angle = rand() * Math.PI * 2
     const radius = 12 + rand() * (HALF - 24)
     const x = Math.sin(angle) * radius
@@ -238,10 +254,13 @@ export class NatureView {
     this.group.name = 'nature'
     const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
 
-    // one InstancedMesh per (kind, variant)
+    // one InstancedMesh per (kind, variant). The undergrowth is thinned with
+    // the seeded generator rather than Math.random, so the same valley looks
+    // the same every time it is loaded at the same settings.
+    const thin = mulberry32(0x51ee)
     const buckets = new Map<string, Prop[]>()
     for (const p of props) {
-      if ((p.kind === 'grass' || p.kind === 'flower') && Math.random() > groundCover) continue
+      if ((p.kind === 'grass' || p.kind === 'flower') && thin() > groundCover) continue
       const key = `${p.kind}:${p.variant}`
       const list = buckets.get(key)
       if (list) list.push(p)

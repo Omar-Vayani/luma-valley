@@ -9,8 +9,6 @@ export interface QualityProfile {
   bloom: boolean
   bloomStrength: number
   msaa: number
-  /** how far scattered trees and rocks are drawn */
-  propDistance: number
   /** fraction of the undergrowth kept */
   groundCover: number
   grade: boolean
@@ -19,15 +17,15 @@ export interface QualityProfile {
 export const QUALITY: Record<QualityPreset, QualityProfile> = {
   low: {
     pixelRatio: 1, shadows: false, shadowMapSize: 1024, shadowDistance: 45,
-    bloom: false, bloomStrength: 0, msaa: 0, propDistance: 110, groundCover: 0.3, grade: false,
+    bloom: false, bloomStrength: 0, msaa: 0, groundCover: 0.3, grade: false,
   },
   medium: {
     pixelRatio: 1.25, shadows: true, shadowMapSize: 2048, shadowDistance: 65,
-    bloom: true, bloomStrength: 0.18, msaa: 0, propDistance: 160, groundCover: 0.65, grade: true,
+    bloom: true, bloomStrength: 0.18, msaa: 0, groundCover: 0.65, grade: true,
   },
   high: {
     pixelRatio: 1.5, shadows: true, shadowMapSize: 3072, shadowDistance: 85,
-    bloom: true, bloomStrength: 0.24, msaa: 4, propDistance: 220, groundCover: 1, grade: true,
+    bloom: true, bloomStrength: 0.24, msaa: 4, groundCover: 1, grade: true,
   },
 }
 

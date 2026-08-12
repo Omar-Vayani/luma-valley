@@ -107,7 +107,7 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.06
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
     // every post pass calls render() again, and each call would zero the
     // counters; reset once a frame so the overlay reports the whole frame
     this.renderer.info.autoReset = false
