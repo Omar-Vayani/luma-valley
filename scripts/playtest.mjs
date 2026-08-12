@@ -351,6 +351,92 @@ check(
   found.discovered.join(', ') || 'nothing found',
 )
 
+// --- buying and selling ------------------------------------------------------
+const shopping = await page.evaluate(async () => {
+  const l = window.luma
+  const world = await import('/src/lab/world.ts')
+  const inv = await import('/src/lab/inventory.ts')
+  const market = world.findTower('food')
+  // stand at the counter with coins and something they want
+  l.view.teleport(market.x, market.z + market.radius + 1)
+  l.sim.player.wallet = 40
+  inv.addItem(l.sim.player.inventory, 'grain', 2, 0)
+  l.sim.economy.goods.bread.stock = Math.max(3, l.sim.economy.goods.bread.stock)
+  const before = {
+    wallet: l.sim.player.wallet,
+    bread: l.sim.player.inventory.items.bread ?? 0,
+    grain: l.sim.player.inventory.items.grain ?? 0,
+  }
+  const bought = l.sim.playerBuy('food', 'bread')
+  const sold = l.sim.playerSell('food', 'grain')
+  return {
+    before,
+    bought,
+    sold,
+    after: {
+      wallet: l.sim.player.wallet,
+      bread: l.sim.player.inventory.items.bread ?? 0,
+      grain: l.sim.player.inventory.items.grain ?? 0,
+    },
+  }
+})
+check(
+  'you can buy from a shop at the price the Luma pay',
+  shopping.bought.ok && shopping.after.bread > shopping.before.bread
+    && shopping.after.wallet < shopping.before.wallet,
+  shopping.bought.message,
+)
+check(
+  'and sell into its till',
+  shopping.sold.ok && shopping.after.grain < shopping.before.grain,
+  shopping.sold.message,
+)
+
+// --- a counter opens the shop ------------------------------------------------
+await page.evaluate(async () => {
+  const l = window.luma
+  const counter = l.sim.fixtures.find((f) => f.kind === 'counter' && f.tower === 'food')
+  if (!counter) return
+  l.view.teleport(counter.x, counter.z + 2)
+  l.view.aimAt(counter.x, 1.0, counter.z)
+})
+await until(() => window.luma.view.currentTarget?.kind === 'fixture', null, 'a counter under the crosshair')
+await page.keyboard.press('KeyE')
+await page.waitForSelector('[data-panel="shop"]', { timeout: 10_000 }).catch(() => {})
+check('E at a counter opens the shop', await page.locator('[data-panel="shop"]').count() === 1)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(400)
+
+// --- an empty hand is a hand -------------------------------------------------
+const comforted = await page.evaluate(async () => {
+  const l = window.luma
+  const c = l.sim.creatures.find((x) => x.alive)
+  c.chem.pleasure = 0.2
+  c.pos = { x: l.view.playerPosition().x + 1.4, z: l.view.playerPosition().z + 1.4 }
+  const before = c.chem.pleasure
+  l.view.aimAt(c.pos.x, 1.2, c.pos.z)
+  await new Promise((r) => setTimeout(r, 500))
+  l.view.useHeld(null)
+  return { before, after: c.chem.pleasure, id: c.id }
+})
+check(
+  'an empty hand on somebody comforts them',
+  comforted.after > comforted.before,
+  `pleasure ${comforted.before.toFixed(2)} to ${comforted.after.toFixed(2)}`,
+)
+
+// --- the toolbar is reachable while the mouse is free ------------------------
+const toolBox = await page.locator('[data-tool="journal"]').boundingBox()
+let toolClickable = false
+if (toolBox) {
+  const hit = await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y)
+    return el?.closest('[data-tool]')?.getAttribute('data-tool') ?? null
+  }, { x: toolBox.x + toolBox.width / 2, y: toolBox.y + toolBox.height / 2 })
+  toolClickable = hit === 'journal'
+}
+check('the top-right buttons are not covered by anything', toolClickable)
+
 // --- every panel opens -----------------------------------------------------
 const panels = [
   ['KeyR', 'board'], ['Tab', 'pack'], ['KeyJ', 'journal'], ['KeyH', 'society'],

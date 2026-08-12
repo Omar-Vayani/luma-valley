@@ -654,9 +654,31 @@ export class WorldView {
     this.viewmodel.setItem(item)
   }
 
-  /** Left click: give what you are holding, or use it on yourself. */
+  /**
+   * Left click. What it does depends on what is in your hand and what you are
+   * looking at: an empty hand is a hand on somebody's shoulder, a stick is a
+   * stick, and anything else is offered to them.
+   */
   useHeld(item: ItemId | null): void {
     this.viewmodel.swing()
+    const looking = this.target
+    if (looking && looking.kind === 'creature') {
+      const c = this.sim.creatureById(looking.id)
+      if (c && c.alive) {
+        if (!item || countItem(this.sim.player.inventory, item) <= 0) {
+          this.sim.comfort(c.id)
+          this.fx.burst('heart', looking.point, 5)
+          this.callbacks.onToast(`You put a hand on ${c.name}'s shoulder.`, 'good')
+          return
+        }
+        if (item === 'stick') {
+          this.sim.playerFight(c.id)
+          this.fx.burst('chip', looking.point, 8)
+          this.callbacks.onToast(`You strike ${c.name}. Haven saw that.`, 'bad')
+          return
+        }
+      }
+    }
     if (!item) return
     if (countItem(this.sim.player.inventory, item) <= 0) return
     const target = this.target

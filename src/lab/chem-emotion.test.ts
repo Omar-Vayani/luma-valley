@@ -36,12 +36,14 @@ describe('chem — needs', () => {
     applyDrink(c, { addictionProne: 0.8 } as Genome)
     expect(c.pleasure).toBeGreaterThan(0.5)
     expect(c.intoxication).toBeGreaterThan(0)
-    expect(c.addiction.drink).toBeGreaterThan(0)
+    // one habit, tracked under one key, wherever the drink came from
+    expect(c.addiction.brew).toBeGreaterThan(0)
+    expect(c.addiction.drink).toBeUndefined()
   })
 
   it('withdrawal spikes fear when an addict is deprived', () => {
     const c = createChem()
-    c.addiction.drink = 0.9
+    c.addiction.medicine = 0.9
     const before = c.fear
     tickChem(c)
     expect(c.fear).toBeGreaterThan(before + 0.1)

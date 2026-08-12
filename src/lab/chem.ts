@@ -117,8 +117,10 @@ export function applyDrink(c: ChemState, genome: Genome, tick = 1): void {
   c.pleasure = clamp01(c.pleasure + 0.35)
   c.intoxication = clamp01(c.intoxication + 0.3)
   c.social = clamp01(c.social + 0.15)
+  // the same key the tavern and `substances.ts` use, so one habit is tracked
+  // in one place rather than two that never meet
   const dose = 0.08 + genome.addictionProne * 0.25
-  c.addiction.drink = clamp01((c.addiction.drink ?? 0) + dose)
+  c.addiction.brew = clamp01((c.addiction.brew ?? 0) + dose)
   c.lastDose.drink = tick
 }
 

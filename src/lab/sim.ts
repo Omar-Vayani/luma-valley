@@ -129,7 +129,6 @@ export interface Sim {
   economy: Economy
   spawnCreature(genome?: Genome, x?: number, z?: number): Creature
   tick(): void
-  poke(id: number): void
   hit(id: number): void
   dropFood(x: number, z: number): void
   dropMoney(x: number, z: number, amount: number): void
@@ -520,12 +519,6 @@ export function createSim(seed = 1): Sim {
         fromPlayer: false,
       })
       return turn
-    },
-    poke(id: number): void {
-      const c = sim.creatureById(id)
-      if (!c || !c.alive) return
-      c.chem.fear = clamp01(c.chem.fear + 0.05)
-      emit(sim, 'flinch', c, undefined, c.pos.x, c.pos.z)
     },
     hit(id: number): void {
       const c = sim.creatureById(id)
