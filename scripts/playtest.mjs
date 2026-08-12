@@ -437,6 +437,125 @@ if (toolBox) {
 }
 check('the top-right buttons are not covered by anything', toolClickable)
 
+// --- every fixture does what the crosshair says it will ----------------------
+/** Stand in front of a fixture of this kind and aim at it. */
+const approach = async (kind, tower) => page.evaluate(async (opts) => {
+  const l = window.luma
+  const t = await import('/src/world/terrain.ts')
+  const f = l.sim.fixtures.find((x) => x.kind === opts.kind && (!opts.tower || x.tower === opts.tower))
+  if (!f) return null
+  // stand a step back from it, along the direction it faces
+  const angle = f.rot ?? 0
+  const x = f.x + Math.sin(angle) * 1.5
+  const z = f.z + Math.cos(angle) * 1.5
+  l.view.teleport(x, z)
+  l.view.aimAt(f.x, t.heightAt(f.x, f.z) + 0.6, f.z)
+  return { id: f.id, kind: f.kind, tower: f.tower, x: f.x, z: f.z }
+}, { kind, tower: tower ?? null })
+
+const facing = async (id) => {
+  const ok = await until(
+    (want) => window.luma.view.currentTarget?.fixture?.id === want, id,
+    `the ${id} under the crosshair`, 8000,
+  )
+  return ok
+}
+
+// benches: sit down, and get up again
+const bench = await approach('bench')
+if (bench && await facing(bench.id)) {
+  const verb = await page.evaluate(() => window.luma.view.currentTarget?.verb ?? '')
+  check('a bench offers to be sat on', verb === 'Sit on', verb || 'nothing targeted')
+  await page.keyboard.press('KeyE')
+  await page.waitForTimeout(700)
+  const seated = await page.evaluate(() => window.luma.view.seated)
+  check('pressing E on a bench sits you down', seated === true)
+  await page.keyboard.down('KeyW')
+  await page.waitForTimeout(600)
+  await page.keyboard.up('KeyW')
+  const up = await page.evaluate(() => window.luma.view.seated)
+  check('and walking gets you back up', up === false)
+} else {
+  check('a bench offers to be sat on', false, 'no bench found')
+}
+
+// doors: open and shut
+const door = await approach('door')
+if (door && await facing(door.id)) {
+  const before = await page.evaluate((id) => window.luma.sim.fixtures.find((f) => f.id === id).open, door.id)
+  await page.keyboard.press('KeyE')
+  await page.waitForTimeout(600)
+  const after = await page.evaluate((id) => window.luma.sim.fixtures.find((f) => f.id === id).open, door.id)
+  check('a door opens and shuts', before !== after, `${before} then ${after}`)
+  // and the leaf actually moves
+  const swung = await page.evaluate((id) => {
+    const d = window.luma.view.doors.find((x) => x.id === id)
+    return d ? Math.abs(d.pivot.rotation.y - d.base) : -1
+  }, door.id)
+  check('and the leaf swings with it', swung >= 0, `${swung.toFixed(2)} rad from the wall`)
+  await page.keyboard.press('KeyE')
+  await page.waitForTimeout(500)
+} else {
+  check('a door opens and shuts', false, 'no door found')
+}
+
+// beds: sleeping restores you
+const bed = await approach('bed')
+if (bed && await facing(bed.id)) {
+  const before = await page.evaluate(() => {
+    window.luma.sim.player.health = 0.5
+    return window.luma.sim.player.health
+  })
+  await page.keyboard.press('KeyE')
+  await page.waitForTimeout(600)
+  const after = await page.evaluate(() => window.luma.sim.player.health)
+  check('sleeping in a bed does you good', after > before, `${before} to ${after.toFixed(2)}`)
+} else {
+  check('sleeping in a bed does you good', false, 'no bed found')
+}
+
+// chests: take out, and put back
+const box = await approach('container')
+if (box && await facing(box.id)) {
+  const before = await page.evaluate((id) => {
+    const l = window.luma
+    // start from an empty pack so capacity cannot be the reason nothing moves
+    l.sim.player.inventory.items = {}
+    l.sim.player.inventory.owners = {}
+    const chest = l.sim.fixtures.find((f) => f.id === id)
+    return Object.values(chest.storage.items).reduce((a, n) => a + n, 0)
+  }, box.id)
+  await page.keyboard.press('KeyE')
+  await page.waitForTimeout(600)
+  const after = await page.evaluate(() => {
+    const inv = window.luma.sim.player.inventory.items
+    return Object.values(inv).reduce((a, n) => a + n, 0)
+  })
+  check(
+    'taking from a chest puts it in your pack',
+    before > 0 && after > 0,
+    `chest held ${before}, pack now ${after}`,
+  )
+
+  const stored = await page.evaluate((id) => {
+    const l = window.luma
+    const held = Object.keys(l.sim.player.inventory.items)[0]
+    const chestBefore = Object.values(l.sim.fixtures.find((f) => f.id === id).storage.items)
+      .reduce((a, n) => a + n, 0)
+    l.view.place(held)
+    const chestAfter = Object.values(l.sim.fixtures.find((f) => f.id === id).storage.items)
+      .reduce((a, n) => a + n, 0)
+    return { chestBefore, chestAfter, held }
+  }, box.id)
+  check(
+    'and right click puts something back in',
+    stored.chestAfter > stored.chestBefore,
+    `${stored.held}: ${stored.chestBefore} to ${stored.chestAfter}`,
+  )
+} else {
+  check('taking from a chest puts it in your pack', false, 'no chest found')
+}
+
 // --- every panel opens -----------------------------------------------------
 const panels = [
   ['KeyR', 'board'], ['Tab', 'pack'], ['KeyJ', 'journal'], ['KeyH', 'society'],

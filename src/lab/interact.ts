@@ -26,6 +26,8 @@ export interface Fixture {
   tower: TowerId
   x: number
   z: number
+  /** which way it faces, for sitting down on it the right way round */
+  rot?: number
   /** container contents (only for containers) */
   storage?: Inventory
   /** who owns this fixture: creature id, or undefined for public */
@@ -103,6 +105,13 @@ export function fixturesOfTower(fixtures: Fixture[], tower: TowerId): Fixture[] 
 export type UseResult =
   | { ok: true; effect: string }
   | { ok: false; reason: 'out-of-reach' | 'wrong-kind' | 'full' | 'empty' | 'locked' }
+
+/** Sit down on something made for sitting on. */
+export function sitOn(actor: Actor, f: Fixture): UseResult {
+  if (f.kind !== 'bench') return { ok: false, reason: 'wrong-kind' }
+  if (!fixtureReachable(actor, f)) return { ok: false, reason: 'out-of-reach' }
+  return { ok: true, effect: 'sat down' }
+}
 
 /** Sleep in a bed: only works if you can actually reach it. */
 export function useBed(actor: Actor, f: Fixture): UseResult {

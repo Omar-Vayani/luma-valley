@@ -69,7 +69,8 @@ import { applyCrowding, applyPurpose, applyComfort } from './chem'
 import { courtStep, partnershipStep, reconcileStep } from './courtship'
 import { resilienceFactor, metabolicRate, fertilityFactor, senseRange } from './genetics'
 import {
-  createFixtures, fixtureAt, useBed, toggleDoor, storeItem, takeItem, giveItem, type Fixture,
+  createFixtures, fixtureAt, useBed, sitOn, toggleDoor, storeItem, takeItem, giveItem,
+  type Fixture,
 } from './interact'
 import { createStoryLog, recordStory, explain, type StoryLog } from './story'
 import {
@@ -184,8 +185,20 @@ export interface Sim {
    * dependency on anything above it.
    */
   obstacleAt: ((x: number, z: number, radius: number) => boolean) | null
-  /** Use the nearest fixture as the player: sleep, open, take, or store. */
-  playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
+  /**
+   * Use a fixture as the player: sit, sleep, open, take, or store.
+   *
+   * `fixtureId` is what the crosshair is on. Without it this fell back to
+   * whatever fixture happened to be nearest, which is how you ended up
+   * opening a door by trying to sit on a bench.
+   */
+  playerUseFixture(
+    action: 'sit' | 'rest' | 'toggle' | 'take' | 'store',
+    itemId?: ItemId,
+    fixtureId?: string,
+  ): string | null
+  /** Replace the settlement's furniture with what the renderer actually built. */
+  setFixtures(fixtures: Fixture[]): void
   /** What a shop will sell you, what it pays for things, and whether it is open. */
   shopAt(tower: TowerId): ShopOffer | null
   /** Buy one of a shop's stock. Returns what happened. */
@@ -298,12 +311,24 @@ export function createSim(seed = 1): Sim {
     obstacleAt: null,
     fixtures: createFixtures(),
     institutions: createInstitutions(),
-    playerUseFixture(action, itemId): string | null {
+    setFixtures(fixtures: Fixture[]): void {
+      sim.fixtures = fixtures
+    },
+
+    playerUseFixture(action, itemId, fixtureId): string | null {
       const p = sim.player
       if (!isPlayerAlive(p)) return null
       const actor = { pos: p.pos, inventory: p.inventory, id: 0 }
-      const f = fixtureAt(sim.fixtures, p.pos.x, p.pos.z)
+      const f = fixtureId
+        ? sim.fixtures.find((x) => x.id === fixtureId)
+        : fixtureAt(sim.fixtures, p.pos.x, p.pos.z)
       if (!f) return null
+      if (action === 'sit') {
+        const res = sitOn(actor, f)
+        if (!res.ok) return null
+        p.health = clamp01(p.health + 0.02)
+        return 'you sit down'
+      }
       if (action === 'rest') {
         const res = useBed(actor, f)
         if (!res.ok) return null

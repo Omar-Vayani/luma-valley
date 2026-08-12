@@ -76,9 +76,9 @@ Add `?fresh=1` to the address to start a new valley and throw away the save.
 | Shift | Sprint |
 | Space | Jump |
 | Ctrl or C | Crouch |
-| E | Interact. Hold it for chopping, mining and fishing |
+| E | Interact: talk, sit on a bench, open a door, sleep in a bed, take from a chest, trade at a counter. Hold it for chopping, mining and fishing |
 | Left click | Give what you hold to whoever you look at. Empty-handed it is a hand on their shoulder; with a stick it is a stick |
-| Right click | Set a lantern, fence post or stone marker down |
+| Right click | Put what you hold into the chest you are looking at, or set a lantern, fence post or stone marker down |
 | Q | Drop what you are holding |
 | 1–9 or scroll | Choose a hotbar slot |
 | Tab | Pack and crafting |

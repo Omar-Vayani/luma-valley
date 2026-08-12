@@ -112,12 +112,16 @@ export function pickTarget(ctx: TargetContext): Target | null {
     const hit = against(eye, dir, f.x, y, f.z, 0.8, REACH)
     if (!hit) continue
     const verb =
-      f.kind === 'bed' ? 'Rest in'
-        : f.kind === 'door' ? (f.open ? 'Close' : 'Open')
-          : f.kind === 'container' ? 'Open'
+      f.kind === 'bed' ? 'Sleep in'
+        : f.kind === 'door' ? (f.open === false ? 'Open' : 'Close')
+          : f.kind === 'container' ? 'Take from'
             : f.kind === 'counter' ? 'Trade at' : 'Sit on'
+    const label =
+      f.kind === 'container' ? 'chest'
+        : f.kind === 'counter' ? 'counter'
+          : f.kind
     take({
-      kind: 'fixture', fixture: f, label: f.kind, verb,
+      kind: 'fixture', fixture: f, label, verb,
       point: new THREE.Vector3(f.x, y, f.z), distance: hit.t,
     }, hit)
   }
@@ -187,7 +191,9 @@ export function promptFor(target: Target, holding: string | null): string {
   switch (target.kind) {
     case 'creature': return `${target.verb} ${target.label}`
     case 'node': return `${target.verb} ${target.label}`
-    case 'fixture': return `${target.verb} the ${target.label}`
+    case 'fixture': return target.fixture.kind === 'bench'
+      ? `${target.verb} the bench`
+      : `${target.verb} the ${target.label}`
     case 'drop': return `${target.verb} ${target.label}`
     case 'placed': return `${target.verb} the ${target.label}`
     case 'landmark': return `Read ${target.label}`

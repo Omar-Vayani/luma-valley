@@ -15,14 +15,16 @@ import { avgFrameMs, recordFrameTime } from '../lab/lod'
 import { Atmosphere } from './atmosphere'
 import { Engine, QUALITY } from './engine'
 import { buildTerrain, Water } from './ground'
-import { buildVillage, makeKit, mergeByMaterial, type Kit, type Lamp } from './architecture'
+import {
+  buildVillage, makeKit, mergeByMaterial, type DoorSpec, type Kit, type Lamp,
+} from './architecture'
 import { loadPropGeometries } from './assets'
 import { ScatterView } from './scatter-view'
 import { LumaView } from './luma'
 import { Fx } from './fx'
 import { ViewModel } from './viewmodel'
 import { PlayerController } from '../game/controller'
-import { CollisionGrid, PROP_SOLIDITY } from '../game/collision'
+import { CollisionGrid, PROP_SOLIDITY, type Solid } from '../game/collision'
 import { Input } from '../game/input'
 import {
   GAZE_RANGE, pickGaze, pickTarget, promptFor, type Target,
@@ -156,6 +158,17 @@ export class WorldView {
   private lampPositions: Lamp[] = []
   private lampLights: THREE.PointLight[] = []
   private solids: CollisionGrid | null = null
+  private doorGroup = new THREE.Group()
+  readonly doors: {
+    id: string
+    pivot: THREE.Group
+    base: number
+    swing: number
+    x: number
+    z: number
+    width: number
+  }[] = []
+  private closedDoors: Solid[] = []
   private placedGroup = new THREE.Group()
   private placedMeshes = new Map<string, THREE.Object3D>()
   private graveGroup = new THREE.Group()
@@ -184,6 +197,7 @@ export class WorldView {
     this.engine.scene.add(this.water.mesh)
     this.engine.scene.add(this.luma.group)
     this.engine.scene.add(this.fx.group)
+    this.engine.scene.add(this.doorGroup)
     this.engine.scene.add(this.placedGroup)
     this.engine.scene.add(this.graveGroup)
     this.engine.scene.add(this.dropGroup)
@@ -218,11 +232,18 @@ export class WorldView {
       if (mesh.isMesh && mesh.material === this.kit.glow) this.glowMeshes.push(mesh)
     })
     this.lampPositions = village.lamps
+    // The simulation's furniture is whatever the renderer actually built, so
+    // the bench you can see is the bench you can sit on.
+    this.sim.setFixtures(village.fixtures)
+    this.stockContainers()
+    this.buildDoors(village.doors)
     this.solids = new CollisionGrid()
     for (const c of village.colliders) {
       this.solids.add({ x: c.x, z: c.z, r: c.r, height: c.height ?? 6, kind: c.kind })
     }
     this.controller.setWorld(this.solids)
+    // a shut door is solid; an open one is a hole you walk through
+    this.controller.setDynamicSolids(this.closedDoors)
     // walkers get the same obstacles the player does, injected rather than
     // imported, so the simulation stays ignorant of the scenery
     this.sim.obstacleAt = (x, z, r) => !this.solids?.isClear(x, z, r)
@@ -315,6 +336,11 @@ export class WorldView {
 
   get pointerLocked(): boolean {
     return this.input.locked
+  }
+
+  /** Whether the player is sitting on something. */
+  get seated(): boolean {
+    return this.controller.seated
   }
 
   /** Where the player is, for the map. */
@@ -481,6 +507,7 @@ export class WorldView {
       this.selectedId, this.gazeId,
     )
 
+    this.updateDoors(dt)
     this.fx.update(dt)
     this.updateLamps(sky.lampLight)
     this.syncGraves()
@@ -584,10 +611,30 @@ export class WorldView {
 
   // ------------------------------------------------------------- actions
 
+  /**
+   * Sit down on something. You stay put until you ask to move, the camera
+   * drops to a sitting height, and resting there is worth something.
+   */
+  private sitDown(x: number, z: number, rot: number, fixtureId: string): void {
+    const message = this.sim.playerUseFixture('sit', undefined, fixtureId)
+    if (!message) {
+      this.callbacks.onToast('Too far to sit down.', 'bad')
+      return
+    }
+    this.controller.sit(x, z, rot)
+    this.callbacks.onToast('You sit down. Move to get up again.', 'info')
+    this.sound.playSpec(SFX.place)
+  }
+
   /** The context action, bound to E. */
   interact(): void {
     const target = this.target
     if (!target) return
+    if (this.controller.seated) {
+      this.controller.stand()
+      this.callbacks.onToast('You get up.', 'info')
+      return
+    }
     if (target.kind !== 'node') this.viewmodel.swing()
     switch (target.kind) {
       case 'creature': {
@@ -606,16 +653,26 @@ export class WorldView {
         break
       }
       case 'fixture': {
-        if (target.fixture.kind === 'counter') {
-          this.callbacks.onShop(target.fixture.tower)
+        const f = target.fixture
+        if (f.kind === 'counter') {
+          this.callbacks.onShop(f.tower)
           break
         }
-        const message = this.sim.playerUseFixture(
-          target.fixture.kind === 'bed' ? 'rest'
-            : target.fixture.kind === 'door' ? 'toggle' : 'take',
-        )
-        if (message) this.callbacks.onToast(message, 'info')
-        this.sound.playSpec(SFX.place)
+        if (f.kind === 'bench') {
+          this.sitDown(f.x, f.z, f.rot ?? 0, f.id)
+          break
+        }
+        const action = f.kind === 'bed' ? 'rest' : f.kind === 'door' ? 'toggle' : 'take'
+        const message = this.sim.playerUseFixture(action, undefined, f.id)
+        if (message) {
+          this.callbacks.onToast(message, 'info')
+        } else if (f.kind === 'container') {
+          this.callbacks.onToast('Empty.', 'info')
+        }
+        if (f.kind === 'bed') {
+          this.fx.burst('note', target.point, 5)
+        }
+        this.sound.playSpec(f.kind === 'door' ? SFX.place : SFX.pickup)
         break
       }
       case 'drop': {
@@ -702,9 +759,19 @@ export class WorldView {
     this.fx.float(itemName(item), this.controller.position.clone().add(new THREE.Vector3(0, 1.6, 0)), '#cfe3f2')
   }
 
-  /** Right click: set the held thing down in the world. */
+  /** Right click: put it in the chest you are looking at, or set it down. */
   place(item: ItemId | null): void {
     if (!item) return
+    const target = this.target
+    if (target && target.kind === 'fixture' && target.fixture.kind === 'container') {
+      const stored = this.sim.playerUseFixture('store', item, target.fixture.id)
+      this.callbacks.onToast(
+        stored ? `Put ${itemName(item)} in the chest.` : 'That will not go in.',
+        stored ? 'good' : 'bad',
+      )
+      if (stored) this.sound.playSpec(SFX.place)
+      return
+    }
     const kind = PLACEABLE_FROM_ITEM[item]
     if (!kind) {
       this.callbacks.onToast(`You cannot set ${itemName(item)} down as anything.`, 'bad')
@@ -737,6 +804,97 @@ export class WorldView {
   }
 
   // ------------------------------------------------------------- scenery
+
+  /**
+   * Put something in the chests, so opening one is not always a disappointment.
+   * A household keeps a little food and a little cloth; a shop's back store
+   * keeps what it deals in.
+   */
+  private stockContainers(): void {
+    const stock: Partial<Record<string, ItemId[]>> = {
+      house1: ['bread', 'cloak'], house2: ['bread', 'water'],
+      house3: ['berry', 'timber'], house4: ['water', 'trinket'],
+      homes: ['bread', 'bread', 'water'],
+      food: ['grain', 'grain', 'bread'],
+      tools: ['timber', 'stone'],
+      work: ['timber', 'stone', 'stick'],
+      farm: ['grain', 'grain', 'berry'],
+    }
+    // anything not listed still keeps something, because opening a chest and
+    // finding nothing at all is a worse answer than a spare candle
+    const spare: ItemId[] = ['water', 'timber']
+    for (const f of this.sim.fixtures) {
+      if (f.kind !== 'container' || !f.storage) continue
+      for (const id of stock[f.tower] ?? spare) addItem(f.storage, id, 1, undefined)
+    }
+  }
+
+  /**
+   * Hang a leaf in every doorway. Kept out of the merged village geometry so
+   * each one can swing, and out of the collision grid while it is open.
+   */
+  private buildDoors(specs: DoorSpec[]): void {
+    for (const spec of specs) {
+      const pivot = new THREE.Group()
+      // hinge on one side of the opening
+      pivot.position.set(
+        spec.x - Math.cos(spec.angle) * (spec.width / 2),
+        spec.y,
+        spec.z + Math.sin(spec.angle) * (spec.width / 2),
+      )
+      pivot.rotation.y = spec.angle
+
+      const leaf = new THREE.Mesh(
+        new THREE.BoxGeometry(spec.width, 2.05, 0.12),
+        this.kit.timber,
+      )
+      leaf.position.set(spec.width / 2, 1.47, 0)
+      leaf.castShadow = true
+      pivot.add(leaf)
+      for (let i = 0; i < 3; i++) {
+        const plank = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 1.9, 0.15),
+          this.kit.darkTimber,
+        )
+        plank.position.set(spec.width * (0.2 + i * 0.3), 1.47, 0)
+        pivot.add(plank)
+      }
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), this.kit.metal)
+      handle.position.set(spec.width - 0.18, 1.35, 0.11)
+      pivot.add(handle)
+
+      this.doorGroup.add(pivot)
+      this.doors.push({
+        id: spec.id,
+        pivot,
+        base: spec.angle,
+        swing: 1,
+        x: spec.x,
+        z: spec.z,
+        width: spec.width,
+      })
+    }
+  }
+
+  /**
+   * Swing each leaf toward whatever the simulation says its door is doing,
+   * and make a shut one solid. An open door is a hole you walk through.
+   */
+  private updateDoors(dt: number): void {
+    this.closedDoors.length = 0
+    for (const door of this.doors) {
+      const fixture = this.sim.fixtures.find((f) => f.id === door.id)
+      const want = fixture?.open === false ? 0 : 1
+      door.swing += (want - door.swing) * Math.min(1, dt * 7)
+      // 0 is shut and flush with the wall; 1 is standing wide open
+      door.pivot.rotation.y = door.base - door.swing * 1.7
+      if (door.swing < 0.5) {
+        this.closedDoors.push({
+          x: door.x, z: door.z, r: door.width * 0.5 + 0.1, height: 2.1, kind: 'door',
+        })
+      }
+    }
+  }
 
   private syncPlaced(): void {
     const live = new Set(this.progress.placed.map((p) => p.id))
