@@ -1,504 +1,227 @@
 /**
- * App — the shell around the game.
+ * App — the shell.
  *
- * Owns the simulation, the player's own progress, and which panel is open.
- * Everything three-dimensional belongs to WorldView; React never touches the
- * scene. The one rule worth stating: whenever a panel is open the world stops
- * hearing the keyboard, so typing is always typing.
+ * Owns one simulation, one view and the panel that happens to be open. React
+ * does not drive the game loop and does not hold any world state; it reads a
+ * snapshot the view publishes ten times a second and renders the interface
+ * from that.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './ui/theme.css'
+import { Hud, type PanelId } from './ui/Hud'
+import { Chat } from './ui/Chat'
+import { Neural } from './ui/Neural'
+import { Settings } from './ui/Settings'
+import { Guide } from './ui/Guide'
+import { WorldView, type HudSnapshot } from './render/view'
+import { loadSettings, saveSettings, type Settings as SettingsState } from './render/quality'
+import { createSim, type Sim } from './sim/sim'
+import { ChatStore, clearWorld, loadWorld, saveWorld } from './sim/save'
 
-import { createSim, type Sim } from './lab/sim'
-import { loadSim, saveSim, type LabSave } from './lab/save'
-import { loadWorldBackup, loadWorldBlob, saveWorldBlob } from './lab/creature-storage'
-import { loadSettings, saveSettings, type QualityPreset } from './lab/settings'
-import { countItem, type ItemId } from './lab/inventory'
-import type { TowerId } from './lab/world'
-import { itemName } from './lab/items'
-import { formatStory, storiesSince } from './lab/story'
-
-import { WorldView, type HudSnapshot } from './render/world-view'
-import { equipTraveller, seedStarterSociety } from './game/seed'
-import {
-  createProgress, loadProgress, migrateProgress, saveProgress, standingRank,
-  type PlayerProgress,
-} from './game/progress'
-import {
-  createBoard, objectiveFor, onGive, onLandmark, onTalk, scanRequests,
-  type RequestBoard,
-} from './game/requests'
-import { pruneNodes } from './game/gather'
-
-import { Hud, type PanelId, type ToastItem } from './ui/Hud'
-import { Talk } from './ui/panels/Talk'
-import { Pack } from './ui/panels/Pack'
-import { Journal } from './ui/panels/Journal'
-import { Society } from './ui/panels/Society'
-import { Mind } from './ui/panels/Mind'
-import { Board } from './ui/panels/Board'
-import { Atlas } from './ui/panels/Atlas'
-import { Settings } from './ui/panels/Settings'
-import { Guide } from './ui/panels/Guide'
-import { Shop } from './ui/panels/Shop'
-
-const AUTOSAVE_EVERY = 20000
-const SENSITIVITY_KEY = 'luma-haven-sensitivity'
+declare global {
+  interface Window {
+    luma?: { sim: Sim; view: WorldView }
+  }
+}
 
 const EMPTY_HUD: HudSnapshot = {
-  time: '10:00', phase: 'morning', day: 1, region: null, prompt: null, promptKey: 'E',
-  hold: 0, gaze: null, health: 1, hunger: 1, swimming: false, underwater: false,
-  population: 0, fps: 60, frameMs: 16, simMs: 0, draws: 0, triangles: 0, locked: false,
-}
-
-const PANEL_KEYS: Record<string, PanelId> = {
-  Tab: 'pack',
-  KeyR: 'board',
-  KeyJ: 'journal',
-  KeyH: 'society',
-  KeyI: 'mind',
-  KeyM: 'atlas',
-  KeyO: 'settings',
-  F1: 'guide',
-  Slash: 'guide',
-}
-
-function bootSim(): { sim: Sim; fresh: boolean } {
-  const settings = loadSettings()
-  const params = new URLSearchParams(location.search)
-  if (!params.has('fresh')) {
-    for (const raw of [loadWorldBlob(), loadWorldBackup()]) {
-      if (!raw) continue
-      try {
-        const sim = loadSim(JSON.parse(raw) as LabSave)
-        Object.assign(sim.settings, settings)
-        return { sim, fresh: false }
-      } catch {
-        // fall through to the next candidate, then to a new world
-      }
-    }
-  }
-  const sim = createSim(Math.floor(Math.random() * 1e9))
-  Object.assign(sim.settings, settings)
-  seedStarterSociety(sim)
-  equipTraveller(sim)
-  return { sim, fresh: true }
+  gaze: { kind: 'none', id: null, name: '', prompt: '', inReach: false },
+  berries: 0,
+  dayPhase: 0.3,
+  clock: '07:00',
+  talkingTo: null,
+  nearby: [],
+  fps: 60,
 }
 
 export default function App(): React.ReactElement {
-  const mountRef = useRef<HTMLDivElement>(null)
+  const mount = useRef<HTMLDivElement>(null)
   const viewRef = useRef<WorldView | null>(null)
   const simRef = useRef<Sim | null>(null)
-  const progressRef = useRef<PlayerProgress>(createProgress())
-  const boardRef = useRef<RequestBoard>(createBoard())
-  const toastId = useRef(1)
-  const lastStoryTick = useRef(0)
-  const toldStories = useRef(new Set<number>())
 
   const [ready, setReady] = useState(false)
-  const [loadState, setLoadState] = useState({ fraction: 0, label: 'waking the valley' })
   const [hud, setHud] = useState<HudSnapshot>(EMPTY_HUD)
-  const [panel, setPanel] = useState<PanelId | null>(null)
-  const [talkId, setTalkId] = useState<number | null>(null)
-  const [shopTower, setShopTower] = useState<TowerId | null>(null)
-  const [mindId, setMindId] = useState<number | null>(null)
-  const [toasts, setToasts] = useState<ToastItem[]>([])
-  const [regionTitle, setRegionTitle] = useState<{ name: string; key: number } | null>(null)
-  const [slot, setSlot] = useState(0)
-  const [showPerf, setShowPerf] = useState(false)
-  const [locked, setLocked] = useState(false)
-  const [, forceRender] = useState(0)
-  const [sound, setSound] = useState(true)
-  const [sensitivity, setSensitivity] = useState(() => {
-    const raw = Number(localStorage.getItem(SENSITIVITY_KEY))
-    return Number.isFinite(raw) && raw > 0 ? raw : 0.45
-  })
+  const [panel, setPanel] = useState<PanelId>('guide')
+  const [subject, setSubject] = useState<number | null>(null)
+  const [settings, setSettings] = useState<SettingsState>(() => loadSettings())
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string }>>([])
 
-  const redraw = useCallback(() => forceRender((n) => n + 1), [])
+  const chatStore = useMemo(() => new ChatStore(), [])
 
-  const toast = useCallback((text: string, kind: ToastItem['kind'] = 'info') => {
-    const id = toastId.current++
-    setToasts((prev) => [...prev.slice(-4), { id, text, kind }])
-    setTimeout(() => {
-      setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)))
-    }, 5200)
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5600)
+  const toast = useCallback((text: string) => {
+    const id = Date.now() + Math.random()
+    setToasts((list) => [...list.slice(-2), { id, text }])
+    window.setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 2600)
   }, [])
 
-  // ---------------------------------------------------------------- boot
-
+  // --- boot ----------------------------------------------------------------
   useEffect(() => {
-    const mount = mountRef.current
-    if (!mount) return
+    const container = mount.current
+    if (!container) return
+    let disposed = false
 
-    const { sim, fresh } = bootSim()
+    const sim = loadWorld() ?? createSim()
     simRef.current = sim
-    const progress = new URLSearchParams(location.search).has('fresh')
-      ? createProgress()
-      : migrateProgress(loadProgress())
-    progressRef.current = progress
-    lastStoryTick.current = sim.time
 
-    const view = new WorldView(mount, sim, progress, {
+    const view = new WorldView(container, sim, loadSettings(), {
       onHud: setHud,
-      onToast: (text, kind) => toast(text, kind),
-      onTalk: (id) => {
-        setTalkId(id)
-        setMindId(id)
-        setPanel('talk')
+      onOpenChat: (id) => {
+        setSubject(id)
+        setPanel('chat')
       },
-      onDiscover: (landmark) => {
-        toast(`Found ${landmark.name} — ${landmark.short}`, 'good')
-        const advanced = onLandmark(boardRef.current, landmark.id)
-        if (advanced) toast(objectiveFor(advanced), 'info')
-      },
-      onRegion: (name) => setRegionTitle({ name, key: Date.now() }),
-      onLoadProgress: (fraction, label) => setLoadState({ fraction, label }),
-      onGave: (creatureId, item) => {
-        const outcome = onGive(sim, boardRef.current, progress, creatureId, item, sim.time)
-        if (outcome) {
-          toast(outcome.message, 'good')
-          if (outcome.coins) toast(`+${outcome.coins} coins`, 'good')
-        }
-      },
-      onGathered: () => redraw(),
-      onPointerLock: setLocked,
-      onShop: (tower) => {
-        setShopTower(tower)
-        setPanel('shop')
-      },
+      onToast: toast,
     })
     viewRef.current = view
-    view.input.setSensitivity(sensitivity)
-    view.sound.setEnabled(sound)
-    if (import.meta.env.DEV) {
-      // a handle for the screenshot harness and for poking at a live world
-      ;(window as unknown as { luma?: unknown }).luma = { view, sim, progress, board: boardRef.current }
-    }
 
-    let cancelled = false
     void view.load().then(() => {
-      if (cancelled) return
-      view.setQuality(sim.settings.quality)
+      if (disposed) return
       view.start()
       setReady(true)
-      if (fresh) {
-        toast('You come down the South Road into Haven.', 'story')
-        setTimeout(() => setPanel('guide'), 900)
-      }
     })
 
+    // The handle the playtest script drives the game through. It is the same
+    // objects the game itself uses — a test that pokes a mock proves nothing
+    // about the thing you ship.
+    window.luma = { sim, view }
+
     return () => {
-      cancelled = true
+      disposed = true
       view.dispose()
       viewRef.current = null
+      delete window.luma
     }
-    // deliberately once: the world is built one time per mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast])
+
+  // --- autosave -------------------------------------------------------------
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      const sim = simRef.current
+      if (sim) saveWorld(sim)
+    }, 20000)
+    const onLeave = (): void => {
+      const sim = simRef.current
+      if (sim) saveWorld(sim)
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => {
+      window.clearInterval(handle)
+      window.removeEventListener('beforeunload', onLeave)
+      onLeave()
+    }
   }, [])
 
-  // ---------------------------------------------------------------- keys
+  // --- the panel owns the mouse while it is open ----------------------------
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.setUiCaptured(panel !== null)
+    view.setTalkingTo(panel === 'chat' || panel === 'mind' ? subject : null)
+    if (panel === null) {
+      const creature = subject != null ? simRef.current?.creature(subject) : null
+      if (creature) simRef.current?.stopListening(creature)
+    }
+  }, [panel, subject])
 
+  // --- keys React owns ------------------------------------------------------
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
     view.input.onKey = (code, event) => {
-      const el = document.activeElement as HTMLElement | null
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-
       if (code === 'Escape') {
-        if (panel) {
-          event.preventDefault()
-          setPanel(null)
-        }
+        setPanel((current) => (current === null ? null : null))
         return
       }
-      if (typing) return
-
-      if (code === 'Tab') event.preventDefault()
-
-      const target = PANEL_KEYS[code]
-      if (target) {
+      // everything else only applies while the world has the keyboard
+      if (panel !== null) return
+      if (code === 'KeyO') setPanel('settings')
+      if (code === 'F1' || code === 'Slash') {
         event.preventDefault()
-        if (target === 'mind') setMindId(view.gazeTarget ?? mindId)
-        setPanel((current) => (current === target ? null : target))
-        return
+        setPanel('guide')
       }
-
-      if (code.startsWith('Digit')) {
-        const n = Number(code.slice(5))
-        if (n >= 1 && n <= 9) {
-          setSlot(n - 1)
-          return
+      if (code === 'KeyN') {
+        const looked = view.gazeTarget()
+        if (looked != null) {
+          setSubject(looked)
+          setPanel('mind')
+        } else {
+          toast('look at a Luma to open its mind')
         }
-      }
-
-      switch (code) {
-        case 'KeyE':
-          if (!panel) view.interact()
-          break
-        case 'KeyQ':
-          if (!panel) view.dropHeld(progressRef.current.hotbar[slot])
-          break
-        case 'F3':
-          event.preventDefault()
-          setShowPerf((v) => !v)
-          break
-        case 'KeyP':
-          setPaused((p) => !p)
-          break
-        case 'Comma':
-          view.setSpeed(1)
-          toast('Speed 1×')
-          break
-        case 'Period':
-          view.setSpeed(3)
-          toast('Speed 3×')
-          break
-        default:
-          break
       }
     }
     return () => {
-      if (view.input) view.input.onKey = null
+      view.input.onKey = null
     }
-  })
-
-  const [paused, setPaused] = useState(false)
-  useEffect(() => {
-    // Opening a panel does not stop the valley. It used to, which meant you
-    // could read the journal for ten minutes and wonder why nobody had moved,
-    // and it made a conversation a freeze-frame instead of something someone
-    // could walk away from. Pausing is P, and only P.
-    viewRef.current?.setPaused(paused)
-  }, [paused])
+  }, [panel, toast])
 
   useEffect(() => {
-    viewRef.current?.setUiCaptured(panel !== null)
-  }, [panel])
+    viewRef.current?.applySettings(settings)
+    saveSettings(settings)
+  }, [settings])
 
-  useEffect(() => {
-    viewRef.current?.setHeld(progressRef.current.hotbar[slot] ?? null)
-  }, [slot, panel])
-
-  useEffect(() => {
-    viewRef.current?.input.setSensitivity(sensitivity)
-    localStorage.setItem(SENSITIVITY_KEY, String(sensitivity))
-  }, [sensitivity])
-
-  useEffect(() => {
-    viewRef.current?.sound.setEnabled(sound)
-  }, [sound])
-
-  // ------------------------------------------------------------ mouse acts
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent): void => {
-      const view = viewRef.current
-      if (!view || panel) return
-      if (!view.pointerLocked) return
-      const held = progressRef.current.hotbar[slot]
-      if (e.button === 0) view.useHeld(held)
-      if (e.button === 2) view.place(held)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [panel, slot])
-
-  useEffect(() => {
-    const onWheel = (): void => {
-      const view = viewRef.current
-      if (!view || panel) return
-      const notches = view.input.takeWheel()
-      if (notches) setSlot((s) => (s + notches + 9) % 9)
-    }
-    window.addEventListener('wheel', onWheel, { passive: true })
-    return () => window.removeEventListener('wheel', onWheel)
-  }, [panel])
-
-  // ------------------------------------------------------- background work
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const sim = simRef.current
-      if (!sim) return
-      scanRequests(sim, boardRef.current, sim.time)
-      pruneNodes(progressRef.current, sim.time)
-
-      // Surface the settlement's own news, sparingly, and once each. A story
-      // that keeps happening between the same two Luma is folded into one
-      // entry whose tick keeps moving, so filtering by time alone showed the
-      // same line over and over.
-      const fresh = storiesSince(sim.stories, lastStoryTick.current, 3)
-      lastStoryTick.current = sim.time
-      for (const story of fresh) {
-        if (story.significance < 0.45) continue
-        if (toldStories.current.has(story.id)) continue
-        toldStories.current.add(story.id)
-        if (toldStories.current.size > 300) toldStories.current.clear()
-        toast(formatStory(story), 'story')
-      }
-      redraw()
-    }, 2500)
-    return () => clearInterval(timer)
-  }, [toast, redraw])
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const sim = simRef.current
-      if (!sim) return
-      saveWorldBlob(JSON.stringify(saveSim(sim)))
-      saveProgress(progressRef.current)
-    }, AUTOSAVE_EVERY)
-    return () => clearInterval(timer)
-  }, [])
-
-  // ---------------------------------------------------------------- render
-
+  const creature = subject != null ? simRef.current?.creature(subject) ?? null : null
   const sim = simRef.current
-  const progress = progressRef.current
-  const board = boardRef.current
-
-  // recomputed on every render on purpose: the inventory mutates in place
-  const counts: Partial<Record<ItemId, number>> = {}
-  if (sim) {
-    for (const id of progress.hotbar) {
-      if (id) counts[id] = countItem(sim.player.inventory, id)
-    }
-  }
-
-  const objectives = board.active.map(objectiveFor)
-  const standing = standingRank(progress.standing)
-  const playerPos = viewRef.current?.playerPosition() ?? { x: 0, z: 0, yaw: 0 }
 
   const closePanel = useCallback(() => setPanel(null), [])
 
-  return (
-    <div className="game" data-game>
-      <div className="viewport" ref={mountRef} />
+  const startNewValley = useCallback(() => {
+    clearWorld()
+    chatStore.clearAll()
+    window.location.reload()
+  }, [chatStore])
 
-      {ready && sim && (
+  return (
+    <div className="app">
+      <div className="viewport" ref={mount} onClick={() => viewRef.current?.audio.unlock()} />
+
+      {ready && (
         <Hud
           hud={hud}
-          hotbar={progress.hotbar}
-          counts={counts}
-          selected={slot}
-          onSelect={setSlot}
           toasts={toasts}
-          regionTitle={regionTitle}
-          objectives={objectives}
-          standing={{ title: standing.title, value: progress.standing }}
-          showPerf={showPerf}
-          onOpen={(id) => {
-            if (id === 'mind') setMindId(viewRef.current?.gazeTarget ?? mindId)
-            setPanel((current) => (current === id ? null : id))
+          onOpen={setPanel}
+          onSelect={(id) => {
+            setSubject(id)
+            setPanel('chat')
           }}
-          openPanel={panel}
         />
       )}
 
-      {ready && sim && !locked && !panel && (
+      {panel !== null && (
         <div
-          className="enter"
-          data-enter
-          onClick={() => viewRef.current?.requestLock()}
+          className="panel-scrim"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closePanel()
+          }}
         >
-          <div className="box">
-            <h3>Click to look around</h3>
-            <p>WASD to walk · E to interact · Esc to let the mouse go</p>
-          </div>
+          {panel === 'chat' && sim && creature && (
+            <Chat
+              sim={sim}
+              creature={creature}
+              store={chatStore}
+              onClose={closePanel}
+              onOpenMind={() => setPanel('mind')}
+            />
+          )}
+          {panel === 'mind' && sim && creature && (
+            <Neural sim={sim} creature={creature} onClose={closePanel} />
+          )}
+          {panel === 'settings' && (
+            <Settings
+              settings={settings}
+              onChange={setSettings}
+              onClose={closePanel}
+              onNewValley={startNewValley}
+            />
+          )}
+          {panel === 'guide' && <Guide onClose={closePanel} />}
         </div>
       )}
 
-      {sim && panel === 'talk' && talkId != null && (
-        <Talk
-          sim={sim}
-          creatureId={talkId}
-          distance={viewRef.current?.distanceTo(talkId) ?? 99}
-          voice={sim.settings.optionalCloudAi && sim.settings.cloudEndpoint ? 'your service' : "Haven's own"}
-          onClose={closePanel}
-          onSpoke={(id) => {
-            const outcome = onTalk(sim, board, progress, id, sim.time)
-            if (outcome) toast(outcome.message, 'good')
-            redraw()
-          }}
-        />
-      )}
-
-      {sim && panel === 'pack' && (
-        <Pack
-          sim={sim}
-          progress={progress}
-          playerX={playerPos.x}
-          playerZ={playerPos.z}
-          onClose={closePanel}
-          onChanged={redraw}
-          onToast={toast}
-        />
-      )}
-
-      {panel === 'journal' && (
-        <Journal progress={progress} tick={sim?.time ?? 0} onClose={closePanel} />
-      )}
-
-      {sim && panel === 'society' && <Society sim={sim} onClose={closePanel} />}
-
-      {sim && panel === 'mind' && (
-        <Mind sim={sim} creatureId={mindId} onClose={closePanel} onPick={setMindId} />
-      )}
-
-      {sim && panel === 'board' && (
-        <Board sim={sim} board={board} onClose={closePanel} onChanged={redraw} />
-      )}
-
-      {panel === 'atlas' && (
-        <Atlas progress={progress} player={playerPos} onClose={closePanel} />
-      )}
-
-      {sim && panel === 'settings' && (
-        <Settings
-          sim={sim}
-          progress={progress}
-          sensitivity={sensitivity}
-          onSensitivity={setSensitivity}
-          onQuality={(q: QualityPreset) => {
-            viewRef.current?.setQuality(q)
-            saveSettings(sim.settings)
-          }}
-          onClose={closePanel}
-          onToast={toast}
-          sound={sound}
-          onSound={setSound}
-          onReload={(save) => {
-            const next = loadSim(save)
-            simRef.current = next
-            location.reload()
-          }}
-        />
-      )}
-
-      {sim && panel === 'shop' && shopTower && (
-        <Shop
-          sim={sim}
-          tower={shopTower}
-          onClose={closePanel}
-          onToast={toast}
-          onChanged={redraw}
-        />
-      )}
-
-      {panel === 'guide' && <Guide onClose={closePanel} />}
-
-      <div className={`loading${ready ? ' done' : ''}`} data-loading>
-        <div className="inner">
+      {!ready && (
+        <div className="boot">
           <h1>Luma Haven</h1>
-          <p className="tag">a valley that does not wait for you</p>
-          <div className="bar"><i style={{ width: `${Math.round(loadState.fraction * 100)}%` }} /></div>
-          <p className="what">{loadState.label}…</p>
+          <p>waking the valley…</p>
         </div>
-      </div>
+      )}
     </div>
   )
 }
-
-export { itemName }
