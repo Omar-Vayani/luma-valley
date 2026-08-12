@@ -52,7 +52,7 @@ describe('save — deep state round-trip', () => {
     expect(a2.banked).toBe(30)
     expect(a2.weapon).toBe('stick')
     expect(a2.gangId).toBe(1)
-    expect(a2.chem.addiction.brew).toBeCloseTo(0.6)
+    expect(a2.chem.addiction.brew).toBeCloseTo(a1.chem.addiction.brew, 6)
     expect(a2.memory.vendettas[2]).toBeCloseTo(0.9)
     expect(a2.memory.facts.bankIsSafe).toBe(1)
     expect(a2.inventory.items.bread).toBeGreaterThan(0)

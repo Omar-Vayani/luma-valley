@@ -30,7 +30,14 @@ export interface Brain {
   b1: Float32Array
   w2: Float32Array
   b2: Float32Array
-  serialize(): { w1: number[]; b1: number[]; w2: number[]; b2: number[] }
+  /**
+   * How many rewarded experiences this brain has had. A newborn's weights are
+   * random, and random opinions held confidently are worse than no opinions,
+   * so the simulation uses this to fade the brain in behind instinct as the
+   * creature actually lives.
+   */
+  trained: number
+  serialize(): BrainWeights
 }
 
 export interface BrainWeights {
@@ -38,6 +45,7 @@ export interface BrainWeights {
   b1: number[]
   w2: number[]
   b2: number[]
+  trained?: number
 }
 
 /**
@@ -95,7 +103,7 @@ export function createBrain(
     for (let i = 0; i < w2.length; i++) w2[i] = randn(rand) * s2
   }
 
-  return {
+  const brain: Brain = {
     inputSize,
     outputSize,
     learnRate: 0.1,
@@ -104,15 +112,18 @@ export function createBrain(
     b1,
     w2,
     b2,
+    trained: fits ? (weights!.trained ?? 0) : 0,
     serialize() {
       return {
         w1: Array.from(w1),
         b1: Array.from(b1),
         w2: Array.from(w2),
         b2: Array.from(b2),
+        trained: brain.trained,
       }
     },
   }
+  return brain
 }
 
 /** Scratch buffers, so thinking allocates nothing on the hot path. */
@@ -181,6 +192,7 @@ export function rewardSync(
   b: Brain, input: number[] | Float32Array, actionIndex: number, rewardValue: number,
 ): void {
   if (actionIndex < 0 || actionIndex >= b.outputSize) return
+  b.trained++
   const probs = thinkSync(b, input)
   const h = hiddenLayer(b, input)
   const step = rewardValue * b.learnRate
@@ -241,6 +253,18 @@ function clampWeights(b: Brain): void {
     if (v > LIMIT) b.w2[i] = LIMIT
     else if (v < -LIMIT) b.w2[i] = -LIMIT
   }
+}
+
+/** Ticks of experience before a brain's opinions count for their full weight. */
+export const BRAIN_MATURITY = 500
+
+/**
+ * How much this brain should be listened to: nothing at birth, rising with
+ * lived experience, and scaled by how settled its opinions actually are.
+ */
+export function brainAuthority(b: Brain, prefs: number[] | null): number {
+  const experience = Math.min(1, b.trained / BRAIN_MATURITY)
+  return experience * brainCertainty(prefs)
 }
 
 /**

@@ -19,6 +19,7 @@ import { findTower, towerAt } from './world'
 import { trustTowards, reputationOf } from './reputation'
 import { revengeScore } from './vengeance'
 import { normPressure } from './norms'
+import { impairmentOf } from './substances'
 import { romanticInterest } from './socialbond'
 import { emotionalRiskBias } from './emotions'
 import { riskModifier } from './psyche'
@@ -95,6 +96,7 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
 
   // Norm pressure: the settlement's expectations, filtered through this
   // creature's conformity. Strong norms make transgressions feel costlier.
+  const sobrietyNorm = normPressure(sim.culture, c, 'sobriety')
   const propertyNorm = normPressure(sim.culture, c, 'property')
   const violenceNorm = normPressure(sim.culture, c, 'nonviolence')
   const generosityNorm = normPressure(sim.culture, c, 'generosity')
@@ -127,6 +129,22 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
 
   // craving: how strongly this creature's personality pulls toward substances
   const cravingBias = Math.min(1, g.addictionProne * 0.8 + (c.chem.addiction.brew ?? 0) * 0.5 + (c.chem.addiction.herb ?? 0) * 0.5 + (c.chem.addiction.spark ?? 0) * 0.6)
+
+  // Already intoxicated. Drink makes people braver, friendlier and worse at
+  // caring what happens tomorrow — and one drink is the best predictor of the
+  // second, which is most of what a bad night out is.
+  const drunk = impairmentOf(c.chem)
+  // Withdrawal outbids nearly everything. A creature in it will spend rent.
+  const craving = {
+    brew: Math.max(0, (c.chem.addiction.brew ?? 0) - 0.25),
+    herb: Math.max(0, (c.chem.addiction.herb ?? 0) - 0.25),
+    spark: Math.max(0, (c.chem.addiction.spark ?? 0) - 0.25),
+  }
+  // What the settlement thinks of it. `normPressure` is already the pull
+  // toward conforming, blending the shared norm with this creature's own
+  // temperament — so somebody born prone to it feels almost none of this. It
+  // makes a marginal drinker think twice and does nothing for an addict.
+  const shame = sobrietyNorm * 0.75
 
   // ── base pressures (0..1) ──
   const press = {
@@ -172,9 +190,20 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
       * (c.knowsTower('clinic') ? 1 : 0.2),
     // drink: ONLY a sad/bored creature or a real addict craves a drink. A
     // happy creature at a tavern has no reason to drink (no instant booze death).
-    drink: open('tavern') * ((c.chem.addiction.brew ?? 0) * 2.2 + press.bored * 1.1) * (0.5 + g.addictionProne * 1.2) * (at?.id === 'tavern' ? 1.6 : 0.9) * (c.knowsTower('tavern') ? 1 : 0.15),
+    drink: open('tavern')
+      * ((c.chem.addiction.brew ?? 0) * 2.2 + craving.brew * 3.4 + press.bored * 1.1 + drunk.recklessness * 0.9)
+      * (0.5 + g.addictionProne * 1.2)
+      * (at?.id === 'tavern' ? 1.6 : 0.9)
+      * (1 - shame * (1 - Math.min(1, (c.chem.addiction.brew ?? 0) * 2)) * 0.35)
+      * (c.knowsTower('tavern') ? 1 : 0.15),
     // den: craving herb/spark — only existing addiction or real boredom pulls.
-    den: (((c.chem.addiction.herb ?? 0) * 2.4 + (c.chem.addiction.spark ?? 0) * 3.0 + press.bored * 0.9) * (0.4 + g.addictionProne * 1.3)) * (at?.id === 'den' ? 1.7 : 0.9) * (c.knowsTower('den') ? 1 : 0.15),
+    den: (((c.chem.addiction.herb ?? 0) * 2.4 + (c.chem.addiction.spark ?? 0) * 3.0
+      + craving.herb * 3.2 + craving.spark * 5.0
+      + press.bored * 0.9 + drunk.recklessness * 0.7)
+      * (0.4 + g.addictionProne * 1.3))
+      * (at?.id === 'den' ? 1.7 : 0.9)
+      * (1 - shame * (1 - Math.min(1, ((c.chem.addiction.spark ?? 0) + (c.chem.addiction.herb ?? 0)) * 2)) * 0.5)
+      * (c.knowsTower('den') ? 1 : 0.15),
     // school: curious, ambitious creatures learn to earn more later (a modest want)
     school: open('school') * (0.1 + g.learning * 0.8 + c.drives.importance * 0.3) * (c.education < 3 ? 1 : 0.1) * (c.wallet > 3 ? 1 : 0.4) * (at?.id === 'school' ? 1.5 : 0.7) * (c.knowsTower('school') ? 1 : 0.15),
     // farm: broke/hungry creatures who know the farm prefer growing food over work
@@ -264,6 +293,21 @@ export function scoreActions(sim: Sim, c: Creature): ActionScores {
   if (c.emotions.joy > 0.4) {
     scores.play += 0.2
     scores.share += 0.1
+  }
+
+  // Drink talking. Everything careful gets harder and everything rash gets
+  // easier — which is how an ordinary evening turns into a story.
+  if (drunk.recklessness > 0.05) {
+    const r = drunk.recklessness
+    scores.social *= 1 + drunk.sociability
+    scores.play *= 1 + drunk.sociability * 0.6
+    scores.fight *= 1 + r * 1.4
+    scores.steal *= 1 + r * 0.8
+    scores.share *= 1 + drunk.sociability * 0.5
+    scores.work *= 1 - r * 0.6
+    scores.school *= 1 - r * 0.8
+    scores.deposit *= 1 - r * 0.7
+    scores.sleep *= 1 - r * 0.3
   }
 
   return scores

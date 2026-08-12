@@ -13,7 +13,11 @@ import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
 import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, recordSale, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
-import { BRAIN_ACTIONS, brainCertainty, rewardSync, thinkSync } from './brain'
+import { BRAIN_ACTIONS, brainAuthority, rewardSync, thinkSync } from './brain'
+import {
+  disapprovalOf, doseSubstance, impairmentOf, substanceDef, tickSubstances,
+  type SubstanceId,
+} from './substances'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
@@ -183,10 +187,38 @@ const JOB_TOWER: Record<JobId, TowerId> = {
   teacher: 'school',
 }
 
-// Haven is spread across a valley now, not a ring of kiosks, so a walker
-// covers ground at a brisk 2.7 units a second. Still slow enough to fall in
-// beside someone and talk to them while they go.
-const SPEED = 0.45
+/**
+ * A walking pace, in metres per tick at six ticks a second — so 1.6 m/s,
+ * which is what a person walking somewhere actually does. It was nearly twice
+ * this, and the settlement read as agitated: everybody power-walking
+ * everywhere, all day, including the elderly and the toddlers.
+ */
+const SPEED = 0.27
+
+/**
+ * How fast this creature is moving right now, and why. Hurrying is for
+ * emergencies, not for fetching bread; the old code hurried at a flat 1.7x
+ * whenever anything was low, which is most of the time.
+ */
+function paceOf(c: Creature): number {
+  let pace = SPEED
+
+  // urgency: only real trouble makes somebody run
+  if (c.chem.health < 0.25 || c.chem.hunger < 0.12 || c.chem.fear > 0.6) pace *= 1.55
+  else if (c.chem.hunger < 0.28 || c.chem.energy < 0.18) pace *= 1.18
+
+  // a body's own speed
+  pace *= 0.9 + c.genome.energy * 0.25
+  if (c.stage === 'child') pace *= 0.82
+  else if (c.stage === 'elder') pace *= 0.78
+
+  // tiredness, illness, injury and drink all slow the walk
+  pace *= 1 - Math.min(0.3, (1 - c.chem.energy) * 0.3)
+  pace *= 1 - Math.min(0.35, c.illness * 0.3 + c.injury * 0.35)
+  pace *= 1 - impairmentOf(c.chem).slowness
+
+  return Math.max(0.06, pace)
+}
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
@@ -781,6 +813,17 @@ export function createSim(seed = 1): Sim {
           tickChem(c.chem, sim.time)
           // apply extra decay steps when striding
           for (let i = 1; i < stride.dt; i++) tickChem(c.chem, sim.time)
+          // comedown, tolerance decay and withdrawal
+          for (let i = 0; i < stride.dt; i++) {
+            const craving = tickSubstances(c.chem, sim.time)
+            if (craving.id && craving.severity > 0.5 && sim.rng() < 0.004) {
+              recordStory(sim.stories, {
+                kind: 'shortage', tick: sim.time, actor: c,
+                text: `${c.name} is shaking for want of ${substanceDef(craving.id)?.name ?? craving.id}`,
+                because: 'withdrawal', weight: 0.5,
+              })
+            }
+          }
           // metabolism: a fast burner empties faster than a thrifty one
           const burn = (metabolicRate(c.genome) - 1) * 0.0004 * stride.dt
           if (burn !== 0) c.chem.hunger = clamp01(c.chem.hunger - burn)
@@ -1986,11 +2029,8 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'drink': {
       const good = at?.id === 'tavern' ? payAtTower(sim, c, 'tavern', 'brew') : null
       if (good) {
-        c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
-        c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
-        const dose = 0.06 + c.genome.addictionProne * 0.2
-        c.chem.addiction.brew = clamp01((c.chem.addiction.brew ?? 0) + dose)
-        c.chem.lastDose.brew = sim.time
+        doseSubstance(c.chem, 'brew', c.genome.addictionProne, sim.time)
+        witnessIntoxication(sim, c, 'brew')
         emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
         c.action = 'drink'
         return
@@ -2001,11 +2041,8 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'den': {
       const good = at?.id === 'den' ? buyFromTower(sim.economy, 'den', c) : null
       if (good === 'herb' || good === 'spark') {
-        c.chem.pleasure = clamp01(c.chem.pleasure + (good === 'spark' ? 0.55 : 0.3))
-        c.chem.fear = clamp01(c.chem.fear + (good === 'spark' ? 0.15 : -0.25))
-        const dose = 0.08 + c.genome.addictionProne * 0.25
-        c.chem.addiction[good] = clamp01((c.chem.addiction[good] ?? 0) + dose)
-        c.chem.lastDose[good] = sim.time
+        doseSubstance(c.chem, good, c.genome.addictionProne, sim.time)
+        witnessIntoxication(sim, c, good)
         emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
         c.action = good
         return
@@ -2193,9 +2230,7 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
     c.action = 'arrived'
     return
   }
-  // desperate creatures hurry — hunger/health urgency speeds the walk
-  const hurry = c.chem.hunger < 0.2 || c.chem.health < 0.3 || c.chem.energy < 0.12 ? 1.7 : 1
-  const step = Math.min(SPEED * hurry, d)
+  const step = Math.min(paceOf(c), d)
   const startX = c.pos.x
   const startZ = c.pos.z
   let dx = ((t.x - c.pos.x) / d) * step
@@ -2255,7 +2290,7 @@ function goToPoint(c: Creature, x: number, z: number, actionLabel: string): void
     c.action = actionLabel
     return
   }
-  const step = Math.min(SPEED, d)
+  const step = Math.min(paceOf(c), d)
   c.pos.x += ((x - c.pos.x) / d) * step
   c.pos.z += ((z - c.pos.z) / d) * step
   c.facing = Math.atan2(x - c.pos.x, z - c.pos.z)
@@ -2289,7 +2324,8 @@ function flee(sim: Sim, c: Creature): void {
     awayX = dx / d
     awayZ = dz / d
   }
-  const speed = SPEED * 1.6
+  // running from something is the one time a Luma really moves
+  const speed = paceOf(c) * 1.75
   c.pos.x += awayX * speed
   c.pos.z += awayZ * speed
   c.facing = Math.atan2(awayX, awayZ)
@@ -2966,10 +3002,12 @@ function blendBrain(sim: Sim, c: Creature, scores: Record<string, number>): void
   const prefs = thinkSync(c.brain, brainContext(sim, c))
   c.brainPrefs = prefs
 
-  // an even spread means the brain has no opinion yet, and should not get one
-  const certainty = brainCertainty(prefs)
-  if (certainty < 0.02) return
-  const weight = Math.min(0.55, 0.15 + certainty * 1.6)
+  // A newborn's weights are random. Random opinions held confidently are
+  // worse than none, so the brain fades in behind instinct as the creature
+  // accumulates lived experience.
+  const authority = brainAuthority(c.brain, prefs)
+  if (authority < 0.02) return
+  const weight = Math.min(0.5, authority * 1.5)
 
   let best = 0
   for (const p of prefs) if (p > best) best = p
@@ -2981,6 +3019,39 @@ function blendBrain(sim: Sim, c: Creature, scores: Record<string, number>): void
     // scale to the range the utility scores live in, then lerp toward it
     const learned = (prefs[i] / best) * 1.6
     scores[name] = scores[name] * (1 - weight) + learned * weight
+  }
+}
+
+/**
+ * Somebody saw you take it.
+ *
+ * The settlement minds a great deal more about sparkdust than about beer, and
+ * the difference is entirely social — the chemistry is separate. Neighbours
+ * who see it think a little less of you, the sobriety norm shifts, and the
+ * hard stuff makes the chronicle.
+ */
+function witnessIntoxication(sim: Sim, c: Creature, id: SubstanceId): void {
+  const disapproval = disapprovalOf(id)
+  if (disapproval < 0.1) return
+
+  let seen = 0
+  for (const other of sim.creatures) {
+    if (other === c || !other.alive || other.sleeping) continue
+    if (dist(other.pos.x, other.pos.z, c.pos.x, c.pos.z) > 11) continue
+    seen++
+    if (sim.rng() < disapproval) {
+      observeEvent(other, 'dissolute', c.id)
+    }
+  }
+
+  witnessedAct(sim.culture, 'sobriety', false, Math.max(1, seen))
+  if (disapproval > 0.7 && seen > 0 && sim.rng() < 0.3) {
+    recordStory(sim.stories, {
+      kind: 'manipulation', tick: sim.time, actor: c,
+      text: `${c.name} was seen on ${substanceDef(id)?.name ?? id} in front of ${seen === 1 ? 'a neighbour' : `${seen} neighbours`}`,
+      because: (c.chem.addiction[id] ?? 0) > 0.4 ? 'a habit by now' : 'a hard week',
+      weight: 0.55,
+    })
   }
 }
 
