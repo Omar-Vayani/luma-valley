@@ -175,6 +175,15 @@ export interface Sim {
   fixtures: Fixture[]
   /** each building's own till and opening hours */
   institutions: Institutions
+  /**
+   * Is there something solid here?
+   *
+   * The simulation deliberately knows nothing about trees, walls or market
+   * stalls — that is the renderer's world. The game layer injects this so
+   * walkers stop shouldering through oaks, without `src/lab` growing a
+   * dependency on anything above it.
+   */
+  obstacleAt: ((x: number, z: number, radius: number) => boolean) | null
   /** Use the nearest fixture as the player: sleep, open, take, or store. */
   playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
   /** What a shop will sell you, what it pays for things, and whether it is open. */
@@ -286,6 +295,7 @@ export function createSim(seed = 1): Sim {
     overheard: [],
     stories: createStoryLog(),
     talkingWith: null,
+    obstacleAt: null,
     fixtures: createFixtures(),
     institutions: createInstitutions(),
     playerUseFixture(action, itemId): string | null {
@@ -1229,7 +1239,7 @@ function decide(sim: Sim, c: Creature): void {
     }
     const foodDrop = nearestDrop(sim, c, 'food', 40)
     if (foodDrop) {
-      goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+      goToPoint(sim, c, foodDrop.x, foodDrop.z, 'eat drop')
       c.intention = null
       return
     }
@@ -1905,7 +1915,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       }
       const foodDrop = nearestDrop(sim, c, 'food', 40)
       if (foodDrop) {
-        goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+        goToPoint(sim, c, foodDrop.x, foodDrop.z, 'eat drop')
         return
       }
       goTo(sim, c, 'food')
@@ -2274,7 +2284,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'collect': {
       const coin = nearestDrop(sim, c, 'money', 40)
       if (coin) {
-        goToPoint(c, coin.x, coin.z, 'collect')
+        goToPoint(sim, c, coin.x, coin.z, 'collect')
         return
       }
       wander(sim, c)
@@ -2306,7 +2316,29 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
   }
 }
 
-function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
+/**
+ * Try a step; if something solid is in the way, try sliding around it the way
+ * this creature prefers, and failing that stand still so the stuck-detector
+ * can pick a new destination.
+ */
+function stepAround(sim: Sim, c: Creature, dx: number, dz: number): { x: number; z: number } {
+  const blocked = sim.obstacleAt
+  if (!blocked) return { x: dx, z: dz }
+  const r = 0.42
+  if (!blocked(c.pos.x + dx, c.pos.z + dz, r)) return { x: dx, z: dz }
+  // sideways, in whichever direction this one goes round obstacles
+  const sx = -dz * c.detourSign
+  const sz = dx * c.detourSign
+  if (!blocked(c.pos.x + sx, c.pos.z + sz, r)) return { x: sx, z: sz }
+  if (!blocked(c.pos.x - sx, c.pos.z - sz, r)) {
+    c.detourSign = -c.detourSign
+    return { x: -sx, z: -sz }
+  }
+  c.stuckTicks++
+  return { x: 0, z: 0 }
+}
+
+function goTo(sim: Sim, c: Creature, towerId: TowerId): void {
   const t = findTower(towerId)
   if (!t) return
   c.goalTowerId = towerId
@@ -2346,9 +2378,10 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
       break
     }
   }
-  c.pos.x += dx
-  c.pos.z += dz
-  c.facing = Math.atan2(dx, dz)
+  const stepped = stepAround(sim, c, dx, dz)
+  c.pos.x += stepped.x
+  c.pos.z += stepped.z
+  if (stepped.x || stepped.z) c.facing = Math.atan2(stepped.x, stepped.z)
   c.action = `go ${towerId}`
 
   // Progress check: a creature that has not moved for a while is wedged.
@@ -2370,15 +2403,16 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
   }
 }
 
-function goToPoint(c: Creature, x: number, z: number, actionLabel: string): void {
+function goToPoint(sim: Sim, c: Creature, x: number, z: number, actionLabel: string): void {
   const d = dist(c.pos.x, c.pos.z, x, z)
   if (d <= 0.5) {
     c.action = actionLabel
     return
   }
   const step = Math.min(paceOf(c), d)
-  c.pos.x += ((x - c.pos.x) / d) * step
-  c.pos.z += ((z - c.pos.z) / d) * step
+  const moved = stepAround(sim, c, ((x - c.pos.x) / d) * step, ((z - c.pos.z) / d) * step)
+  c.pos.x += moved.x
+  c.pos.z += moved.z
   c.facing = Math.atan2(x - c.pos.x, z - c.pos.z)
   c.action = actionLabel
 }

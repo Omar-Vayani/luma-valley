@@ -223,6 +223,9 @@ export class WorldView {
       this.solids.add({ x: c.x, z: c.z, r: c.r, height: c.height ?? 6, kind: c.kind })
     }
     this.controller.setWorld(this.solids)
+    // walkers get the same obstacles the player does, injected rather than
+    // imported, so the simulation stays ignorant of the scenery
+    this.sim.obstacleAt = (x, z, r) => !this.solids?.isClear(x, z, r)
     await frameBreak()
 
     this.callbacks.onLoadProgress(0.3, 'planting the woods')
