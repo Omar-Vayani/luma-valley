@@ -13,11 +13,18 @@ import { learnFact, addVendetta, preferPlace, decayMemory } from './memory'
 import { createEconomy, tickEconomy, tickMarketDay, buyFromTower, marketPrice, recordSale, WORK_SHIFT_TICKS, WORK_PAY, type Economy } from './economy'
 import { createNamePool, pickName, type NamePool } from './names'
 import { learnWord, shareWithNeighbors, sayWord, hearWord, getWord, CONCEPTS } from './language'
-import { think, reward } from './brain'
+import { BRAIN_ACTIONS, brainAuthority, rewardSync, thinkSync } from './brain'
+import {
+  disapprovalOf, doseSubstance, impairmentOf, substanceDef, tickSubstances,
+  type SubstanceId,
+} from './substances'
 import { agingDamage, canProcreate, procreationCost } from './lifecycle'
 import { recordWrong, settleRevenge, decayGrudges } from './vengeance'
 import { tickWant, wantExpired, refreshWant, wantProgress } from './wants'
-import { addItem, useItem, hasItem, tradeItem, countItem, ownerOf, type ItemId } from './inventory'
+import {
+  addItem, canCarry, countItem, hasItem, ownerOf, removeItem, tradeItem, useItem, type ItemId,
+} from './inventory'
+import { itemBaseValue, itemName } from './items'
 import { createPlayer, hurtPlayer, healPlayer, equipItem, eatPlayer, isPlayerAlive, type Player } from './player'
 import { scoreActions, chooseAction, actionValid, COMMITMENT_TICKS, type ActionName } from './mind'
 import { tickRelationships } from './relationships'
@@ -66,7 +73,7 @@ import {
 } from './interact'
 import { createStoryLog, recordStory, explain, type StoryLog } from './story'
 import {
-  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight,
+  createInstitutions, isOpen, takePayment, payFromTill, tickInstitutions, isNight, tillOf,
   type Institutions,
 } from './institutions'
 import { standingOf, priceMultiplierFor, willingToHelp } from './status'
@@ -122,7 +129,6 @@ export interface Sim {
   economy: Economy
   spawnCreature(genome?: Genome, x?: number, z?: number): Creature
   tick(): void
-  poke(id: number): void
   hit(id: number): void
   dropFood(x: number, z: number): void
   dropMoney(x: number, z: number, amount: number): void
@@ -169,8 +175,42 @@ export interface Sim {
   fixtures: Fixture[]
   /** each building's own till and opening hours */
   institutions: Institutions
+  /**
+   * Is there something solid here?
+   *
+   * The simulation deliberately knows nothing about trees, walls or market
+   * stalls — that is the renderer's world. The game layer injects this so
+   * walkers stop shouldering through oaks, without `src/lab` growing a
+   * dependency on anything above it.
+   */
+  obstacleAt: ((x: number, z: number, radius: number) => boolean) | null
   /** Use the nearest fixture as the player: sleep, open, take, or store. */
   playerUseFixture(action: 'rest' | 'toggle' | 'take' | 'store', itemId?: ItemId): string | null
+  /** What a shop will sell you, what it pays for things, and whether it is open. */
+  shopAt(tower: TowerId): ShopOffer | null
+  /** Buy one of a shop's stock. Returns what happened. */
+  playerBuy(tower: TowerId, good: string): TradeResult
+  /** Sell something out of your pack to a shop that deals in it. */
+  playerSell(tower: TowerId, id: ItemId): TradeResult
+}
+
+export interface ShopOffer {
+  tower: TowerId
+  label: string
+  open: boolean
+  /** what it sells, with the price today and how many are left */
+  sells: { id: string; price: number; stock: number }[]
+  /** what it will take off your hands, and for how much */
+  buys: { id: ItemId; price: number }[]
+  /** coins in the till, which is what limits what it can buy from you */
+  till: number
+  keeper: string | null
+}
+
+export interface TradeResult {
+  ok: boolean
+  message: string
+  coins?: number
 }
 
 /** Where each institutional role is performed. */
@@ -183,10 +223,38 @@ const JOB_TOWER: Record<JobId, TowerId> = {
   teacher: 'school',
 }
 
-// Haven is spread across a valley now, not a ring of kiosks, so a walker
-// covers ground at a brisk 2.7 units a second. Still slow enough to fall in
-// beside someone and talk to them while they go.
-const SPEED = 0.45
+/**
+ * A walking pace, in metres per tick at six ticks a second — so 1.6 m/s,
+ * which is what a person walking somewhere actually does. It was nearly twice
+ * this, and the settlement read as agitated: everybody power-walking
+ * everywhere, all day, including the elderly and the toddlers.
+ */
+const SPEED = 0.27
+
+/**
+ * How fast this creature is moving right now, and why. Hurrying is for
+ * emergencies, not for fetching bread; the old code hurried at a flat 1.7x
+ * whenever anything was low, which is most of the time.
+ */
+function paceOf(c: Creature): number {
+  let pace = SPEED
+
+  // urgency: only real trouble makes somebody run
+  if (c.chem.health < 0.25 || c.chem.hunger < 0.12 || c.chem.fear > 0.6) pace *= 1.55
+  else if (c.chem.hunger < 0.28 || c.chem.energy < 0.18) pace *= 1.18
+
+  // a body's own speed
+  pace *= 0.9 + c.genome.energy * 0.25
+  if (c.stage === 'child') pace *= 0.82
+  else if (c.stage === 'elder') pace *= 0.78
+
+  // tiredness, illness, injury and drink all slow the walk
+  pace *= 1 - Math.min(0.3, (1 - c.chem.energy) * 0.3)
+  pace *= 1 - Math.min(0.35, c.illness * 0.3 + c.injury * 0.35)
+  pace *= 1 - impairmentOf(c.chem).slowness
+
+  return Math.max(0.06, pace)
+}
 const FIGHT_RANGE = 2.5
 const STEAL_RANGE = 2.5
 const SOCIAL_RANGE = 3
@@ -227,6 +295,7 @@ export function createSim(seed = 1): Sim {
     overheard: [],
     stories: createStoryLog(),
     talkingWith: null,
+    obstacleAt: null,
     fixtures: createFixtures(),
     institutions: createInstitutions(),
     playerUseFixture(action, itemId): string | null {
@@ -461,12 +530,6 @@ export function createSim(seed = 1): Sim {
       })
       return turn
     },
-    poke(id: number): void {
-      const c = sim.creatureById(id)
-      if (!c || !c.alive) return
-      c.chem.fear = clamp01(c.chem.fear + 0.05)
-      emit(sim, 'flinch', c, undefined, c.pos.x, c.pos.z)
-    },
     hit(id: number): void {
       const c = sim.creatureById(id)
       if (!c || !c.alive) return
@@ -646,6 +709,71 @@ export function createSim(seed = 1): Sim {
      * Exported so tests can drive the trade directly; the tick calls it via
      * tradeNearby() when a stocked seller meets a hungry, able buyer.
      */
+    shopAt(tower: TowerId): ShopOffer | null {
+      const trade = SHOP_TRADE[tower]
+      if (!trade) return null
+      const t = findTower(tower)
+      const keeper = sim.creatures.find((c) => c.alive && c.job === trade.job)
+      return {
+        tower,
+        label: t?.label ?? tower,
+        open: isOpen(sim.institutions, tower, sim.time),
+        sells: trade.sells.map((id) => ({
+          id,
+          price: Math.max(1, Math.round(marketPrice(sim.economy, id))),
+          stock: sim.economy.goods[id]?.stock ?? 0,
+        })),
+        buys: trade.buys.map((id) => ({ id, price: sellPriceOf(sim, id) })),
+        till: Math.round(tillOf(sim.institutions, tower)),
+        keeper: keeper?.name ?? null,
+      }
+    },
+
+    playerBuy(tower: TowerId, good: string): TradeResult {
+      const offer = sim.shopAt(tower)
+      if (!offer) return { ok: false, message: 'Nobody trades here.' }
+      if (!offer.open) return { ok: false, message: `${offer.label} is shut.` }
+      const line = offer.sells.find((s) => s.id === good)
+      if (!line) return { ok: false, message: 'They do not stock that.' }
+      if (line.stock <= 0) return { ok: false, message: `No ${good} left today.` }
+      if (sim.player.wallet < line.price) {
+        return { ok: false, message: `${line.price} coins, and you have ${sim.player.wallet}.` }
+      }
+      const carried = good === 'weapon' ? 'stick' : (good as ItemId)
+      if (!canCarry(sim.player.inventory, carried, 1)) {
+        return { ok: false, message: 'Your pack is full.' }
+      }
+      sim.player.wallet -= line.price
+      const g = sim.economy.goods[good]
+      if (g) g.stock = Math.max(0, g.stock - 1)
+      recordSale(sim.economy, good, 1)
+      takePayment(sim.institutions, tower, line.price)
+      addItem(sim.player.inventory, carried, 1, 0)
+      return { ok: true, message: `Bought ${itemName(carried)} for ${line.price}.`, coins: -line.price }
+    },
+
+    playerSell(tower: TowerId, id: ItemId): TradeResult {
+      const offer = sim.shopAt(tower)
+      if (!offer) return { ok: false, message: 'Nobody trades here.' }
+      if (!offer.open) return { ok: false, message: `${offer.label} is shut.` }
+      const line = offer.buys.find((b) => b.id === id)
+      if (!line) return { ok: false, message: `${offer.label} has no use for that.` }
+      if (countItem(sim.player.inventory, id) <= 0) return { ok: false, message: 'You have none.' }
+      const paid = payFromTill(sim.institutions, tower, line.price)
+      if (paid <= 0) return { ok: false, message: `${offer.label} has nothing in the till.` }
+      removeItem(sim.player.inventory, id, 1)
+      const g = sim.economy.goods[id]
+      if (g) g.stock = Math.min(g.maxStock, g.stock + 1)
+      sim.player.wallet += paid
+      return {
+        ok: true,
+        message: paid < line.price
+          ? `They could only find ${paid} coins for it.`
+          : `Sold ${itemName(id)} for ${paid}.`,
+        coins: paid,
+      }
+    },
+
     creatureTrade(seller: Creature, buyer: Creature, price?: number): boolean {
       if (!seller.alive || !buyer.alive) return false
       if (!hasItem(seller.inventory, 'bread')) return false
@@ -781,6 +909,17 @@ export function createSim(seed = 1): Sim {
           tickChem(c.chem, sim.time)
           // apply extra decay steps when striding
           for (let i = 1; i < stride.dt; i++) tickChem(c.chem, sim.time)
+          // comedown, tolerance decay and withdrawal
+          for (let i = 0; i < stride.dt; i++) {
+            const craving = tickSubstances(c.chem, sim.time)
+            if (craving.id && craving.severity > 0.5 && sim.rng() < 0.004) {
+              recordStory(sim.stories, {
+                kind: 'shortage', tick: sim.time, actor: c,
+                text: `${c.name} is shaking for want of ${substanceDef(craving.id)?.name ?? craving.id}`,
+                because: 'withdrawal', weight: 0.5,
+              })
+            }
+          }
           // metabolism: a fast burner empties faster than a thrifty one
           const burn = (metabolicRate(c.genome) - 1) * 0.0004 * stride.dt
           if (burn !== 0) c.chem.hunger = clamp01(c.chem.hunger - burn)
@@ -1100,7 +1239,7 @@ function decide(sim: Sim, c: Creature): void {
     }
     const foodDrop = nearestDrop(sim, c, 'food', 40)
     if (foodDrop) {
-      goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+      goToPoint(sim, c, foodDrop.x, foodDrop.z, 'eat drop')
       c.intention = null
       return
     }
@@ -1233,7 +1372,7 @@ function decide(sim: Sim, c: Creature): void {
   // Re-score and pick a fresh action (mind + free will).
   const scores = scoreActions(sim, c)
   // The creature's own brain (learned experience) biases the action choice.
-  blendBrainFromCache(c, scores)
+  blendBrain(sim, c, scores)
   // Habits: what this creature keeps doing gets a little easier to choose.
   for (const name of Object.keys(scores) as ActionName[]) {
     scores[name] += habitBias(c.habits, name)
@@ -1243,8 +1382,8 @@ function decide(sim: Sim, c: Creature): void {
   c.intentionTicks = COMMITMENT_TICKS
   reinforceHabit(c.habits, chosen, 0.02 * learningRateFor(c.stage))
   execute(sim, c, chosen)
-  // Learning: the outcome of this action teaches the brain a little (async).
-  void learnFromOutcome(sim, c, chosen)
+  // Learning: the outcome of this action teaches the brain a little.
+  learnFromOutcome(sim, c, chosen)
 }
 
 /**
@@ -1776,7 +1915,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
       }
       const foodDrop = nearestDrop(sim, c, 'food', 40)
       if (foodDrop) {
-        goToPoint(c, foodDrop.x, foodDrop.z, 'eat drop')
+        goToPoint(sim, c, foodDrop.x, foodDrop.z, 'eat drop')
         return
       }
       goTo(sim, c, 'food')
@@ -1986,11 +2125,8 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'drink': {
       const good = at?.id === 'tavern' ? payAtTower(sim, c, 'tavern', 'brew') : null
       if (good) {
-        c.chem.pleasure = clamp01(c.chem.pleasure + 0.3)
-        c.chem.intoxication = clamp01(c.chem.intoxication + 0.25)
-        const dose = 0.06 + c.genome.addictionProne * 0.2
-        c.chem.addiction.brew = clamp01((c.chem.addiction.brew ?? 0) + dose)
-        c.chem.lastDose.brew = sim.time
+        doseSubstance(c.chem, 'brew', c.genome.addictionProne, sim.time)
+        witnessIntoxication(sim, c, 'brew')
         emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
         c.action = 'drink'
         return
@@ -2001,11 +2137,8 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'den': {
       const good = at?.id === 'den' ? buyFromTower(sim.economy, 'den', c) : null
       if (good === 'herb' || good === 'spark') {
-        c.chem.pleasure = clamp01(c.chem.pleasure + (good === 'spark' ? 0.55 : 0.3))
-        c.chem.fear = clamp01(c.chem.fear + (good === 'spark' ? 0.15 : -0.25))
-        const dose = 0.08 + c.genome.addictionProne * 0.25
-        c.chem.addiction[good] = clamp01((c.chem.addiction[good] ?? 0) + dose)
-        c.chem.lastDose[good] = sim.time
+        doseSubstance(c.chem, good, c.genome.addictionProne, sim.time)
+        witnessIntoxication(sim, c, good)
         emit(sim, 'drink', c, undefined, c.pos.x, c.pos.z)
         c.action = good
         return
@@ -2151,7 +2284,7 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
     case 'collect': {
       const coin = nearestDrop(sim, c, 'money', 40)
       if (coin) {
-        goToPoint(c, coin.x, coin.z, 'collect')
+        goToPoint(sim, c, coin.x, coin.z, 'collect')
         return
       }
       wander(sim, c)
@@ -2183,7 +2316,29 @@ function execute(sim: Sim, c: Creature, action: ActionName): void {
   }
 }
 
-function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
+/**
+ * Try a step; if something solid is in the way, try sliding around it the way
+ * this creature prefers, and failing that stand still so the stuck-detector
+ * can pick a new destination.
+ */
+function stepAround(sim: Sim, c: Creature, dx: number, dz: number): { x: number; z: number } {
+  const blocked = sim.obstacleAt
+  if (!blocked) return { x: dx, z: dz }
+  const r = 0.42
+  if (!blocked(c.pos.x + dx, c.pos.z + dz, r)) return { x: dx, z: dz }
+  // sideways, in whichever direction this one goes round obstacles
+  const sx = -dz * c.detourSign
+  const sz = dx * c.detourSign
+  if (!blocked(c.pos.x + sx, c.pos.z + sz, r)) return { x: sx, z: sz }
+  if (!blocked(c.pos.x - sx, c.pos.z - sz, r)) {
+    c.detourSign = -c.detourSign
+    return { x: -sx, z: -sz }
+  }
+  c.stuckTicks++
+  return { x: 0, z: 0 }
+}
+
+function goTo(sim: Sim, c: Creature, towerId: TowerId): void {
   const t = findTower(towerId)
   if (!t) return
   c.goalTowerId = towerId
@@ -2193,9 +2348,7 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
     c.action = 'arrived'
     return
   }
-  // desperate creatures hurry — hunger/health urgency speeds the walk
-  const hurry = c.chem.hunger < 0.2 || c.chem.health < 0.3 || c.chem.energy < 0.12 ? 1.7 : 1
-  const step = Math.min(SPEED * hurry, d)
+  const step = Math.min(paceOf(c), d)
   const startX = c.pos.x
   const startZ = c.pos.z
   let dx = ((t.x - c.pos.x) / d) * step
@@ -2225,9 +2378,10 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
       break
     }
   }
-  c.pos.x += dx
-  c.pos.z += dz
-  c.facing = Math.atan2(dx, dz)
+  const stepped = stepAround(sim, c, dx, dz)
+  c.pos.x += stepped.x
+  c.pos.z += stepped.z
+  if (stepped.x || stepped.z) c.facing = Math.atan2(stepped.x, stepped.z)
   c.action = `go ${towerId}`
 
   // Progress check: a creature that has not moved for a while is wedged.
@@ -2249,15 +2403,16 @@ function goTo(_sim: Sim, c: Creature, towerId: TowerId): void {
   }
 }
 
-function goToPoint(c: Creature, x: number, z: number, actionLabel: string): void {
+function goToPoint(sim: Sim, c: Creature, x: number, z: number, actionLabel: string): void {
   const d = dist(c.pos.x, c.pos.z, x, z)
   if (d <= 0.5) {
     c.action = actionLabel
     return
   }
-  const step = Math.min(SPEED, d)
-  c.pos.x += ((x - c.pos.x) / d) * step
-  c.pos.z += ((z - c.pos.z) / d) * step
+  const step = Math.min(paceOf(c), d)
+  const moved = stepAround(sim, c, ((x - c.pos.x) / d) * step, ((z - c.pos.z) / d) * step)
+  c.pos.x += moved.x
+  c.pos.z += moved.z
   c.facing = Math.atan2(x - c.pos.x, z - c.pos.z)
   c.action = actionLabel
 }
@@ -2289,7 +2444,8 @@ function flee(sim: Sim, c: Creature): void {
     awayX = dx / d
     awayZ = dz / d
   }
-  const speed = SPEED * 1.6
+  // running from something is the one time a Luma really moves
+  const speed = paceOf(c) * 1.75
   c.pos.x += awayX * speed
   c.pos.z += awayZ * speed
   c.facing = Math.atan2(awayX, awayZ)
@@ -2952,47 +3108,128 @@ function brainContext(sim: Sim, c: Creature): number[] {
   ]
 }
 
-/** Action indices for the brain's preference vector (aligned with ActionName order). */
-const BRAIN_ACTIONS = ['food', 'work', 'sleep', 'heal', 'drink', 'den', 'school', 'farm', 'park', 'play', 'social', 'steal', 'share', 'fight', 'wander', 'idle', 'deposit', 'withdraw'] as const
+/**
+ * Ask the creature's own brain what it feels like doing, and fold that into
+ * the utility scores.
+ *
+ * This is the part that makes two Luma with identical genomes and identical
+ * needs diverge: the rules in `mind.ts` are the same for everybody, and the
+ * brain is not. It is weighted deliberately below the rules — a starving
+ * creature still goes for food — but it is enough to give an individual
+ * settled preferences about where to go and who to be near.
+ */
+function blendBrain(sim: Sim, c: Creature, scores: Record<string, number>): void {
+  const prefs = thinkSync(c.brain, brainContext(sim, c))
+  c.brainPrefs = prefs
 
-/** Blend the creature's learned brain preferences (cached async) into scores. */
-function blendBrainFromCache(c: Creature, scores: Record<string, number>): void {
-  const prefs = c.brainPrefs
-  if (!prefs) return
+  // A newborn's weights are random. Random opinions held confidently are
+  // worse than none, so the brain fades in behind instinct as the creature
+  // accumulates lived experience.
+  const authority = brainAuthority(c.brain, prefs)
+  if (authority < 0.02) return
+  const weight = Math.min(0.5, authority * 1.5)
+
+  let best = 0
+  for (const p of prefs) if (p > best) best = p
+  if (best <= 0) return
+
   for (let i = 0; i < BRAIN_ACTIONS.length && i < prefs.length; i++) {
     const name = BRAIN_ACTIONS[i]
-    if (name in scores) {
-      scores[name] = scores[name] * 0.7 + prefs[i] * 2.2 // learned bias, scaled
+    if (!(name in scores)) continue
+    // scale to the range the utility scores live in, then lerp toward it
+    const learned = (prefs[i] / best) * 1.6
+    scores[name] = scores[name] * (1 - weight) + learned * weight
+  }
+}
+
+/**
+ * Which building deals in what, from the player's side of the counter.
+ * Creatures buy through `buyFromTower`; this is the same economy seen from
+ * the other direction, because a settlement you can only give things to is
+ * not an economy you are part of.
+ */
+const SHOP_TRADE: Partial<Record<TowerId, { job: string; sells: string[]; buys: ItemId[] }>> = {
+  food: { job: 'shopkeep', sells: ['bread'], buys: ['grain', 'berry', 'fish', 'herb'] },
+  pharmacy: { job: 'healer', sells: ['medicine', 'tonic'], buys: ['herb', 'medicine'] },
+  clinic: { job: 'healer', sells: ['medicine'], buys: ['herb'] },
+  tavern: { job: 'bartender', sells: ['brew'], buys: ['grain', 'berry', 'fish'] },
+  tools: { job: 'porter', sells: ['weapon'], buys: ['timber', 'stone', 'gem'] },
+  den: { job: 'porter', sells: ['herb', 'spark'], buys: ['herb'] },
+  farm: { job: 'farmer', sells: ['grain'], buys: ['timber', 'stone'] },
+}
+
+/**
+ * What a shop pays for something. Well under what it charges, because that
+ * difference is the shopkeeper's living.
+ */
+function sellPriceOf(sim: Sim, id: ItemId): number {
+  const listed = sim.economy.goods[id]
+  const base = listed ? marketPrice(sim.economy, id) : itemBaseValue(id)
+  return Math.max(1, Math.round(base * 0.6))
+}
+
+/**
+ * Somebody saw you take it.
+ *
+ * The settlement minds a great deal more about sparkdust than about beer, and
+ * the difference is entirely social — the chemistry is separate. Neighbours
+ * who see it think a little less of you, the sobriety norm shifts, and the
+ * hard stuff makes the chronicle.
+ */
+function witnessIntoxication(sim: Sim, c: Creature, id: SubstanceId): void {
+  const disapproval = disapprovalOf(id)
+  if (disapproval < 0.1) return
+
+  let seen = 0
+  for (const other of sim.creatures) {
+    if (other === c || !other.alive || other.sleeping) continue
+    if (dist(other.pos.x, other.pos.z, c.pos.x, c.pos.z) > 11) continue
+    seen++
+    if (sim.rng() < disapproval) {
+      observeEvent(other, 'dissolute', c.id)
     }
   }
-}
 
-/** Refresh a creature's brain preference cache (async, throttled by sim). */
-export async function refreshBrain(sim: Sim, c: Creature): Promise<void> {
-  try {
-    c.brainPrefs = await think(c.brain, brainContext(sim, c))
-  } catch {
-    c.brainPrefs = null
+  witnessedAct(sim.culture, 'sobriety', false, Math.max(1, seen))
+  if (disapproval > 0.7 && seen > 0 && sim.rng() < 0.3) {
+    recordStory(sim.stories, {
+      kind: 'manipulation', tick: sim.time, actor: c,
+      text: `${c.name} was seen on ${substanceDef(id)?.name ?? id} in front of ${seen === 1 ? 'a neighbour' : `${seen} neighbours`}`,
+      because: (c.chem.addiction[id] ?? 0) > 0.4 ? 'a habit by now' : 'a hard week',
+      weight: 0.55,
+    })
   }
 }
 
-/** Reward the brain after an action based on how it changed needs. */
-async function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): Promise<void> {
-  try {
-    // skip low-value/no-op actions — reward only meaningful experiences so
-    // tfjs work is minimal on mobile (wander/idle/collect teach nothing)
-    if (action === 'wander' || action === 'idle' || action === 'collect') return
-    const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
-    if (idx < 0) return
-    // reward = how much better the creature feels right now (needs satisfied)
-    const pleasureNow = c.chem.pleasure
-    const hungerNow = c.chem.hunger
-    const r = 0.3 + pleasureNow * 0.5 + hungerNow * 0.3 + (c.wallet > 0 ? 0.1 : 0)
-    await reward(c.brain, brainContext(sim, c), idx, Math.min(1, r))
-    learnLanguageFromAction(sim, c, action)
-  } catch {
-    // learning failure must never break the sim
-  }
+/** Refresh a creature's cached preferences without making a decision. */
+export function refreshBrain(sim: Sim, c: Creature): void {
+  c.brainPrefs = thinkSync(c.brain, brainContext(sim, c))
+}
+
+/**
+ * Teach the brain from what just happened.
+ *
+ * The reward is how the creature feels *now*, compared with a neutral middle,
+ * so an action that left it hungrier and poorer is punished rather than merely
+ * un-rewarded. Without the negative half it learned that everything was
+ * roughly fine.
+ */
+function learnFromOutcome(sim: Sim, c: Creature, action: ActionName): void {
+  if (action === 'wander' || action === 'idle' || action === 'collect') return
+  const idx = BRAIN_ACTIONS.indexOf(action as (typeof BRAIN_ACTIONS)[number])
+  if (idx < 0) return
+
+  const wellbeing =
+    c.chem.hunger * 0.3
+    + c.chem.energy * 0.15
+    + c.chem.pleasure * 0.2
+    + c.chem.social * 0.1
+    + c.chem.health * 0.15
+    + (1 - c.chem.fear) * 0.1
+  // -1 .. 1, so a bad outcome moves the weights the other way
+  const signal = (wellbeing - 0.5) * 2
+  rewardSync(c.brain, brainContext(sim, c), idx, Math.max(-0.8, Math.min(1, signal)))
+  learnLanguageFromAction(sim, c, action)
 }
 
 /** Language: doing things teaches words; being near others spreads them. */

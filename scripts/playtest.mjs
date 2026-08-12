@@ -152,45 +152,97 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(400)
 
 // --- the crosshair picks who you are pointing at ---------------------------
-const targeting = await page.evaluate(() => {
+const targeting = await page.evaluate(async () => {
   const l = window.luma
+  const t = await import('/src/world/terrain.ts')
   const living = l.sim.creatures.filter((c) => c.alive)
   if (living.length < 2) return { ok: false, reason: 'not enough Luma' }
-  // the closest pair, so that standing between them puts both in reach
-  let a = living[0]
-  let b = living[1]
-  let best = Infinity
-  for (const x of living) {
-    for (const y of living) {
-      if (x.id >= y.id) continue
-      const d = Math.hypot(x.pos.x - y.pos.x, x.pos.z - y.pos.z)
-      if (d < best) {
-        best = d
-        a = x
-        b = y
-      }
-    }
+  // Put two of them side by side in the plaza and stand in front of both, so
+  // the check is about where the crosshair points and nothing else.
+  const [a, b] = living
+  a.pos = { x: -1.4, z: -4 }
+  b.pos = { x: 1.4, z: -4 }
+  a.busyTicks = 200
+  b.busyTicks = 200
+  l.view.teleport(0, -1.6)
+  return {
+    ok: true,
+    aId: a.id, bId: b.id,
+    ax: a.pos.x, az: a.pos.z, ay: t.heightAt(a.pos.x, a.pos.z) + 1,
+    bx: b.pos.x, bz: b.pos.z, by: t.heightAt(b.pos.x, b.pos.z) + 1,
   }
-  if (best > 5) return { ok: false, reason: `nearest pair are ${best.toFixed(1)} m apart` }
-  const mx = (a.pos.x + b.pos.x) / 2
-  const mz = (a.pos.z + b.pos.z) / 2
-  l.view.teleport(mx, mz)
-  l.view.lookAt(a.pos.x, a.pos.z, 0)
-  return { ok: true, aId: a.id, bId: b.id, ax: a.pos.x, az: a.pos.z, bx: b.pos.x, bz: b.pos.z }
 })
 if (targeting.ok) {
-  await until((t) => window.luma.view.currentTarget?.id === t.aId, targeting, 'the first Luma')
+  await page.evaluate((t) => window.luma.view.aimAt(t.ax, t.ay, t.az), targeting)
+  await until((t) => window.luma.view.currentTarget?.id === t.aId, targeting, 'the left Luma')
   const first = await page.evaluate(() => window.luma.view.currentTarget?.id ?? null)
-  await page.evaluate((t) => window.luma.view.lookAt(t.bx, t.bz, 0), targeting)
-  await until((t) => window.luma.view.currentTarget?.id === t.bId, targeting, 'the second Luma')
+  await page.evaluate((t) => window.luma.view.aimAt(t.bx, t.by, t.bz), targeting)
+  await until((t) => window.luma.view.currentTarget?.id === t.bId, targeting, 'the right Luma')
   const second = await page.evaluate(() => window.luma.view.currentTarget?.id ?? null)
   check(
     'the crosshair selects who you point at, not the nearest',
     first !== null && second !== null && first !== second,
-    `looked at ${first} then ${second}`,
+    `looked left at ${first}, right at ${second}`,
   )
 } else {
   check('the crosshair selects who you point at', false, targeting.reason)
+}
+
+// --- walls are solid ---------------------------------------------------------
+const walled = await page.evaluate(async () => {
+  const l = window.luma
+  const world = await import('/src/lab/world.ts')
+  const t = await import('/src/world/terrain.ts')
+  const hall = world.findTower('bank')
+  // stand outside the back of the building and try to walk straight through it
+  const back = { x: hall.x - Math.sin(hall.facing) * 12, z: hall.z - Math.cos(hall.facing) * 12 }
+  l.view.teleport(back.x, back.z)
+  l.view.lookAt(hall.x, hall.z, 0)
+  return { hx: hall.x, hz: hall.z, sx: back.x, sz: back.z, ground: t.heightAt(back.x, back.z) }
+})
+await page.waitForTimeout(800)
+await page.keyboard.down('KeyW')
+await until(
+  (w) => {
+    const p = window.luma.view.playerPosition()
+    return Math.hypot(p.x - w.sx, p.z - w.sz) > 5.5
+  },
+  walled, 'the player to reach the wall', 12_000,
+)
+await page.waitForTimeout(1200)
+await page.keyboard.up('KeyW')
+const stopped = await page.evaluate(() => window.luma.view.playerPosition())
+const intoBuilding = Math.hypot(stopped.x - walled.hx, stopped.z - walled.hz)
+check(
+  'a wall stops you instead of letting you walk through the building',
+  intoBuilding > 4.5,
+  `${intoBuilding.toFixed(1)} m from the middle of the hall`,
+)
+
+// --- trees are solid ---------------------------------------------------------
+const treed = await page.evaluate(async () => {
+  const l = window.luma
+  const scatter = await import('/src/world/scatter.ts')
+  const tree = scatter.worldScatter().props
+    .filter((p) => p.kind === 'pine' || p.kind === 'tree')
+    .sort((p, q) => Math.hypot(p.x, p.z) - Math.hypot(q.x, q.z))[0]
+  if (!tree) return null
+  const angle = Math.atan2(tree.z, tree.x)
+  const from = { x: tree.x + Math.cos(angle) * 4, z: tree.z + Math.sin(angle) * 4 }
+  l.view.teleport(from.x, from.z)
+  l.view.lookAt(tree.x, tree.z, 0)
+  return { tx: tree.x, tz: tree.z }
+})
+if (treed) {
+  await page.waitForTimeout(700)
+  await page.keyboard.down('KeyW')
+  await page.waitForTimeout(2500)
+  await page.keyboard.up('KeyW')
+  const at = await page.evaluate(() => window.luma.view.playerPosition())
+  const gap = Math.hypot(at.x - treed.tx, at.z - treed.tz)
+  check('you cannot walk through a tree', gap > 0.6, `${gap.toFixed(2)} m from the trunk`)
+} else {
+  check('you cannot walk through a tree', false, 'no tree found')
 }
 
 // --- gathering -------------------------------------------------------------
@@ -298,6 +350,92 @@ check(
   found.discovered.includes('stones'),
   found.discovered.join(', ') || 'nothing found',
 )
+
+// --- buying and selling ------------------------------------------------------
+const shopping = await page.evaluate(async () => {
+  const l = window.luma
+  const world = await import('/src/lab/world.ts')
+  const inv = await import('/src/lab/inventory.ts')
+  const market = world.findTower('food')
+  // stand at the counter with coins and something they want
+  l.view.teleport(market.x, market.z + market.radius + 1)
+  l.sim.player.wallet = 40
+  inv.addItem(l.sim.player.inventory, 'grain', 2, 0)
+  l.sim.economy.goods.bread.stock = Math.max(3, l.sim.economy.goods.bread.stock)
+  const before = {
+    wallet: l.sim.player.wallet,
+    bread: l.sim.player.inventory.items.bread ?? 0,
+    grain: l.sim.player.inventory.items.grain ?? 0,
+  }
+  const bought = l.sim.playerBuy('food', 'bread')
+  const sold = l.sim.playerSell('food', 'grain')
+  return {
+    before,
+    bought,
+    sold,
+    after: {
+      wallet: l.sim.player.wallet,
+      bread: l.sim.player.inventory.items.bread ?? 0,
+      grain: l.sim.player.inventory.items.grain ?? 0,
+    },
+  }
+})
+check(
+  'you can buy from a shop at the price the Luma pay',
+  shopping.bought.ok && shopping.after.bread > shopping.before.bread
+    && shopping.after.wallet < shopping.before.wallet,
+  shopping.bought.message,
+)
+check(
+  'and sell into its till',
+  shopping.sold.ok && shopping.after.grain < shopping.before.grain,
+  shopping.sold.message,
+)
+
+// --- a counter opens the shop ------------------------------------------------
+await page.evaluate(async () => {
+  const l = window.luma
+  const counter = l.sim.fixtures.find((f) => f.kind === 'counter' && f.tower === 'food')
+  if (!counter) return
+  l.view.teleport(counter.x, counter.z + 2)
+  l.view.aimAt(counter.x, 1.0, counter.z)
+})
+await until(() => window.luma.view.currentTarget?.kind === 'fixture', null, 'a counter under the crosshair')
+await page.keyboard.press('KeyE')
+await page.waitForSelector('[data-panel="shop"]', { timeout: 10_000 }).catch(() => {})
+check('E at a counter opens the shop', await page.locator('[data-panel="shop"]').count() === 1)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(400)
+
+// --- an empty hand is a hand -------------------------------------------------
+const comforted = await page.evaluate(async () => {
+  const l = window.luma
+  const c = l.sim.creatures.find((x) => x.alive)
+  c.chem.pleasure = 0.2
+  c.pos = { x: l.view.playerPosition().x + 1.4, z: l.view.playerPosition().z + 1.4 }
+  const before = c.chem.pleasure
+  l.view.aimAt(c.pos.x, 1.2, c.pos.z)
+  await new Promise((r) => setTimeout(r, 500))
+  l.view.useHeld(null)
+  return { before, after: c.chem.pleasure, id: c.id }
+})
+check(
+  'an empty hand on somebody comforts them',
+  comforted.after > comforted.before,
+  `pleasure ${comforted.before.toFixed(2)} to ${comforted.after.toFixed(2)}`,
+)
+
+// --- the toolbar is reachable while the mouse is free ------------------------
+const toolBox = await page.locator('[data-tool="journal"]').boundingBox()
+let toolClickable = false
+if (toolBox) {
+  const hit = await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y)
+    return el?.closest('[data-tool]')?.getAttribute('data-tool') ?? null
+  }, { x: toolBox.x + toolBox.width / 2, y: toolBox.y + toolBox.height / 2 })
+  toolClickable = hit === 'journal'
+}
+check('the top-right buttons are not covered by anything', toolClickable)
 
 // --- every panel opens -----------------------------------------------------
 const panels = [

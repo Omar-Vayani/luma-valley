@@ -32,6 +32,10 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`))
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
 await page.waitForTimeout(wait)
 
+if (process.env.SHOT_QUALITY) {
+  await page.evaluate((q) => window.luma?.view.setQuality(q), process.env.SHOT_QUALITY)
+  await page.waitForTimeout(1200)
+}
 // the click-to-look overlay cannot be dismissed without a real pointer lock
 await page.addStyleTag({ content: '.enter{display:none !important}' })
 // close whatever panel opened on first run so the world is visible

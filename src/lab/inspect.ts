@@ -20,6 +20,8 @@ import { standingOf, describeStanding } from './status'
 import { closedNow, timeOfDay, tillOf } from './institutions'
 import { wealthInequality, totalOwedBy, totalOwedTo } from './economy'
 import { lifeStory, topStories, storiesSince, formatStory } from './story'
+import { SUBSTANCES } from './substances'
+import { brainAuthority } from './brain'
 
 export interface InspectReport {
   id: number
@@ -69,6 +71,23 @@ export interface InspectReport {
   /** how the settlement regards them, in words */
   standing: string
   standingScore: number
+  /** how much schooling they have had, 0..5 */
+  education: number
+  /** the words this one has for things, and how firmly */
+  vocabulary: { concept: string; word: string; strength: number }[]
+  /** what they are dependent on, how badly, and how numb to it they have become */
+  habitsOfSubstance: {
+    id: string
+    name: string
+    dependence: number
+    tolerance: number
+    /** ticks since the last dose */
+    since: number
+  }[]
+  /** how far gone right now, 0..1 */
+  intoxication: number
+  /** how much of this creature's behaviour is learned rather than instinct */
+  learned: number
 }
 
 export function inspectCreature(sim: Sim, c: Creature): InspectReport {
@@ -212,6 +231,23 @@ export function inspectCreature(sim: Sim, c: Creature): InspectReport {
     owed: Math.round(totalOwedTo(sim.ledger, c.id)),
     standing: describeStanding(standing),
     standingScore: Math.round(standing.score * 100) / 100,
+    education: c.education,
+    vocabulary: [...c.language.vocab.entries()]
+      .map(([concept, entry]) => ({ concept, word: entry.word, strength: entry.strength }))
+      .sort((a, b) => b.strength - a.strength)
+      .slice(0, 12),
+    habitsOfSubstance: SUBSTANCES
+      .map((def) => ({
+        id: def.id,
+        name: def.name,
+        dependence: c.chem.addiction[def.id] ?? 0,
+        tolerance: c.chem.tolerance?.[def.id] ?? 0,
+        since: sim.time - (c.chem.lastDose[def.id] ?? -99999),
+      }))
+      .filter((h) => h.dependence > 0.02 || h.tolerance > 0.02)
+      .sort((a, b) => b.dependence - a.dependence),
+    intoxication: c.chem.intoxication,
+    learned: brainAuthority(c.brain, c.brainPrefs),
   }
 }
 

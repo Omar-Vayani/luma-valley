@@ -32,8 +32,9 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     const s = createSim(2027)
     const c = s.spawnCreature(GEN({ curiosity: 0.95 }), 0, 0)
     s.tick()
-    // after wandering a bit, the seen set grows
-    for (let i = 0; i < 300; i++) s.tick()
+    // after wandering a bit, the seen set grows. Luma walk at a walking pace,
+    // so covering the valley takes real time.
+    for (let i = 0; i < 700; i++) s.tick()
     expect(Object.keys(c.memory.seenPlaces).length).toBeGreaterThanOrEqual(2)
   })
 
@@ -48,11 +49,13 @@ describe('sim — exploration (creatures roam, not pile on one tower)', () => {
     a.age = 700 // old enough to procreate
     b.age = 700
     const before = s.creatures.length
-    // the hearths are a walk from the commons hall, so give them time to nest
-    for (let i = 0; i < 320; i++) s.tick()
+    // the hearths are a walk from the commons hall, at a walking pace
+    for (let i = 0; i < 900; i++) s.tick()
     expect(s.creatures.length).toBeGreaterThan(before)
-    // the first one born to this couple, not whoever wandered in afterwards
-    const child = s.creatures[before]
+    // the one born to this couple, not whoever wandered into Haven meanwhile
+    const child = s.creatures.find((x) => x.parentIds.includes(a.id) && x.parentIds.includes(b.id))
+    expect(child, 'the couple had no child').toBeDefined()
+    if (!child) return
     // child's genome came from the parents: aggression is high, not random-low
     expect(child.genome.aggression).toBeGreaterThan(0.5)
     expect(child.genome.curiosity).toBeGreaterThan(0.5)

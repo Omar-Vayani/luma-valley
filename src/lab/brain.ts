@@ -1,156 +1,287 @@
 /**
- * brain — a tiny per-creature neural network built with TensorFlow.js.
- * Self-organizing: each creature's brain learns action preferences from its
- * own experience via reward reinforcement (Hebbian-style weight updates on
- * the context → action pathway). Small enough to run efficiently in a
- * browser on mobile for dozens of creatures.
+ * brain — a small neural network per creature, and the reason two Luma with
+ * the same genome and the same needs can end up with different habits.
  *
- * Architecture: input(need context) → 12 hidden → output(action preferences).
- * Weights are plain Float32Arrays so saves stay tiny; tfjs is used for the
- * math so it benefits from WebGL on phones when available.
+ * Architecture: context in → one hidden ReLU layer → a preference over every
+ * action, softmaxed. It is trained by reward: after an action, whatever the
+ * creature ended up feeling is fed back along the pathway that chose it, so a
+ * creature who keeps finding food at the market grows a bias toward the market
+ * that no rule in `mind.ts` put there.
  *
- * PERFORMANCE: this is the hottest tfjs path (called per creature per frame).
- * Every intermediate tensor is disposed in a finally block and inline weight
- * tensors are reused via a small cache — no leaks, no WebGL context loss.
+ * This used to run on TensorFlow.js. For a sixteen-by-twelve-by-twenty network
+ * that was several hundred kilobytes of dependency and a WebGL round trip to
+ * do about six hundred multiply-adds — and because the forward pass was async,
+ * inference was never actually wired into the decision, so every brain in the
+ * settlement trained and none of them were ever asked. Plain arrays are faster
+ * here by a wide margin, synchronous, and exactly reproducible from a seed,
+ * which the simulation's determinism guarantees depend on.
+ *
+ * Weight layout is row-major and unchanged, so saved brains still load:
+ *   w1[input * hidden + h]   b1[hidden]
+ *   w2[hidden * output + o]  b2[output]
  */
-import * as tf from '@tensorflow/tfjs'
 
 export interface Brain {
   inputSize: number
   outputSize: number
   learnRate: number
   hidden: number
-  /** w1[hidden][input], b1[hidden], w2[output][hidden], b2[output] */
   w1: Float32Array
   b1: Float32Array
   w2: Float32Array
   b2: Float32Array
-  serialize(): { w1: number[]; b1: number[]; w2: number[]; b2: number[] }
-  /** cached weight tensors for fast reuse between think/reward calls */
-  _tw1?: tf.Tensor2D
-  _tw2?: tf.Tensor2D
-  _tb1?: tf.Tensor1D
-  _tb2?: tf.Tensor1D
+  /**
+   * How many rewarded experiences this brain has had. A newborn's weights are
+   * random, and random opinions held confidently are worse than no opinions,
+   * so the simulation uses this to fade the brain in behind instinct as the
+   * creature actually lives.
+   */
+  trained: number
+  serialize(): BrainWeights
 }
 
-function randn(): number {
-  // Box-Muller with Math.random — fine for weight init
-  const u = Math.max(1e-8, Math.random())
-  const v = Math.max(1e-8, Math.random())
+export interface BrainWeights {
+  w1: number[]
+  b1: number[]
+  w2: number[]
+  b2: number[]
+  trained?: number
+}
+
+/**
+ * The actions a brain can hold an opinion about, in the order of its output
+ * vector. It lives here rather than beside `ActionName` so that both the
+ * creature (which sizes its brain) and the simulation (which reads the
+ * preferences) can import it without a cycle.
+ */
+export const BRAIN_ACTIONS = [
+  'food', 'work', 'sleep', 'heal', 'drink', 'den', 'school', 'farm', 'park',
+  'play', 'social', 'steal', 'share', 'fight', 'wander', 'idle', 'deposit',
+  'withdraw',
+] as const
+
+export type BrainAction = (typeof BRAIN_ACTIONS)[number]
+
+/** How many numbers of context a brain reads, and how many it answers with. */
+export const BRAIN_INPUTS = 16
+export const BRAIN_OUTPUTS = BRAIN_ACTIONS.length
+
+const HIDDEN = 12
+
+/** Box–Muller. Optionally seeded, so a world rebuilt from a seed is identical. */
+function randn(rand: () => number): number {
+  const u = Math.max(1e-8, rand())
+  const v = Math.max(1e-8, rand())
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
 }
 
-export function createBrain(inputSize: number, outputSize: number, weights?: { w1: number[]; b1: number[]; w2: number[]; b2: number[] }): Brain {
-  const hidden = 12
-  const w1 = weights ? new Float32Array(weights.w1) : new Float32Array(hidden * inputSize)
-  const b1 = weights ? new Float32Array(weights.b1) : new Float32Array(hidden)
-  const w2 = weights ? new Float32Array(weights.w2) : new Float32Array(outputSize * hidden)
-  const b2 = weights ? new Float32Array(weights.b2) : new Float32Array(outputSize)
-  if (!weights) {
-    for (let i = 0; i < w1.length; i++) w1[i] = randn() * 0.4
-    for (let i = 0; i < w2.length; i++) w2[i] = randn() * 0.4
+export function createBrain(
+  inputSize: number,
+  outputSize: number,
+  weights?: BrainWeights,
+  rand: () => number = Math.random,
+): Brain {
+  const hidden = HIDDEN
+  // A saved brain from a build with a different action list cannot be
+  // meaningfully reshaped, so it is started again rather than mangled.
+  const fits = weights
+    && weights.w1.length === inputSize * hidden
+    && weights.b1.length === hidden
+    && weights.w2.length === hidden * outputSize
+    && weights.b2.length === outputSize
+
+  const w1 = fits ? new Float32Array(weights!.w1) : new Float32Array(inputSize * hidden)
+  const b1 = fits ? new Float32Array(weights!.b1) : new Float32Array(hidden)
+  const w2 = fits ? new Float32Array(weights!.w2) : new Float32Array(hidden * outputSize)
+  const b2 = fits ? new Float32Array(weights!.b2) : new Float32Array(outputSize)
+
+  if (!fits) {
+    // Xavier-ish: keep early activations in a range where ReLU learns
+    const s1 = Math.sqrt(2 / Math.max(1, inputSize))
+    const s2 = Math.sqrt(2 / hidden)
+    for (let i = 0; i < w1.length; i++) w1[i] = randn(rand) * s1
+    for (let i = 0; i < w2.length; i++) w2[i] = randn(rand) * s2
   }
-  return {
+
+  const brain: Brain = {
     inputSize,
     outputSize,
-    learnRate: 0.12,
+    learnRate: 0.1,
     hidden,
     w1,
     b1,
     w2,
     b2,
+    trained: fits ? (weights!.trained ?? 0) : 0,
     serialize() {
       return {
         w1: Array.from(w1),
         b1: Array.from(b1),
         w2: Array.from(w2),
         b2: Array.from(b2),
+        trained: brain.trained,
       }
     },
   }
+  return brain
 }
 
-/** Lazily build (and cache) the weight tensors for a brain. */
-function weightTensors(b: Brain): { tw1: tf.Tensor2D; tw2: tf.Tensor2D; tb1: tf.Tensor1D; tb2: tf.Tensor1D } {
-  if (!b._tw1 || !b._tw2 || !b._tb1 || !b._tb2) {
-    b._tw1 = tf.tensor2d(b.w1, [b.inputSize, b.hidden])
-    b._tw2 = tf.tensor2d(b.w2, [b.hidden, b.outputSize])
-    b._tb1 = tf.tensor1d(b.b1)
-    b._tb2 = tf.tensor1d(b.b2)
-  }
-  return { tw1: b._tw1, tw2: b._tw2, tb1: b._tb1, tb2: b._tb2 }
+/** Scratch buffers, so thinking allocates nothing on the hot path. */
+const scratch = {
+  hidden: new Float32Array(HIDDEN),
+  out: new Float32Array(64),
 }
 
-/** Forward pass: context → action preference vector (0..1-ish, softmaxed). */
-export async function think(b: Brain, input: number[]): Promise<number[]> {
-  const x = tf.tensor2d([input], [1, b.inputSize])
-  let out: number[] = []
-  let h: tf.Tensor | null = null
-  let y: tf.Tensor | null = null
-  let sm: tf.Tensor | null = null
-  try {
-    const { tw1, tw2, tb1, tb2 } = weightTensors(b)
-    h = tf.relu(x.matMul(tw1).add(tb1))
-    y = h.matMul(tw2).add(tb2)
-    sm = tf.softmax(y)
-    const arr = await sm.data()
-    out = Array.from(arr)
-  } finally {
-    x.dispose()
-    h?.dispose()
-    y?.dispose()
-    sm?.dispose()
+function hiddenLayer(b: Brain, input: number[] | Float32Array): Float32Array {
+  const h = scratch.hidden.length >= b.hidden ? scratch.hidden : new Float32Array(b.hidden)
+  for (let j = 0; j < b.hidden; j++) {
+    let sum = b.b1[j]
+    for (let i = 0; i < b.inputSize; i++) {
+      const x = input[i]
+      if (x !== 0) sum += x * b.w1[i * b.hidden + j]
+    }
+    h[j] = sum > 0 ? sum : 0
   }
-  return out
+  return h
 }
 
 /**
- * Reward-based learning: strengthen the pathway from this context toward the
- * rewarded action. Uses a policy-gradient-style update: dW ≈ reward * (onehot - prob) * activation.
+ * Forward pass: context → a preference for every action, summing to one.
+ * Synchronous, which is what lets it actually take part in a decision.
  */
-export async function reward(b: Brain, input: number[], actionIndex: number, rewardValue: number): Promise<void> {
-  const x = tf.tensor2d([input], [1, b.inputSize])
-  const temps: tf.Tensor[] = []
-  try {
-    const { tw1, tw2, tb1, tb2 } = weightTensors(b)
-    const h = tf.relu(x.matMul(tw1).add(tb1))
-    temps.push(h)
-    const y = h.matMul(tw2).add(tb2)
-    temps.push(y)
-    const probs = tf.softmax(y)
-    temps.push(probs)
-    const onehot = tf.oneHot(tf.tensor1d([actionIndex], 'int32'), b.outputSize)
-    temps.push(onehot)
-    const grad = tf.sub(onehot, probs).mul(tf.scalar(rewardValue * b.learnRate))
-    temps.push(grad)
-    // w2 += hᵀ · grad
-    const dw2 = h.transpose().matMul(grad)
-    temps.push(dw2)
-    const dw1 = x.transpose().matMul(grad.matMul(tw2.transpose()))
-    temps.push(dw1)
-    const dw2Arr = await dw2.data()
-    const dw1Arr = await dw1.data()
-    for (let i = 0; i < dw2Arr.length; i++) b.w2[i] += dw2Arr[i]
-    for (let i = 0; i < dw1Arr.length; i++) b.w1[i] += dw1Arr[i]
-    // bias updates
-    const db2Arr = await grad.data()
-    for (let i = 0; i < db2Arr.length; i++) b.b2[i] += db2Arr[i]
-    const hGrad = grad.matMul(tw2.transpose()).data()
-    const hGradArr = await hGrad
-    for (let i = 0; i < hGradArr.length; i++) b.b1[i] += hGradArr[i]
-  } finally {
-    x.dispose()
-    for (const t of temps) t.dispose()
+export function thinkSync(b: Brain, input: number[] | Float32Array): number[] {
+  const h = hiddenLayer(b, input)
+  const out = b.outputSize <= scratch.out.length
+    ? scratch.out.subarray(0, b.outputSize)
+    : new Float32Array(b.outputSize)
+
+  let max = -Infinity
+  for (let k = 0; k < b.outputSize; k++) {
+    let sum = b.b2[k]
+    for (let j = 0; j < b.hidden; j++) {
+      const hv = h[j]
+      if (hv !== 0) sum += hv * b.w2[j * b.outputSize + k]
+    }
+    out[k] = sum
+    if (sum > max) max = sum
+  }
+
+  let total = 0
+  for (let k = 0; k < b.outputSize; k++) {
+    const e = Math.exp(out[k] - max)
+    out[k] = e
+    total += e
+  }
+  const result = new Array<number>(b.outputSize)
+  const inv = total > 0 ? 1 / total : 0
+  for (let k = 0; k < b.outputSize; k++) result[k] = out[k] * inv
+  return result
+}
+
+/** Kept async for callers that awaited the old tfjs implementation. */
+export async function think(b: Brain, input: number[]): Promise<number[]> {
+  return thinkSync(b, input)
+}
+
+/**
+ * Reward learning. A policy-gradient step: push the probability of the action
+ * that was taken up or down by how well it turned out, and carry that back
+ * through the hidden layer.
+ */
+export function rewardSync(
+  b: Brain, input: number[] | Float32Array, actionIndex: number, rewardValue: number,
+): void {
+  if (actionIndex < 0 || actionIndex >= b.outputSize) return
+  b.trained++
+  const probs = thinkSync(b, input)
+  const h = hiddenLayer(b, input)
+  const step = rewardValue * b.learnRate
+
+  // output layer: (onehot - p) * reward
+  const g = new Float32Array(b.outputSize)
+  for (let k = 0; k < b.outputSize; k++) {
+    g[k] = ((k === actionIndex ? 1 : 0) - probs[k]) * step
+  }
+
+  // hidden gradient must be read from the weights *before* they move
+  const hGrad = new Float32Array(b.hidden)
+  for (let j = 0; j < b.hidden; j++) {
+    if (h[j] <= 0) continue // ReLU is flat below zero, so nothing flows back
+    let sum = 0
+    for (let k = 0; k < b.outputSize; k++) sum += g[k] * b.w2[j * b.outputSize + k]
+    hGrad[j] = sum
+  }
+
+  for (let j = 0; j < b.hidden; j++) {
+    const hv = h[j]
+    if (hv !== 0) {
+      for (let k = 0; k < b.outputSize; k++) b.w2[j * b.outputSize + k] += hv * g[k]
+    }
+  }
+  for (let k = 0; k < b.outputSize; k++) b.b2[k] += g[k]
+
+  for (let i = 0; i < b.inputSize; i++) {
+    const x = input[i]
+    if (x === 0) continue
+    for (let j = 0; j < b.hidden; j++) {
+      if (hGrad[j] !== 0) b.w1[i * b.hidden + j] += x * hGrad[j]
+    }
+  }
+  for (let j = 0; j < b.hidden; j++) b.b1[j] += hGrad[j] * 0.5
+
+  // Keep the weights from running away over tens of thousands of rewards.
+  clampWeights(b)
+}
+
+/** Kept async for callers that awaited the old tfjs implementation. */
+export async function reward(
+  b: Brain, input: number[], actionIndex: number, rewardValue: number,
+): Promise<void> {
+  rewardSync(b, input, actionIndex, rewardValue)
+}
+
+const LIMIT = 6
+
+function clampWeights(b: Brain): void {
+  for (let i = 0; i < b.w1.length; i++) {
+    const v = b.w1[i]
+    if (v > LIMIT) b.w1[i] = LIMIT
+    else if (v < -LIMIT) b.w1[i] = -LIMIT
+  }
+  for (let i = 0; i < b.w2.length; i++) {
+    const v = b.w2[i]
+    if (v > LIMIT) b.w2[i] = LIMIT
+    else if (v < -LIMIT) b.w2[i] = -LIMIT
   }
 }
 
-export function disposeBrain(b: Brain): void {
-  b._tw1?.dispose()
-  b._tw2?.dispose()
-  b._tb1?.dispose()
-  b._tb2?.dispose()
-  b._tw1 = undefined
-  b._tw2 = undefined
-  b._tb1 = undefined
-  b._tb2 = undefined
+/** Ticks of experience before a brain's opinions count for their full weight. */
+export const BRAIN_MATURITY = 500
+
+/**
+ * How much this brain should be listened to: nothing at birth, rising with
+ * lived experience, and scaled by how settled its opinions actually are.
+ */
+export function brainAuthority(b: Brain, prefs: number[] | null): number {
+  const experience = Math.min(1, b.trained / BRAIN_MATURITY)
+  return experience * brainCertainty(prefs)
+}
+
+/**
+ * How settled a brain's opinions are: 0 when it has no preference at all,
+ * 1 when it is certain. Shown in the inspector as "learned confidence".
+ */
+export function brainCertainty(prefs: number[] | null): number {
+  if (!prefs || prefs.length < 2) return 0
+  let entropy = 0
+  for (const p of prefs) {
+    if (p > 1e-6) entropy -= p * Math.log(p)
+  }
+  const max = Math.log(prefs.length)
+  return max > 0 ? 1 - entropy / max : 0
+}
+
+/** Nothing to release any more; kept so existing call sites stay valid. */
+export function disposeBrain(_b: Brain): void {
+  // the weights are plain arrays and are collected with the creature
 }

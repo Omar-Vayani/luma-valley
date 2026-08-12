@@ -221,6 +221,15 @@ const LANDMARK_PADS: { id: string; x: number; z: number; r: number }[] = [
   { id: 'hollowtree', x: 78, z: -52, r: 7 },
   { id: 'mill', x: -98, z: -34, r: 6 },
   { id: 'shrine', x: -140, z: 74, r: 5 },
+  // the outbuildings need level ground under them too
+  { id: 'granary', x: -68, z: 22, r: 6 },
+  { id: 'tollhouse', x: 112, z: -26, r: 5 },
+  { id: 'emptyhouse', x: -84, z: -58, r: 6 },
+  { id: 'boathouse', x: 106, z: 60, r: 7 },
+  { id: 'charcoal', x: -58, z: -96, r: 6 },
+  { id: 'archive', x: -34, z: 44, r: 5 },
+  { id: 'apiary', x: -110, z: 50, r: 6 },
+  { id: 'millhouse', x: -94, z: -30, r: 6 },
 ]
 
 /**

@@ -8,7 +8,7 @@
 
 export type IconName =
   | 'board' | 'pack' | 'journal' | 'village' | 'mind' | 'map' | 'settings' | 'help'
-  | 'heart' | 'food' | 'coin' | 'star' | 'close'
+  | 'heart' | 'food' | 'coin' | 'star'
 
 const PATHS: Record<IconName, React.ReactElement> = {
   board: (
@@ -74,7 +74,6 @@ const PATHS: Record<IconName, React.ReactElement> = {
     </>
   ),
   star: <path d="M10 2.5l2.3 4.9 5.2.7-3.8 3.7 1 5.2L10 14.6l-4.7 2.4 1-5.2L2.5 8.1l5.2-.7L10 2.5Z" />,
-  close: <path d="M5 5l10 10M15 5L5 15" />,
 }
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }): React.ReactElement {

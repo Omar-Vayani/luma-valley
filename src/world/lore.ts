@@ -210,6 +210,50 @@ export const LANDMARKS: Landmark[] = [
       'diverted channel for a decade, then stopped. The stone is still here, cracked across the eye.',
   },
   {
+    id: 'granary',
+    name: 'The Stilted Granary',
+    kind: 'mill',
+    x: -68, z: 22, radius: 13,
+    short: 'Everything they own that matters, up off the ground.',
+    text:
+      'Four stone legs with stone caps, so the rats cannot climb and the water cannot reach. It was ' +
+      'built the spring after the flood and every store since has been built the same way, whether or ' +
+      'not the ground floods. Ask a Luma why and they will tell you it is how a granary is built.',
+  },
+  {
+    id: 'tollhouse',
+    name: 'The Toll House',
+    kind: 'waystone',
+    x: 112, z: -26, radius: 13,
+    short: 'Nobody has collected a toll here in forty years.',
+    text:
+      'A one-room stone hut at the near end of the Old Bridge, with a barrier arm that still lowers. ' +
+      'The toll paid for the bridge, the bridge was paid for, and the toll went on being collected for ' +
+      'eleven years afterwards. The argument that ended it is the reason Haven now votes on things.',
+  },
+  {
+    id: 'emptyhouse',
+    name: 'The Empty House',
+    kind: 'ruin',
+    x: -84, z: -58, radius: 14,
+    short: 'Left during the Quiet Split, and never claimed.',
+    text:
+      'The roof went first, then the door. It has been habitable for decades and nobody has taken it, ' +
+      'because taking it would mean deciding whose it was, and the Quiet Split was precisely an argument ' +
+      'about that. It is easier to leave it standing empty than to be the one who settles it.',
+  },
+  {
+    id: 'boathouse',
+    name: 'The Boathouse',
+    kind: 'wreck',
+    x: 106, z: 60, radius: 14,
+    short: 'A jetty, a hull, and no sailors.',
+    text:
+      'Built by the same newcomer who rowed out at dusk and walked back. The hull inside is patched and ' +
+      'sound and has never been in the water. Haven keeps the boathouse in repair with the same care it ' +
+      'gives to everything it has decided not to use.',
+  },
+  {
     id: 'shrine',
     name: 'The Lantern Shrine',
     kind: 'shrine',

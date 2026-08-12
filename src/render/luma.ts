@@ -1,119 +1,221 @@
 /**
- * luma — the creatures, and how they move.
+ * luma — the people of the valley, and how they move.
  *
- * A Luma is built from a dozen flat-shaded pieces on a small hierarchy: hips,
- * torso, head, two ears, two arms, two legs, a tail. Nothing is keyframed;
- * every pose is computed each frame from what the simulation already knows —
- * how fast they are walking, what they are doing, how they feel, how old they
- * are — so the animation cannot drift out of sync with the mind driving it.
+ * A Luma is built to human proportions out of flat-shaded parts on a real
+ * hierarchy: pelvis, spine, chest, neck, head, and two-segment arms and legs
+ * so that elbows and knees actually bend. They are not humans — the ears are
+ * a little high, the heads a little large, the palette is not ours — but they
+ * are close enough that you read a posture as a mood without being told.
  *
- * The point is legibility. You should be able to tell from thirty metres that
- * someone is frightened, carrying something, or asleep on their feet.
+ * Nothing is keyframed. Every pose is computed from what the simulation
+ * already knows: how fast they are walking, what they are doing, how they
+ * feel, how old they are, whether they have had a drink. That means the
+ * animation cannot drift out of sync with the mind driving it.
+ *
+ * The other half of this file is about smoothness. The simulation moves
+ * bodies six times a second; the screen redraws sixty. Reading `c.pos`
+ * straight into the transform is what made everybody look like they were
+ * teleporting, and made the measured speed spike wildly between frames, which
+ * in turn made the legs blur. Positions are followed with a critically damped
+ * spring, and gait is measured from the *rendered* path, not the simulated one.
  */
 import * as THREE from 'three'
 import type { Creature } from '../lab/creature'
 import { deriveEmotion } from '../lab/emotion'
-import { bodyScale } from '../lab/genetics'
 import { hairStyle } from '../lab/hair'
+import { impairmentOf } from '../lab/substances'
 import { heightAt } from '../world/terrain'
+
+// ---------------------------------------------------------------- palette
+
+/** Skin, in the range a person's skin comes in, indexed by a genome value. */
+const SKIN_TONES = [
+  '#f0cdb0', '#e5b895', '#d99e75', '#c68642', '#a9663c',
+  '#8d5524', '#6f4021', '#54301a',
+]
+
+const HAIR_TONES = [
+  '#1b1512', '#2e2119', '#4a2f1d', '#6b4423', '#8a6234',
+  '#b08a4a', '#c9a86a', '#8d8d8d', '#d8d3c8',
+]
+
+/** Clothing. Dyed cloth in a valley without industry: earthy, but not drab. */
+const SHIRT_TONES = [
+  '#7d8f6a', '#8a6f52', '#6d7f95', '#9a6b62', '#7b6b8f',
+  '#b0a074', '#5f7a72', '#a8785a', '#6b6f7d', '#94825f',
+]
+
+const TROUSER_TONES = ['#4a4438', '#3f4550', '#5a4a3c', '#454b42', '#57493f', '#3d3a36']
+
+/** Roles that show on the body, so a trade is legible across the square. */
+const JOB_LOOK: Record<string, { apron: string; hat?: string }> = {
+  shopkeep: { apron: '#c9b18a' },
+  healer: { apron: '#e4e9e6' },
+  bartender: { apron: '#8a5a3c' },
+  farmer: { apron: '#9a8a5a', hat: '#c9b077' },
+  porter: { apron: '#7a6a58' },
+  teacher: { apron: '#5f6a8a' },
+}
+
+function pick<T>(list: T[], value: number): T {
+  return list[Math.min(list.length - 1, Math.max(0, Math.floor(value * list.length)))]
+}
+
+/** Everything about how one Luma looks, derived from the genome so it breeds. */
+function appearanceOf(c: Creature): {
+  skin: THREE.Color
+  hair: THREE.Color
+  shirt: THREE.Color
+  trousers: THREE.Color
+  height: number
+  build: number
+} {
+  const g = c.genome
+  const skinPick = (g.resilience * 0.6 + g.longevity * 0.4) % 1
+  const hairPick = (g.curiosity * 0.7 + g.emotionality * 0.3) % 1
+  const shirtPick = (g.sociability * 0.55 + g.courage * 0.45) % 1
+  const trouserPick = (g.loyalty * 0.6 + g.energy * 0.4) % 1
+  return {
+    skin: new THREE.Color(pick(SKIN_TONES, skinPick)),
+    hair: new THREE.Color(pick(HAIR_TONES, hairPick)),
+    shirt: new THREE.Color(pick(SHIRT_TONES, shirtPick)),
+    trousers: new THREE.Color(pick(TROUSER_TONES, trouserPick)),
+    // adults stand between about 1.60 m and 1.88 m
+    height: 1.6 + (g.size ?? 0.5) * 0.28,
+    // narrow to broad across the shoulders
+    build: 0.86 + (g.size ?? 0.5) * 0.2 + (g.energy ?? 0.5) * 0.06,
+  }
+}
 
 // ---------------------------------------------------------------- geometry
 
+/** A tapered box, which is most of a body. */
+function taper(top: number, bottom: number, height: number, depth: number, depthTop = depth): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(0.5, 0.5, 1, 4, 1)
+  geo.rotateY(Math.PI / 4)
+  const pos = geo.attributes.position
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i)
+    const upper = y > 0
+    const w = upper ? top : bottom
+    const d = upper ? depthTop : depth
+    pos.setX(i, Math.sign(pos.getX(i)) * (w / 2) * Math.SQRT2 * 0.7071)
+    pos.setZ(i, Math.sign(pos.getZ(i)) * (d / 2) * Math.SQRT2 * 0.7071)
+    pos.setY(i, y * height)
+  }
+  geo.computeVertexNormals()
+  return geo
+}
+
 const GEO = {
-  torso: new THREE.IcosahedronGeometry(0.5, 1),
-  head: new THREE.IcosahedronGeometry(0.36, 1),
-  snout: new THREE.ConeGeometry(0.13, 0.2, 6),
-  ear: new THREE.ConeGeometry(0.1, 0.62, 5),
-  limb: new THREE.CapsuleGeometry(0.085, 0.3, 2, 6),
-  foot: new THREE.BoxGeometry(0.2, 0.11, 0.3),
-  hand: new THREE.IcosahedronGeometry(0.11, 0),
-  eye: new THREE.SphereGeometry(0.095, 8, 6),
-  pupil: new THREE.SphereGeometry(0.062, 7, 6),
-  brow: new THREE.BoxGeometry(0.13, 0.035, 0.04),
-  tail: new THREE.ConeGeometry(0.13, 0.5, 5),
-  tuft: new THREE.ConeGeometry(0.1, 0.28, 5),
-  belly: new THREE.SphereGeometry(0.34, 8, 6),
-  held: new THREE.BoxGeometry(0.24, 0.24, 0.24),
+  head: taper(0.205, 0.175, 0.24, 0.2, 0.195),
+  jaw: taper(0.16, 0.12, 0.062, 0.17, 0.18),
+  neck: taper(0.095, 0.115, 0.09, 0.095),
+  chest: taper(0.46, 0.37, 0.32, 0.23, 0.25),
+  belly: taper(0.37, 0.33, 0.2, 0.21, 0.23),
+  pelvis: taper(0.34, 0.31, 0.15, 0.22),
+  upperArm: taper(0.115, 0.1, 0.3, 0.115),
+  foreArm: taper(0.1, 0.085, 0.27, 0.1),
+  thigh: taper(0.165, 0.13, 0.44, 0.175),
+  shin: taper(0.125, 0.1, 0.42, 0.125),
+  hand: new THREE.BoxGeometry(0.095, 0.12, 0.055),
+  foot: new THREE.BoxGeometry(0.12, 0.075, 0.26),
+  ear: new THREE.BoxGeometry(0.03, 0.075, 0.05),
+  eye: new THREE.SphereGeometry(0.032, 7, 5),
+  pupil: new THREE.SphereGeometry(0.018, 6, 4),
+  brow: new THREE.BoxGeometry(0.055, 0.014, 0.02),
+  nose: taper(0.02, 0.045, 0.06, 0.06, 0.03),
+  mouth: new THREE.BoxGeometry(0.05, 0.012, 0.015),
+  hairCap: new THREE.SphereGeometry(0.108, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.62),
+  hairTuft: taper(0.05, 0.03, 0.1, 0.05),
+  held: new THREE.BoxGeometry(0.15, 0.15, 0.15),
 }
-GEO.snout.rotateX(Math.PI / 2)
-GEO.tail.rotateX(Math.PI / 2)
-
-const WHITE = new THREE.MeshLambertMaterial({ color: '#f4f1e8', flatShading: true })
-const DARK = new THREE.MeshLambertMaterial({ color: '#151318' })
-
-/** A stable hue per creature, so siblings resemble each other via the genome. */
-function skinColor(c: Creature): THREE.Color {
-  const g = c.genome
-  const hue = (g.curiosity * 0.42 + g.sociability * 0.3 + g.energy * 0.18) % 1
-  const sat = 0.3 + g.emotionality * 0.28
-  const light = 0.42 + g.resilience * 0.16
-  return new THREE.Color().setHSL(hue, sat, light)
+// origins at the top of each limb, so rotation happens at the joint
+for (const [name, h] of [
+  ['upperArm', 0.3], ['foreArm', 0.27], ['thigh', 0.44], ['shin', 0.42],
+] as const) {
+  GEO[name].translate(0, -h / 2, 0)
 }
+GEO.neck.translate(0, 0.045, 0)
+GEO.chest.translate(0, 0.15, 0)
+GEO.belly.translate(0, 0.1, 0)
+GEO.pelvis.translate(0, 0.07, 0)
+GEO.head.translate(0, 0.117, 0)
+GEO.nose.rotateX(Math.PI)
 
-function bellyColor(base: THREE.Color): THREE.Color {
-  const hsl = { h: 0, s: 0, l: 0 }
-  base.getHSL(hsl)
-  return new THREE.Color().setHSL((hsl.h + 0.04) % 1, hsl.s * 0.55, Math.min(0.92, hsl.l + 0.3))
-}
+const WHITE = new THREE.MeshLambertMaterial({ color: '#f6f3ec', flatShading: true })
+const DARK = new THREE.MeshLambertMaterial({ color: '#221c18' })
 
 // ---------------------------------------------------------------- the rig
 
 interface Rig {
   id: number
   root: THREE.Group
-  /** everything above the feet, for bob and lean */
+  /** the whole body, for bob and crouch */
   body: THREE.Group
-  torso: THREE.Mesh
-  belly: THREE.Mesh
+  pelvis: THREE.Group
+  spine: THREE.Group
+  chest: THREE.Group
   neck: THREE.Group
-  head: THREE.Mesh
-  snout: THREE.Mesh
+  head: THREE.Group
+  jaw: THREE.Mesh
   mouth: THREE.Mesh
-  earL: THREE.Group
-  earR: THREE.Group
   eyeL: THREE.Group
   eyeR: THREE.Group
   pupilL: THREE.Mesh
   pupilR: THREE.Mesh
-  armL: THREE.Group
-  armR: THREE.Group
-  legL: THREE.Group
-  legR: THREE.Group
-  tail: THREE.Group
-  crest: THREE.Group
+  browL: THREE.Mesh
+  browR: THREE.Mesh
+  shoulderL: THREE.Group
+  shoulderR: THREE.Group
+  elbowL: THREE.Group
+  elbowR: THREE.Group
+  hipL: THREE.Group
+  hipR: THREE.Group
+  kneeL: THREE.Group
+  kneeR: THREE.Group
+  footL: THREE.Mesh
+  footR: THREE.Mesh
   held: THREE.Mesh
-  skin: THREE.MeshLambertMaterial
-  bellyMat: THREE.MeshLambertMaterial
-  /** per-creature animation offset so a crowd is not a chorus line */
+  skinMat: THREE.MeshLambertMaterial
+  shirtMat: THREE.MeshLambertMaterial
+  apron: THREE.Mesh | null
+  hat: THREE.Mesh | null
+  jobShown: string | null
+
   phase: number
-  /** smoothed walk speed in metres/second */
-  speed: number
+  /** the position actually drawn, chasing the simulated one */
+  renderX: number
+  renderZ: number
   lastX: number
   lastZ: number
+  /** metres per second along the rendered path */
+  speed: number
+  groundY: number
   blink: number
   blinkTimer: number
-  earTwitch: number
+  glanceX: number
+  glanceTimer: number
   scale: number
-  /** the y the feet are standing on, smoothed */
-  groundY: number
   label: Label | null
   bubble: Label | null
   bubbleUntil: number
   bubbleText: string
-  selected: boolean
   ring: THREE.Mesh
 }
 
-function limbGroup(parent: THREE.Object3D, mat: THREE.Material, len: number, x: number, y: number, z = 0): THREE.Group {
+function joint(parent: THREE.Object3D, x: number, y: number, z = 0): THREE.Group {
   const g = new THREE.Group()
   g.position.set(x, y, z)
-  const mesh = new THREE.Mesh(GEO.limb, mat)
-  mesh.scale.set(1, len / 0.47, 1)
-  mesh.position.y = -len / 2
-  mesh.castShadow = true
-  g.add(mesh)
   parent.add(g)
   return g
+}
+
+function limb(parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh {
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.castShadow = true
+  parent.add(mesh)
+  return mesh
 }
 
 // ---------------------------------------------------------------- labels
@@ -147,28 +249,28 @@ function drawLabel(label: Label, text: string, accent: string, sub?: string): vo
   label.text = key
   const { ctx, canvas } = label
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.font = '600 46px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+  ctx.font = '600 44px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  const w = Math.min(canvas.width - 20, ctx.measureText(text).width + 56)
-  const h = sub ? 92 : 62
+  const w = Math.min(canvas.width - 20, ctx.measureText(text).width + 52)
+  const h = sub ? 88 : 60
   const x = (canvas.width - w) / 2
   const y = (canvas.height - h) / 2
 
-  ctx.fillStyle = 'rgba(14, 16, 22, 0.72)'
-  roundRect(ctx, x, y, w, h, 16)
+  ctx.fillStyle = 'rgba(14, 16, 22, 0.7)'
+  roundRect(ctx, x, y, w, h, 14)
   ctx.fill()
   ctx.strokeStyle = accent
-  ctx.lineWidth = 3
-  roundRect(ctx, x, y, w, h, 16)
+  ctx.lineWidth = 2.5
+  roundRect(ctx, x, y, w, h, 14)
   ctx.stroke()
 
   ctx.fillStyle = '#f3efe6'
-  ctx.fillText(text, canvas.width / 2, y + (sub ? 30 : h / 2))
+  ctx.fillText(text, canvas.width / 2, y + (sub ? 28 : h / 2))
   if (sub) {
-    ctx.font = '400 30px ui-sans-serif, system-ui, sans-serif'
-    ctx.fillStyle = 'rgba(233, 226, 212, 0.75)'
-    ctx.fillText(sub, canvas.width / 2, y + 66)
+    ctx.font = '400 28px ui-sans-serif, system-ui, sans-serif'
+    ctx.fillStyle = 'rgba(233, 226, 212, 0.72)'
+    ctx.fillText(sub, canvas.width / 2, y + 62)
   }
   label.texture.needsUpdate = true
 }
@@ -197,10 +299,7 @@ function drawBubble(label: Label, text: string): void {
   if (line) lines.push(line)
   const lh = 42
   const h = lines.length * lh + 34
-  const w = Math.min(
-    canvas.width - 16,
-    Math.max(...lines.map((l) => ctx.measureText(l).width)) + 56,
-  )
+  const w = Math.min(canvas.width - 16, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 56)
   const x = (canvas.width - w) / 2
   const y = canvas.height - h - 24
 
@@ -238,163 +337,149 @@ export interface LumaViewOptions {
 export class LumaView {
   readonly group = new THREE.Group()
   private rigs = new Map<number, Rig>()
-  private selectionRing: THREE.RingGeometry
+  private ringGeo: THREE.RingGeometry
   private ringMat: THREE.MeshBasicMaterial
 
   constructor() {
     this.group.name = 'luma'
-    this.selectionRing = new THREE.RingGeometry(0.62, 0.78, 24)
-    this.selectionRing.rotateX(-Math.PI / 2)
+    this.ringGeo = new THREE.RingGeometry(0.44, 0.56, 24)
+    this.ringGeo.rotateX(-Math.PI / 2)
     this.ringMat = new THREE.MeshBasicMaterial({
       color: '#ffd27a', transparent: true, opacity: 0.85, depthWrite: false,
     })
   }
 
   private build(c: Creature): Rig {
-    const skinColor_ = skinColor(c)
-    const skin = new THREE.MeshLambertMaterial({ color: skinColor_, flatShading: true })
-    const bellyMat = new THREE.MeshLambertMaterial({ color: bellyColor(skinColor_), flatShading: true })
+    const look = appearanceOf(c)
+    const skinMat = new THREE.MeshLambertMaterial({ color: look.skin, flatShading: true })
+    const shirtMat = new THREE.MeshLambertMaterial({ color: look.shirt, flatShading: true })
+    const trouserMat = new THREE.MeshLambertMaterial({ color: look.trousers, flatShading: true })
+    const hairMat = new THREE.MeshLambertMaterial({ color: look.hair, flatShading: true })
+    const shoeMat = new THREE.MeshLambertMaterial({ color: '#3a3029', flatShading: true })
 
     const root = new THREE.Group()
     const body = new THREE.Group()
-    body.position.y = 0.66
     root.add(body)
 
-    const torso = new THREE.Mesh(GEO.torso, skin)
-    torso.scale.set(0.84, 1.12, 0.76)
-    torso.castShadow = true
-    body.add(torso)
+    // --- pelvis and spine ---------------------------------------------------
+    const pelvis = joint(body, 0, 0.92, 0)
+    limb(pelvis, GEO.pelvis, trouserMat)
+    const spine = joint(pelvis, 0, 0.13, 0)
+    limb(spine, GEO.belly, shirtMat)
+    const chest = joint(spine, 0, 0.2, 0)
+    limb(chest, GEO.chest, shirtMat)
 
-    const belly = new THREE.Mesh(GEO.belly, bellyMat)
-    belly.scale.set(0.78, 0.86, 0.6)
-    belly.position.set(0, -0.05, 0.22)
-    body.add(belly)
+    // --- neck and head ------------------------------------------------------
+    const neck = joint(chest, 0, 0.3, 0)
+    limb(neck, GEO.neck, skinMat)
+    const head = joint(neck, 0, 0.09, 0)
+    limb(head, GEO.head, skinMat)
+    const jaw = limb(head, GEO.jaw, skinMat)
+    jaw.position.set(0, 0.035, 0.012)
 
-    const neck = new THREE.Group()
-    neck.position.set(0, 0.6, 0.02)
-    body.add(neck)
-
-    const head = new THREE.Mesh(GEO.head, skin)
-    head.scale.set(1, 0.95, 1.02)
-    head.castShadow = true
-    neck.add(head)
-
-    const snout = new THREE.Mesh(GEO.snout, bellyMat)
-    snout.position.set(0, -0.1, 0.31)
-    neck.add(snout)
-
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.05), DARK)
-    nose.position.set(0, -0.05, 0.42)
-    neck.add(nose)
-
-    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.035, 0.035), DARK)
-    mouth.position.set(0, -0.16, 0.37)
-    neck.add(mouth)
+    for (const side of [-1, 1]) {
+      const ear = limb(head, GEO.ear, skinMat)
+      ear.position.set(side * 0.102, 0.118, -0.005)
+    }
 
     const makeEye = (side: number) => {
-      const g = new THREE.Group()
-      g.position.set(side * 0.16, 0.06, 0.27)
+      const g = joint(head, side * 0.058, 0.142, 0.094)
       const white = new THREE.Mesh(GEO.eye, WHITE)
-      white.scale.set(1, 1.05, 0.7)
+      white.scale.set(1, 0.95, 0.6)
       g.add(white)
       const pupil = new THREE.Mesh(GEO.pupil, DARK)
-      pupil.position.set(0, 0, 0.05)
+      pupil.position.z = 0.022
       g.add(pupil)
-      const brow = new THREE.Mesh(GEO.brow, skin)
-      brow.position.set(0, 0.1, 0.03)
-      brow.rotation.z = side * 0.22
-      g.add(brow)
-      neck.add(g)
       return { g, pupil }
     }
     const eyeLeft = makeEye(-1)
     const eyeRight = makeEye(1)
 
-    const makeEar = (side: number) => {
-      const g = new THREE.Group()
-      g.position.set(side * 0.2, 0.26, -0.02)
-      g.rotation.z = side * 0.22
-      const ear = new THREE.Mesh(GEO.ear, skin)
-      ear.position.y = 0.3
-      ear.castShadow = true
-      g.add(ear)
-      const inner = new THREE.Mesh(GEO.ear, bellyMat)
-      inner.position.y = 0.28
-      inner.scale.set(0.6, 0.9, 0.4)
-      g.add(inner)
-      neck.add(g)
-      return g
+    const makeBrow = (side: number) => {
+      const brow = limb(head, GEO.brow, hairMat)
+      brow.position.set(side * 0.058, 0.186, 0.091)
+      return brow
     }
-    const earL = makeEar(-1)
-    const earR = makeEar(1)
+    const browL = makeBrow(-1)
+    const browR = makeBrow(1)
 
-    const armL = limbGroup(body, skin, 0.46, -0.4, 0.3)
-    const armR = limbGroup(body, skin, 0.46, 0.4, 0.3)
-    for (const arm of [armL, armR]) {
-      const hand = new THREE.Mesh(GEO.hand, bellyMat)
-      hand.position.y = -0.48
-      arm.add(hand)
-    }
+    const nose = limb(head, GEO.nose, skinMat)
+    nose.position.set(0, 0.117, 0.099)
+    const mouth = limb(head, GEO.mouth, DARK)
+    mouth.position.set(0, 0.058, 0.1)
 
-    const legL = limbGroup(root, skin, 0.62, -0.19, 0.68)
-    const legR = limbGroup(root, skin, 0.62, 0.19, 0.68)
-    for (const leg of [legL, legR]) {
-      const foot = new THREE.Mesh(GEO.foot, bellyMat)
-      foot.position.set(0, -0.64, 0.07)
-      leg.add(foot)
-    }
-
-    const tail = new THREE.Group()
-    tail.position.set(0, -0.06, -0.4)
-    const tailMesh = new THREE.Mesh(GEO.tail, skin)
-    tailMesh.position.z = -0.2
-    tailMesh.rotation.x = Math.PI
-    tail.add(tailMesh)
-    body.add(tail)
-
-    // a crest of hair, from the genome
-    const crest = new THREE.Group()
+    // --- hair ---------------------------------------------------------------
     const style = hairStyle(c.genome, c.id * 7)
-    const hairMat = new THREE.MeshLambertMaterial({ color: style.color, flatShading: true })
-    const tufts = style.style === 'bald' ? 0 : style.style === 'buzz' ? 3 : style.style === 'long' ? 6 : 5
-    for (let i = 0; i < tufts; i++) {
-      const t = new THREE.Mesh(GEO.tuft, hairMat)
-      const f = i / (tufts - 1)
-      t.position.set((f - 0.5) * 0.34, 0.3, -0.04 - Math.abs(f - 0.5) * 0.1)
-      const lean = style.style === 'spiky' ? -0.1 : style.style === 'curly' ? 0.9 : 0.35
-      t.rotation.x = lean + (i % 2) * 0.15
-      t.rotation.z = (f - 0.5) * 0.7
-      t.scale.setScalar(0.6 + style.size * 0.9)
-      crest.add(t)
+    if (style.style !== 'bald') {
+      const cap = limb(head, GEO.hairCap, hairMat)
+      cap.position.set(0, 0.138, -0.004)
+      cap.scale.set(1.08, style.style === 'buzz' ? 0.78 : 1, 1.1)
+      if (style.style === 'long') {
+        const back = limb(head, taper(0.2, 0.17, 0.24, 0.06), hairMat)
+        back.position.set(0, 0.02, -0.095)
+      }
+      if (style.style === 'spiky') {
+        for (let i = 0; i < 4; i++) {
+          const tuft = limb(head, GEO.hairTuft, hairMat)
+          tuft.position.set((i - 1.5) * 0.06, 0.235, -0.01)
+          tuft.rotation.z = (i - 1.5) * 0.22
+        }
+      }
     }
-    neck.add(crest)
 
-    const held = new THREE.Mesh(GEO.held, bellyMat)
-    held.position.set(0, -0.62, 0.14)
-    held.scale.setScalar(0.85)
+    // --- arms ---------------------------------------------------------------
+    const shoulderL = joint(chest, -0.245 * look.build, 0.27, 0)
+    const shoulderR = joint(chest, 0.245 * look.build, 0.27, 0)
+    limb(shoulderL, GEO.upperArm, shirtMat)
+    limb(shoulderR, GEO.upperArm, shirtMat)
+    const elbowL = joint(shoulderL, 0, -0.3, 0)
+    const elbowR = joint(shoulderR, 0, -0.3, 0)
+    limb(elbowL, GEO.foreArm, skinMat)
+    limb(elbowR, GEO.foreArm, skinMat)
+    for (const e of [elbowL, elbowR]) {
+      const hand = limb(e, GEO.hand, skinMat)
+      hand.position.y = -0.31
+    }
+
+    // --- legs ---------------------------------------------------------------
+    const hipL = joint(pelvis, -0.105, -0.02, 0)
+    const hipR = joint(pelvis, 0.105, -0.02, 0)
+    limb(hipL, GEO.thigh, trouserMat)
+    limb(hipR, GEO.thigh, trouserMat)
+    const kneeL = joint(hipL, 0, -0.44, 0)
+    const kneeR = joint(hipR, 0, -0.44, 0)
+    limb(kneeL, GEO.shin, trouserMat)
+    limb(kneeR, GEO.shin, trouserMat)
+    const footL = limb(kneeL, GEO.foot, shoeMat)
+    const footR = limb(kneeR, GEO.foot, shoeMat)
+    footL.position.set(0, -0.45, 0.055)
+    footR.position.set(0, -0.45, 0.055)
+
+    const held = new THREE.Mesh(GEO.held, new THREE.MeshLambertMaterial({ color: '#c8a568', flatShading: true }))
+    held.position.set(0, -0.36, 0.03)
+    held.scale.setScalar(0.75)
     held.visible = false
-    armR.add(held)
+    elbowR.add(held)
 
-    const ring = new THREE.Mesh(this.selectionRing, this.ringMat)
+    const ring = new THREE.Mesh(this.ringGeo, this.ringMat)
     ring.position.y = 0.04
     ring.visible = false
     root.add(ring)
 
-    // Luma stand a little over head height on a person when fully grown; that
-    // is close enough to eye level that a conversation feels like one
-    const scale = bodyScale(c.genome) * 1.12
+    // scale the whole body to this person's height (the rig is built at 1.75 m)
+    const scale = look.height / 1.75
     root.scale.setScalar(scale)
 
     const label = makeLabel()
     if (label) {
-      label.sprite.position.y = 2.32
-      label.sprite.scale.set(2.6, 0.65, 1)
+      label.sprite.position.y = 2.1
+      label.sprite.scale.set(2.2, 0.55, 1)
       root.add(label.sprite)
     }
     const bubble = makeLabel(512, 256)
     if (bubble) {
-      bubble.sprite.position.y = 3.02
-      bubble.sprite.scale.set(3.2, 1.6, 1)
+      bubble.sprite.position.y = 2.55
+      bubble.sprite.scale.set(3, 1.5, 1)
       bubble.sprite.visible = false
       root.add(bubble.sprite)
     }
@@ -402,22 +487,55 @@ export class LumaView {
     this.group.add(root)
 
     return {
-      id: c.id, root, body, torso, belly, neck, head, snout, mouth,
-      earL, earR, eyeL: eyeLeft.g, eyeR: eyeRight.g, pupilL: eyeLeft.pupil, pupilR: eyeRight.pupil,
-      armL, armR, legL, legR, tail, crest, held, skin, bellyMat,
+      id: c.id, root, body, pelvis, spine, chest, neck, head, jaw, mouth,
+      eyeL: eyeLeft.g, eyeR: eyeRight.g, pupilL: eyeLeft.pupil, pupilR: eyeRight.pupil,
+      browL, browR,
+      shoulderL, shoulderR, elbowL, elbowR, hipL, hipR, kneeL, kneeR, footL, footR,
+      held, skinMat, shirtMat, apron: null, hat: null, jobShown: null,
       phase: (c.id * 2.399963) % (Math.PI * 2),
-      speed: 0, lastX: c.pos.x, lastZ: c.pos.z,
-      blink: 0, blinkTimer: 1 + (c.id % 7) * 0.6, earTwitch: 0,
-      scale, groundY: heightAt(c.pos.x, c.pos.z),
+      renderX: c.pos.x, renderZ: c.pos.z, lastX: c.pos.x, lastZ: c.pos.z,
+      speed: 0,
+      groundY: heightAt(c.pos.x, c.pos.z),
+      blink: 0, blinkTimer: 1 + (c.id % 7) * 0.6,
+      glanceX: 0, glanceTimer: 2 + (c.id % 5),
+      scale,
       label, bubble, bubbleUntil: 0, bubbleText: '',
-      selected: false, ring,
+      ring,
     }
   }
 
-  /**
-   * Bring the rigs in line with the simulation and pose them.
-   * `dt` is real seconds; `now` is a monotonic clock for the cycles.
-   */
+  /** An apron or a hat, so you can see a trade across the square. */
+  private dressForWork(rig: Rig, c: Creature): void {
+    if (c.job === rig.jobShown) return
+    rig.jobShown = c.job
+    if (rig.apron) {
+      rig.apron.removeFromParent()
+      rig.apron = null
+    }
+    if (rig.hat) {
+      rig.hat.removeFromParent()
+      rig.hat = null
+    }
+    const look = c.job ? JOB_LOOK[c.job] : undefined
+    if (!look) return
+    const apron = new THREE.Mesh(
+      taper(0.3, 0.26, 0.42, 0.03),
+      new THREE.MeshLambertMaterial({ color: look.apron, flatShading: true }),
+    )
+    apron.position.set(0, 0.06, 0.115)
+    rig.spine.add(apron)
+    rig.apron = apron
+    if (look.hat) {
+      const hat = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.19, 0.21, 0.05, 10),
+        new THREE.MeshLambertMaterial({ color: look.hat, flatShading: true }),
+      )
+      hat.position.set(0, 0.245, 0)
+      rig.head.add(hat)
+      rig.hat = hat
+    }
+  }
+
   sync(
     creatures: Creature[],
     dt: number,
@@ -456,45 +574,58 @@ export class LumaView {
     opts: LumaViewOptions, selectedId: number | null, lookedAtId: number | null,
   ): void {
     const emotion = deriveEmotion(c.chem, c.genome)
+    this.dressForWork(rig, c)
 
-    // --- position, footing, facing -----------------------------------------
-    const targetGround = heightAt(c.pos.x, c.pos.z)
-    rig.groundY += (targetGround - rig.groundY) * Math.min(1, dt * 12)
-    const dx = c.pos.x - rig.lastX
-    const dz = c.pos.z - rig.lastZ
-    const instant = Math.hypot(dx, dz) / Math.max(dt, 0.0001)
-    rig.speed += (Math.min(instant, 6) - rig.speed) * Math.min(1, dt * 8)
-    rig.lastX = c.pos.x
-    rig.lastZ = c.pos.z
-    rig.root.position.set(c.pos.x, rig.groundY, c.pos.z)
+    // --- follow the simulated position smoothly -----------------------------
+    // The sim steps six times a second. Chasing its output with a damped
+    // follow, and measuring speed from the path we actually draw, is what
+    // turns a row of teleports into a walk.
+    const jump = Math.hypot(c.pos.x - rig.renderX, c.pos.z - rig.renderZ)
+    if (jump > 4) {
+      rig.renderX = c.pos.x
+      rig.renderZ = c.pos.z
+    } else {
+      const follow = Math.min(1, dt * 11)
+      rig.renderX += (c.pos.x - rig.renderX) * follow
+      rig.renderZ += (c.pos.z - rig.renderZ) * follow
+    }
 
+    const travelled = Math.hypot(rig.renderX - rig.lastX, rig.renderZ - rig.lastZ)
+    rig.lastX = rig.renderX
+    rig.lastZ = rig.renderZ
+    const instant = travelled / Math.max(dt, 1 / 240)
+    rig.speed += (Math.min(instant, 7) - rig.speed) * Math.min(1, dt * 6)
+    if (rig.speed < 0.05) rig.speed = 0
+
+    const targetGround = heightAt(rig.renderX, rig.renderZ)
+    rig.groundY += (targetGround - rig.groundY) * Math.min(1, dt * 10)
+    rig.root.position.set(rig.renderX, rig.groundY, rig.renderZ)
+
+    // face the way they are going, turning at a human rate
     const facing = rig.root.rotation.y
-    let want = c.facing
-    // shortest way round, so nobody spins to turn 10 degrees
-    let diff = ((want - facing + Math.PI) % (Math.PI * 2)) - Math.PI
+    let diff = ((c.facing - facing + Math.PI) % (Math.PI * 2)) - Math.PI
     if (diff < -Math.PI) diff += Math.PI * 2
-    rig.root.rotation.y = facing + diff * Math.min(1, dt * 9)
+    rig.root.rotation.y = facing + diff * Math.min(1, dt * 6)
 
     const dist = camPos.distanceTo(rig.root.position)
     const near = dist < 60
 
-    // --- the age of them ----------------------------------------------------
-    const stageScale = c.stage === 'child' ? 0.62 : c.stage === 'adolescent' ? 0.82 : 1
-    const elderStoop = c.stage === 'elder' ? 0.12 : 0
-    const scale = rig.scale * stageScale
-    rig.root.scale.setScalar(scale)
+    // --- age and build ------------------------------------------------------
+    const stageScale = c.stage === 'child' ? 0.62 : c.stage === 'adolescent' ? 0.84 : 1
+    rig.root.scale.setScalar(rig.scale * stageScale)
 
     // --- dead ---------------------------------------------------------------
     if (!c.alive) {
-      rig.body.rotation.set(-1.45, 0, 0)
-      rig.body.position.set(0, 0.34, -0.2)
-      rig.legL.rotation.set(0.4, 0, 0)
-      rig.legR.rotation.set(0.2, 0, 0)
-      rig.armL.rotation.set(0.9, 0, 0.4)
-      rig.armR.rotation.set(0.7, 0, -0.3)
-      rig.neck.rotation.set(0.3, 0, 0)
-      rig.eyeL.scale.y = 0.08
-      rig.eyeR.scale.y = 0.08
+      rig.body.rotation.set(-Math.PI / 2 + 0.1, 0, 0)
+      rig.body.position.set(0, 0.16, 0)
+      rig.hipL.rotation.set(0.3, 0, 0.1)
+      rig.hipR.rotation.set(0.1, 0, -0.15)
+      rig.kneeL.rotation.set(-0.4, 0, 0)
+      rig.kneeR.rotation.set(-0.2, 0, 0)
+      rig.shoulderL.rotation.set(0.4, 0, 0.5)
+      rig.shoulderR.rotation.set(0.2, 0, -0.6)
+      rig.eyeL.scale.y = 0.06
+      rig.eyeR.scale.y = 0.06
       rig.ring.visible = false
       if (rig.label) rig.label.sprite.visible = false
       if (rig.bubble) rig.bubble.sprite.visible = false
@@ -503,167 +634,187 @@ export class LumaView {
 
     // --- sleeping -----------------------------------------------------------
     if (c.sleeping) {
-      const breath = Math.sin(now * 1.3 + rig.phase) * 0.04
-      rig.body.rotation.set(-1.3, 0.2, 0)
-      rig.body.position.set(0, 0.42 + breath, -0.1)
-      rig.legL.rotation.set(1.3, 0, 0.2)
-      rig.legR.rotation.set(1.1, 0, -0.1)
-      rig.armL.rotation.set(1.4, 0, 0.5)
-      rig.armR.rotation.set(1.2, 0, -0.4)
-      rig.neck.rotation.set(0.5, 0.2, 0)
-      rig.earL.rotation.x = 0.7
-      rig.earR.rotation.x = 0.7
-      rig.eyeL.scale.y = 0.08
-      rig.eyeR.scale.y = 0.08
-      rig.tail.rotation.x = 0.4
+      const breath = Math.sin(now * 0.9 + rig.phase) * 0.02
+      rig.body.rotation.set(-Math.PI / 2 + 0.06, 0.15, 0)
+      rig.body.position.set(0, 0.2 + breath, 0)
+      rig.hipL.rotation.set(0.7, 0, 0.12)
+      rig.hipR.rotation.set(0.5, 0, -0.08)
+      rig.kneeL.rotation.set(-0.9, 0, 0)
+      rig.kneeR.rotation.set(-0.7, 0, 0)
+      rig.shoulderL.rotation.set(0.5, 0, 0.4)
+      rig.shoulderR.rotation.set(0.3, 0, -0.35)
+      rig.neck.rotation.set(0.2, 0.3, 0)
+      rig.eyeL.scale.y = 0.06
+      rig.eyeR.scale.y = 0.06
       this.updateLabels(rig, c, emotion.color, near && opts.showLabels, now, dist, selectedId, lookedAtId)
       return
     }
 
-    // --- the walk cycle -----------------------------------------------------
-    const gait = Math.min(1, rig.speed / 2.8)
-    const running = rig.speed > 3.2
-    const freq = 3.4 + gait * 4.2
-    const t = now * freq + rig.phase
-    const swing = Math.sin(t) * (0.35 + gait * 0.55)
-    const bob = Math.abs(Math.sin(t)) * (0.02 + gait * 0.08)
-    const roll = Math.cos(t) * gait * 0.05
+    // --- the walk -----------------------------------------------------------
+    // A stride is about three quarters of a metre, so cadence follows speed
+    // instead of being a number that happens to look right at one pace.
+    const stride = 0.78 * rig.scale * stageScale
+    const walking = rig.speed > 0.12
+    if (walking) rig.phase += (rig.speed / stride) * Math.PI * dt
+    else rig.phase += dt * 0.6
+    if (rig.phase > Math.PI * 4) rig.phase -= Math.PI * 4
+
+    const p = rig.phase
+    const gait = Math.min(1.35, rig.speed / 1.7)
+    const amp = walking ? Math.min(0.62, 0.2 + gait * 0.38) : 0
 
     // --- mood, as posture ---------------------------------------------------
+    const drunk = impairmentOf(c.chem)
     const fear = c.chem.fear
-    const sad = Math.max(c.chem.grief, 1 - c.chem.pleasure - 0.35)
-    const joy = Math.max(0, c.chem.pleasure - 0.55) * 2
+    const sad = Math.max(c.chem.grief, Math.max(0, 0.55 - c.chem.pleasure))
+    const joy = Math.max(0, c.chem.pleasure - 0.6) * 2.5
     const anger = emotion.type === 'angry' ? emotion.intensity : 0
     const tired = 1 - c.chem.energy
+    const old = c.stage === 'elder' ? 1 : 0
 
-    const crouch = fear * 0.18 + tired * 0.06
-    const slump = Math.max(0, sad) * 0.3 + elderStoop + tired * 0.1
-    const bounce = joy * Math.abs(Math.sin(now * 5 + rig.phase)) * 0.07
+    const slump = sad * 0.34 + tired * 0.18 + old * 0.2 + drunk.slowness * 0.3
+    const crouch = fear * 0.1
+    const sway = drunk.slowness * Math.sin(now * 1.7 + rig.phase) * 0.14
 
-    rig.body.position.set(0, 0.66 - crouch + bob + bounce, 0)
-    rig.body.rotation.set(
-      gait * 0.14 + anger * 0.16 + slump * 0.35,
+    // --- the body -----------------------------------------------------------
+    const bob = walking ? Math.abs(Math.sin(p)) * 0.035 * (0.5 + gait) : 0
+    const breathe = Math.sin(now * 1.5 + rig.phase) * 0.006
+    rig.body.position.set(0, bob + breathe - crouch, 0)
+    rig.body.rotation.set(0, 0, sway)
+
+    rig.pelvis.rotation.set(0, walking ? -Math.sin(p) * amp * 0.24 : 0, walking ? Math.cos(p) * 0.03 : 0)
+    rig.spine.rotation.set(
+      slump * 0.24 + gait * 0.05 + anger * 0.06,
+      walking ? Math.sin(p) * amp * 0.14 : Math.sin(now * 0.5 + rig.phase) * 0.02,
       0,
-      roll,
     )
+    rig.chest.rotation.set(slump * 0.12, 0, 0)
 
-    // legs and arms
-    rig.legL.rotation.x = swing
-    rig.legR.rotation.x = -swing
-    const armBase = anger * 0.3 + fear * 0.25
-    rig.armL.rotation.x = -swing * 0.75 - armBase
-    rig.armR.rotation.x = swing * 0.75 - armBase
-    rig.armL.rotation.z = 0.1 + anger * 0.35 + fear * 0.3
-    rig.armR.rotation.z = -0.1 - anger * 0.35 - fear * 0.3
+    // --- legs: hip swings, knee bends on the way through --------------------
+    const hipL = Math.sin(p) * amp
+    const hipR = Math.sin(p + Math.PI) * amp
+    rig.hipL.rotation.x = hipL
+    rig.hipR.rotation.x = hipR
+    // the knee folds while the leg swings forward and stays straight on stance
+    rig.kneeL.rotation.x = -Math.max(0, Math.sin(p + 1.5)) * amp * 1.5 - (walking ? 0.05 : 0.02)
+    rig.kneeR.rotation.x = -Math.max(0, Math.sin(p + Math.PI + 1.5)) * amp * 1.5 - (walking ? 0.05 : 0.02)
+    // ankles keep the feet roughly level with the ground
+    rig.footL.rotation.x = -hipL * 0.35 + Math.max(0, Math.sin(p + 2.4)) * amp * 0.5
+    rig.footR.rotation.x = -hipR * 0.35 + Math.max(0, Math.sin(p + Math.PI + 2.4)) * amp * 0.5
 
-    // ears: up when curious, flat back when frightened or angry
-    const alert = Math.max(0, c.emotions.curiosity - 0.3)
-    rig.earTwitch = Math.max(0, rig.earTwitch - dt)
-    if (rig.earTwitch <= 0 && Math.random() < dt * 0.15) rig.earTwitch = 0.28
-    const twitch = rig.earTwitch > 0 ? Math.sin(rig.earTwitch * 40) * 0.25 : 0
-    const earBack = fear * 1.1 + anger * 0.6 + slump * 0.5
-    rig.earL.rotation.x = -0.1 - alert * 0.25 + earBack + twitch
-    rig.earR.rotation.x = -0.1 - alert * 0.25 + earBack - twitch * 0.6
-    rig.earL.rotation.z = 0.22 + earBack * 0.3
-    rig.earR.rotation.z = -0.22 - earBack * 0.3
+    // --- arms: counter-swing, with a resting bend ---------------------------
+    const armBase = 0.06 + slump * 0.16 + fear * 0.2
+    rig.shoulderL.rotation.x = -hipL * 0.7 - armBase
+    rig.shoulderR.rotation.x = -hipR * 0.7 - armBase
+    rig.shoulderL.rotation.z = 0.07 + anger * 0.2 + fear * 0.18 + slump * 0.05
+    rig.shoulderR.rotation.z = -0.07 - anger * 0.2 - fear * 0.18 - slump * 0.05
+    rig.elbowL.rotation.x = -0.16 - Math.max(0, hipL) * 0.5 - anger * 0.3
+    rig.elbowR.rotation.x = -0.16 - Math.max(0, hipR) * 0.5 - anger * 0.3
 
-    // tail: wags when happy, tucks when scared
-    const wag = joy > 0.05 ? Math.sin(now * 9 + rig.phase) * joy * 0.5 : Math.sin(now * 1.6 + rig.phase) * 0.08
-    rig.tail.rotation.y = wag
-    rig.tail.rotation.x = -0.2 + fear * 0.9 + slump * 0.5 - joy * 0.3
-
-    // head: level against the body lean, then look at whatever matters
-    let headPitch = -rig.body.rotation.x * 0.7 + slump * 0.5 - alert * 0.12
+    // --- head: level against the lean, then look at what matters ------------
+    let headPitch = -rig.spine.rotation.x * 0.8 + slump * 0.42 - joy * 0.08
     let headYaw = 0
-    const partner = c.talkingTo
-    if (partner === 0) {
-      // looking at the player
-      const toCam = Math.atan2(camPos.x - c.pos.x, camPos.z - c.pos.z)
-      headYaw = wrapAngle(toCam - rig.root.rotation.y) * 0.6
-      headPitch += 0.06
+    if (c.talkingTo === 0) {
+      const toCam = Math.atan2(camPos.x - rig.renderX, camPos.z - rig.renderZ)
+      headYaw = wrapAngle(toCam - rig.root.rotation.y) * 0.7
+      headPitch += 0.04
     } else if (near) {
-      headYaw = Math.sin(now * 0.6 + rig.phase) * 0.18
+      rig.glanceTimer -= dt
+      if (rig.glanceTimer <= 0) {
+        rig.glanceTimer = 2.5 + Math.random() * 5
+        rig.glanceX = (Math.random() - 0.5) * 0.7
+      }
+      headYaw += (rig.glanceX - headYaw) * Math.min(1, dt * 3)
     }
     rig.neck.rotation.set(
-      headPitch,
-      THREE.MathUtils.clamp(headYaw, -1.1, 1.1),
-      Math.sin(now * 1.1 + rig.phase) * 0.03,
+      headPitch * 0.5,
+      THREE.MathUtils.clamp(headYaw, -1.2, 1.2) * 0.5,
+      0,
+    )
+    rig.head.rotation.set(
+      headPitch * 0.5,
+      THREE.MathUtils.clamp(headYaw, -1.2, 1.2) * 0.5,
+      Math.sin(now * 0.8 + rig.phase) * 0.015,
     )
 
-    // blinking
+    // --- face ---------------------------------------------------------------
     rig.blinkTimer -= dt
     if (rig.blinkTimer <= 0) {
-      rig.blink = 0.14
-      rig.blinkTimer = 2.4 + Math.random() * 4
+      rig.blink = 0.13
+      rig.blinkTimer = 2.4 + Math.random() * 4.5
     }
     rig.blink = Math.max(0, rig.blink - dt)
-    const lid = rig.blink > 0 ? 0.1 : 1
-    const squint = 1 - Math.min(0.55, anger * 0.5 + Math.max(0, sad) * 0.35)
+    const lid = rig.blink > 0 ? 0.08 : 1
+    const squint = 1 - Math.min(0.5, anger * 0.45 + sad * 0.3 + drunk.slowness * 0.5)
     rig.eyeL.scale.y = lid * squint
     rig.eyeR.scale.y = lid * squint
-    // pupils drift toward whatever the head is looking at
-    const px = THREE.MathUtils.clamp(headYaw * 0.09, -0.045, 0.045)
-    rig.pupilL.position.x = px
-    rig.pupilR.position.x = px
+    const gaze = THREE.MathUtils.clamp(headYaw * 0.02, -0.014, 0.014)
+    rig.pupilL.position.x = gaze
+    rig.pupilR.position.x = gaze
+    // brows carry most of an expression
+    const browAngle = anger * 0.5 - sad * 0.3
+    rig.browL.rotation.z = -browAngle
+    rig.browR.rotation.z = browAngle
+    rig.browL.position.y = 0.183 + (joy * 0.008) - anger * 0.01
+    rig.browR.position.y = rig.browL.position.y
 
-    // talking: a bob and a moving mouth
     const talking = c.busyTicks > 0 && (c.action === 'chat' || c.talkingTo != null)
     if (talking) {
-      const m = (Math.sin(now * 13 + rig.phase) * 0.5 + 0.5)
-      rig.mouth.scale.set(1, 0.6 + m * 2.4, 1)
-      rig.neck.rotation.x += Math.sin(now * 6 + rig.phase) * 0.05
-      rig.armR.rotation.x -= 0.25 + Math.sin(now * 5 + rig.phase) * 0.2
+      const m = Math.sin(now * 9 + rig.phase) * 0.5 + 0.5
+      rig.jaw.position.y = 0.035 - m * 0.022
+      rig.mouth.scale.set(1, 0.7 + m * 2.2, 1)
+      rig.head.rotation.x += Math.sin(now * 4 + rig.phase) * 0.03
+      // a hand comes up while explaining something
+      rig.shoulderR.rotation.x -= 0.35 + Math.sin(now * 3.4 + rig.phase) * 0.2
+      rig.elbowR.rotation.x -= 0.5
     } else {
-      rig.mouth.scale.set(1, 1, 1)
+      rig.jaw.position.y = 0.035
+      rig.mouth.scale.set(1, joy > 0.3 ? 0.7 : 1, 1)
     }
 
-    // action flavour
+    // --- what they are doing ------------------------------------------------
     switch (c.action) {
       case 'work':
       case 'work done': {
-        const hammer = Math.sin(now * 7 + rig.phase)
-        rig.armR.rotation.x = -1.5 + hammer * 0.7
-        rig.armL.rotation.x = -0.9
-        rig.body.rotation.x += 0.18
+        const swing = Math.sin(now * 4.5 + rig.phase)
+        rig.shoulderR.rotation.x = -1.5 + swing * 0.6
+        rig.elbowR.rotation.x = -0.5 - Math.max(0, swing) * 0.5
+        rig.shoulderL.rotation.x = -0.7
+        rig.elbowL.rotation.x = -0.7
+        rig.spine.rotation.x += 0.18
         break
       }
       case 'eat': {
-        const bite = Math.sin(now * 8 + rig.phase) * 0.3
-        rig.armR.rotation.x = -2.0 + bite
-        rig.mouth.scale.y = 1.4 + bite * 2
+        const bite = Math.sin(now * 5 + rig.phase) * 0.25
+        rig.shoulderR.rotation.x = -1.1 + bite
+        rig.elbowR.rotation.x = -1.5 - bite
+        rig.jaw.position.y = 0.035 - Math.abs(bite) * 0.06
         break
       }
       case 'fight': {
-        const jab = Math.sin(now * 11 + rig.phase)
-        rig.armR.rotation.x = -1.8 - jab * 0.9
-        rig.armL.rotation.x = -0.6 + jab * 0.4
-        rig.body.rotation.x += 0.25
-        break
-      }
-      case 'flee': {
-        rig.body.rotation.x += 0.2
+        const jab = Math.sin(now * 7 + rig.phase)
+        rig.shoulderR.rotation.x = -1.3 - jab * 0.7
+        rig.elbowR.rotation.x = -0.4 + jab * 0.3
+        rig.shoulderL.rotation.x = -0.9
+        rig.elbowL.rotation.x = -1.2
+        rig.spine.rotation.x += 0.16
         break
       }
       case 'play': {
-        rig.body.position.y += Math.abs(Math.sin(now * 6 + rig.phase)) * 0.12
-        rig.armL.rotation.x = -2.2
-        rig.armR.rotation.x = -2.2
+        rig.shoulderL.rotation.x = -2.1 + Math.sin(now * 4) * 0.3
+        rig.shoulderR.rotation.x = -2.1 - Math.sin(now * 4) * 0.3
+        rig.body.position.y += Math.abs(Math.sin(now * 3.4 + rig.phase)) * 0.06
         break
       }
-      case 'teach':
-      case 'social':
-      case 'chat': {
-        rig.armR.rotation.x -= 0.4 + Math.sin(now * 4 + rig.phase) * 0.3
+      case 'school':
+      case 'learn':
+      case 'teach': {
+        rig.shoulderR.rotation.x = -0.9
+        rig.elbowR.rotation.x = -1.1
         break
       }
       default:
         break
-    }
-
-    if (running) {
-      rig.body.rotation.x += 0.16
-      rig.armL.rotation.x -= 0.3
-      rig.armR.rotation.x -= 0.3
     }
 
     // something in hand
@@ -671,15 +822,15 @@ export class LumaView {
     rig.held.visible = carried != null
     if (carried) {
       ;(rig.held.material as THREE.MeshLambertMaterial).color.set(ITEM_COLORS[carried] ?? '#c8a568')
-      rig.armR.rotation.x = -1.2
-      rig.armL.rotation.x = -1.1
+      rig.shoulderR.rotation.x = -0.55
+      rig.elbowR.rotation.x = -1.25
     }
 
-    // colour drifts with mood: sickly when ill, flushed when angry
-    const base = skinColor(c)
-    if (c.illness > 0.2) base.lerp(new THREE.Color('#9aa97e'), Math.min(0.5, c.illness))
-    if (anger > 0.2) base.lerp(new THREE.Color('#c05a45'), anger * 0.35)
-    rig.skin.color.lerp(base, Math.min(1, dt * 3))
+    // illness shows in the face before it shows anywhere else
+    const base = appearanceOf(c).skin
+    if (c.illness > 0.15) base.lerp(new THREE.Color('#a8b39a'), Math.min(0.45, c.illness))
+    if (drunk.slowness > 0.1) base.lerp(new THREE.Color('#c98a7a'), drunk.slowness * 0.4)
+    rig.skinMat.color.lerp(base, Math.min(1, dt * 3))
 
     this.updateLabels(rig, c, emotion.color, near && opts.showLabels, now, dist, selectedId, lookedAtId)
   }
@@ -698,17 +849,13 @@ export class LumaView {
     }
 
     if (rig.label) {
-      // Names only when you are close, or when you are looking right at them —
-      // and never for the one under the crosshair, because the HUD is already
-      // giving them a nameplate with more in it.
       const visible = show && !looked && (dist < 26 || selected)
       rig.label.sprite.visible = visible
       if (visible) {
         const sub = c.job ? c.job : c.stage === 'child' ? 'child' : undefined
         drawLabel(rig.label, c.name, accent, sub)
         const s = Math.max(1, dist / 22)
-        rig.label.sprite.scale.set(2.6 * s, 0.65 * s, 1)
-        rig.label.sprite.position.y = 2.32
+        rig.label.sprite.scale.set(2.2 * s, 0.55 * s, 1)
       }
     }
 
@@ -723,7 +870,7 @@ export class LumaView {
       rig.bubble.sprite.visible = visible
       if (visible) {
         const s = Math.max(1, dist / 20)
-        rig.bubble.sprite.scale.set(3.2 * s, 1.6 * s, 1)
+        rig.bubble.sprite.scale.set(3 * s, 1.5 * s, 1)
       }
     }
   }
@@ -732,7 +879,7 @@ export class LumaView {
   headPosition(id: number, out: THREE.Vector3): boolean {
     const rig = this.rigs.get(id)
     if (!rig) return false
-    rig.neck.getWorldPosition(out)
+    rig.head.getWorldPosition(out)
     return true
   }
 

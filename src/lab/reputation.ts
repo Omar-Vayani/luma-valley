@@ -24,16 +24,18 @@ export interface Reputation {
   thief: number // 0..1
   protector: number // 0..1
   aggressor: number // 0..1
+  /** 0..1 — how often this one has been seen out of their senses */
+  dissolute?: number
 }
 
 export type ReputationMap = Record<number, Reputation>
 
-export type ObservedKind = 'steal' | 'aggress' | 'protect' | 'share' | 'betray'
+export type ObservedKind = 'steal' | 'aggress' | 'protect' | 'share' | 'betray' | 'dissolute'
 
 const clampTrust = (x: number): number => Math.min(1, Math.max(-1, x))
 
 export function createReputation(): Reputation {
-  return { trust: 0, thief: 0, protector: 0, aggressor: 0 }
+  return { trust: 0, thief: 0, protector: 0, aggressor: 0, dissolute: 0 }
 }
 
 /** Get (or lazily create) the observer's reputation entry for a target. */
@@ -62,6 +64,7 @@ export function reputationOf(observer: Creature, targetId: number): Reputation {
  *   'aggress' — actor started an unprovoked fight
  *   'protect' — actor defended a friend
  *   'share'   — actor gave resources to someone
+ *   'dissolute' — actor was seen visibly intoxicated
  */
 export function observeEvent(observer: Creature, kind: ObservedKind, actorId: number): void {
   const rep = getReputation(observer, actorId)
@@ -85,6 +88,12 @@ export function observeEvent(observer: Creature, kind: ObservedKind, actorId: nu
     case 'share':
       rep.protector = clamp01(rep.protector + 0.2)
       rep.trust = clampTrust(rep.trust + 0.2)
+      break
+    case 'dissolute':
+      // being seen out of your senses does not make you a thief; it makes
+      // people slightly less willing to rely on you
+      rep.dissolute = clamp01((rep.dissolute ?? 0) + 0.2)
+      rep.trust = clampTrust(rep.trust - 0.08)
       break
   }
 }

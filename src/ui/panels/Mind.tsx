@@ -71,6 +71,7 @@ export function Mind({ sim, creatureId, onClose, onPick }: MindProps): React.Rea
       tabs={[
         { id: 'now', label: 'Right now' },
         { id: 'who', label: 'Who they are' },
+        { id: 'body', label: 'Body & habits' },
         { id: 'ties', label: 'Ties' },
         { id: 'life', label: 'Life' },
       ]}
@@ -102,13 +103,26 @@ export function Mind({ sim, creatureId, onClose, onPick }: MindProps): React.Rea
             ))}
           </div>
 
-          {(report.illness > 0.05 || report.injury > 0.05) && (
+          {(report.illness > 0.05 || report.injury > 0.05 || report.intoxication > 0.05) && (
             <>
-              <h3 className="section">Body</h3>
+              <h3 className="section">Condition</h3>
               {report.illness > 0.05 && <Bar label="illness" value={report.illness} tint="var(--bad)" />}
               {report.injury > 0.05 && <Bar label="injury" value={report.injury} tint="var(--bad)" />}
+              {report.intoxication > 0.05 && (
+                <Bar label="intoxicated" value={report.intoxication} tint="#b06ad0" />
+              )}
             </>
           )}
+
+          <h3 className="section">How much of this is learned</h3>
+          <Bar label="experience" value={report.learned} tint="var(--cool)" />
+          <p className="small faint" style={{ marginTop: 2 }}>
+            {report.learned < 0.05
+              ? 'Acting almost entirely on instinct so far.'
+              : report.learned < 0.4
+                ? 'Beginning to have preferences of their own.'
+                : 'Their own experience now outweighs a good deal of instinct.'}
+          </p>
         </div>
       )}
 
@@ -137,6 +151,63 @@ export function Mind({ sim, creatureId, onClose, onPick }: MindProps): React.Rea
               <p className="small" key={b.key} style={{ margin: '3px 0' }}>
                 {b.key} <span className="faint">({Math.round(b.confidence * 100)}% sure, {b.source})</span>
               </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'body' && (
+        <div data-mind-body>
+          <h3 className="section">Schooling</h3>
+          <Bar label="education" value={report.education / 5} tint="var(--good)" />
+          <p className="small faint" style={{ marginTop: 2 }}>
+            {report.education === 0
+              ? 'Never been to the schoolhouse.'
+              : `${report.education} of 5. Earns about ${Math.round(report.education * 12)}% more for the same day's work.`}
+          </p>
+
+          <h3 className="section">Trade</h3>
+          <p className="small muted">
+            {report.role
+              ? `Holds the ${report.role} role, and is paid out of that building's till.`
+              : 'No claimed trade. Takes day work at the workyard when the belly demands it.'}
+          </p>
+
+          <h3 className="section">Habits</h3>
+          {report.habitsOfSubstance.length === 0 && (
+            <p className="muted small">Nothing they cannot put down.</p>
+          )}
+          {report.habitsOfSubstance.map((h) => (
+            <div className="card" key={h.id} style={{ marginBottom: 6 }}>
+              <div className="row">
+                <b>{h.name}</b>
+                <span className="faint small" style={{ marginLeft: 'auto' }}>
+                  {h.since > 9000 ? 'not for a long while' : `${Math.round(h.since / 6)}s since the last`}
+                </span>
+              </div>
+              <Bar label="dependence" value={h.dependence} tint="var(--bad)" />
+              <Bar label="tolerance" value={h.tolerance} tint="#b06ad0" />
+              <p className="small faint" style={{ margin: '4px 0 0' }}>
+                {h.dependence > 0.5
+                  ? 'Would spend the rent on it.'
+                  : h.dependence > 0.25
+                    ? 'Notices when there is none.'
+                    : 'A taste, not yet a need.'}
+                {h.tolerance > 0.4 ? ' Needs far more than they used to for the same evening.' : ''}
+              </p>
+            </div>
+          ))}
+
+          <h3 className="section">Words they have for things</h3>
+          {report.vocabulary.length === 0 && (
+            <p className="muted small">No words yet. Teach them one, or let them hear one.</p>
+          )}
+          <div className="row small" style={{ flexWrap: 'wrap', gap: '6px 12px' }} data-mind-vocabulary>
+            {report.vocabulary.map((v) => (
+              <span key={v.concept} title={`${Math.round(v.strength * 100)}% sure`}>
+                <b style={{ color: 'var(--accent)' }}>{v.word}</b>
+                <span className="faint"> = {v.concept}</span>
+              </span>
             ))}
           </div>
         </div>

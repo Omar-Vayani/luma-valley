@@ -9,6 +9,7 @@ import { createSim } from '../lab/sim'
 import { heightAt, WATER_LEVEL } from '../world/terrain'
 import { LAKE } from '../world/terrain'
 import { PlayerController } from './controller'
+import { CollisionGrid } from './collision'
 import { pickGaze, pickTarget, promptFor, REACH } from './targeting'
 import { createProgress } from './progress'
 
@@ -80,7 +81,9 @@ describe('controller — standing, walking, jumping, swimming', () => {
 
   it('is stopped by a building instead of walking through it', () => {
     const c = new PlayerController(0, 20)
-    c.setColliders([{ x: 0, z: 14, r: 4 }])
+    const grid = new CollisionGrid()
+    grid.add({ x: 0, z: 14, r: 4, height: 6 })
+    c.setWorld(grid)
     c.yaw = Math.PI // facing +z, toward the obstacle
     step(c, 3, { ...STILL, forward: 1 })
     expect(Math.hypot(c.position.x - 0, c.position.z - 14)).toBeGreaterThan(3.8)

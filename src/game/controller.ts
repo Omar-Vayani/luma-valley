@@ -15,12 +15,7 @@ import * as THREE from 'three'
 import {
   WATER_LEVEL, clampToTerrain, heightAt, slopeAt, surfaceAt,
 } from '../world/terrain'
-
-export interface Collider {
-  x: number
-  z: number
-  r: number
-}
+import { CollisionGrid, type Solid } from './collision'
 
 export interface ControllerInputs {
   forward: number
@@ -68,7 +63,8 @@ export class PlayerController {
   private bobAmount = 0
   private landImpact = 0
   private coyote = 0
-  private colliders: Collider[] = []
+  private world: CollisionGrid | null = null
+  private scratch: Solid[] = []
   private stepDistance = 0
   private lastStep = 0
 
@@ -80,8 +76,9 @@ export class PlayerController {
     this.position.set(startX, heightAt(startX, startZ), startZ)
   }
 
-  setColliders(list: Collider[]): void {
-    this.colliders = list
+  /** Everything solid in the valley, filed into a grid. */
+  setWorld(grid: CollisionGrid): void {
+    this.world = grid
   }
 
   /** Where the eyes are, which is where the camera goes. */
@@ -202,36 +199,34 @@ export class PlayerController {
     this.landImpact = Math.max(0, this.landImpact - dt * 3)
   }
 
-  /** Slide along building walls instead of sticking to them. */
+  /** Slide along walls and trunks instead of sticking to them or passing through. */
   private moveHorizontally(nextX: number, nextZ: number): void {
-    let x = nextX
-    let z = nextZ
+    const probe = { x: nextX, z: nextZ }
 
-    for (const c of this.colliders) {
-      const dx = x - c.x
-      const dz = z - c.z
-      const d = Math.hypot(dx, dz)
-      const min = c.r + RADIUS
-      if (d < min && d > 0.0001) {
-        const push = (min - d) / d
-        x += dx * push
-        z += dz * push
+    if (this.world) {
+      // how high off the ground we are, so a jump clears a fence
+      const feet = this.position.y - heightAt(this.position.x, this.position.z)
+      if (this.world.resolve(probe, RADIUS, Math.max(0, feet), this.scratch)) {
+        // bleed off the speed we were carrying into whatever we hit, so
+        // running at a wall stops rather than juddering along it
+        this.velocity.x *= 0.5
+        this.velocity.z *= 0.5
       }
     }
 
     // refuse ground too steep to stand on, so the rim mountains are a wall
     if (!this.swimming) {
-      const slope = slopeAt(x, z)
-      if (slope > MAX_SLOPE && heightAt(x, z) > this.position.y + 0.4) {
-        x = this.position.x
-        z = this.position.z
+      const slope = slopeAt(probe.x, probe.z)
+      if (slope > MAX_SLOPE && heightAt(probe.x, probe.z) > this.position.y + 0.4) {
+        probe.x = this.position.x
+        probe.z = this.position.z
         this.velocity.x *= 0.2
         this.velocity.z *= 0.2
       }
     }
 
-    this.position.x = clampToTerrain(x)
-    this.position.z = clampToTerrain(z)
+    this.position.x = clampToTerrain(probe.x)
+    this.position.z = clampToTerrain(probe.z)
   }
 
   /**

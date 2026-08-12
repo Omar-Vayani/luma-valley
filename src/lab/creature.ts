@@ -8,7 +8,7 @@ import { createMemory, type MemoryState } from './memory'
 import { createDrives, type Drives } from './drives'
 import { createEmotions, type EmotionState } from './emotions'
 import type { ReputationMap } from './reputation'
-import { createBrain, type Brain } from './brain'
+import { createBrain, BRAIN_INPUTS, BRAIN_OUTPUTS, type Brain } from './brain'
 import { createLanguage, type LanguageState } from './language'
 import { ageLimitFor } from './lifecycle'
 import { createInventory, type Inventory } from './inventory'
@@ -151,7 +151,7 @@ export function createCreature(
     knowledge: {},
     emotions: createEmotions(),
     reputation: {},
-    brain: createBrain(16, 20),
+    brain: createBrain(BRAIN_INPUTS, BRAIN_OUTPUTS, undefined, rng),
     language: createLanguage(id),
     brainPrefs: null,
     playerBond: 0,

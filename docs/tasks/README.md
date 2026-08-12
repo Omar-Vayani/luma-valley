@@ -81,6 +81,21 @@ the only verb the player had was watching. This wave replaced everything above
 | Interface rebuild: HUD and nine panels | `done` |
 | A browser playtest harness that drives a real session | `done` |
 
+### Wave 5 — Depth, and the parts that were not working
+
+| Task | Status |
+|---|---|
+| Make the per-creature neural nets real: synchronous, wired into decisions | `done` |
+| Substances with tolerance, intoxication, withdrawal and social consequence | `done` |
+| A calm settlement: walking pace, and animation that does not teleport | `done` |
+| Creatures rebuilt to human proportions with a real walk cycle | `done` |
+| Collision across the whole valley, not just eighteen circles | `done` |
+| Bigger buildings, with interiors and eight historical outbuildings | `done` |
+| An economy the player is part of: buying and selling at counters | `done` |
+| Drawn item icons; the top-right toolbar made reachable | `done` |
+| Schooling, trade, habits, vocabulary and learning shown in the inspector | `done` |
+| Cleanup: dead observer tools, a duplicated addiction key, stale docs | `done` |
+
 ## What is left
 
 Every task on this board is implemented. `npm test` covers the rules,
@@ -97,9 +112,12 @@ What remains is the kind of work only a person playing can direct:
 - **More depth per system.** Everything is real but finite: six norms rather
   than twenty, one shift pattern per trade, eight recipes, nine kinds of
   request, mentors who teach places and words but not a craft.
-- **Interiors.** Buildings have exteriors and you interact at the door. Being
-  able to walk into the tavern is the largest single thing still missing.
+- **Interiors** exist now, but they are one room with furniture in it. Upper
+  floors, back rooms and doors that shut are all still missing.
 - **Sound.** A handful of oscillators, and no music.
+- **Creature collision** with trees and walls. Walkers deflect around building
+  footprints but will still walk through a trunk; only the player is tested
+  against the full collision grid.
 - **Hand-authored animation.** The procedural rig cannot drift out of sync with
   the mind driving it, which is the point, but it caps how expressive a Luma
   can be.

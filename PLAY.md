@@ -47,21 +47,24 @@ Add `?fresh=1` to the address to start a new valley and throw away the save.
    your hand. They will remember it. If they were the one who asked, that closes
    the request and Haven thinks a little better of you.
 
-6. **Talk.** Look at someone and press **E**. Type in ordinary language: greet
+6. **Trade.** Point at a shop counter and press **E**. You buy at the same
+   prices the Luma pay and sell into that building's till, which can be empty.
+
+7. **Talk.** Look at someone and press **E**. Type in ordinary language: greet
    them, ask how they are, ask where the bread is, warn them about somebody,
    offer help. They answer out of what they actually know and feel, and they can
    refuse you or lie to you. (Typing is typing — the keys do not move you.)
 
-7. **Ask why.** Still looking at them, press **I**. That is the state their last
+8. **Ask why.** Still looking at them, press **I**. That is the state their last
    decision came out of: needs, the scores the utility function produced, their
    beliefs and how sure they are, who they trust.
 
-8. **Walk out of the valley.** There are twelve places with a story attached.
+9. **Walk out of the valley.** There are sixteen places with a story attached.
    The Founders' Stones on the western plateau, the Burned Beacon on the hill
    south-west, the Old Bridge over the Coldrun, a sunken boat in Mirror Lake.
    Getting close writes each one into your journal (**J**).
 
-9. **Stay out after dark.** The shops shut, the windows light, the lamps come
+10. **Stay out after dark.** The shops shut, the windows light, the lamps come
    on, and the Luma go home. A day is about three and a half minutes.
 
 ## Controls
@@ -74,7 +77,7 @@ Add `?fresh=1` to the address to start a new valley and throw away the save.
 | Space | Jump |
 | Ctrl or C | Crouch |
 | E | Interact. Hold it for chopping, mining and fishing |
-| Left click | Give what you are holding to whoever you look at, or use it yourself |
+| Left click | Give what you hold to whoever you look at. Empty-handed it is a hand on their shoulder; with a stick it is a stick |
 | Right click | Set a lantern, fence post or stone marker down |
 | Q | Drop what you are holding |
 | 1–9 or scroll | Choose a hotbar slot |

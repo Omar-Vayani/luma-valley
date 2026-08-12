@@ -25,6 +25,12 @@ export interface ChemState {
   purpose: number
   addiction: Record<string, number> // substance -> 0..1 dependence
   lastDose: Record<string, number> // tick index of last dose (withdrawal timer)
+  /**
+   * substance -> 0..1 tolerance. Separate from dependence on purpose: it
+   * blunts the payoff of a dose without creating the craving, and it fades
+   * more slowly, which is what makes going back to something hit so hard.
+   */
+  tolerance?: Record<string, number>
 }
 
 export function createChem(): ChemState {
@@ -45,6 +51,7 @@ export function createChem(): ChemState {
     purpose: 0.5,
     addiction: {},
     lastDose: {},
+    tolerance: {},
   }
 }
 
@@ -80,8 +87,10 @@ export function tickChem(c: ChemState, tick = 1): void {
     c.health = clamp01(c.health - 0.0015)
   }
 
-  // withdrawal: addicted creatures panic when deprived (timer via lastDose)
+  // Withdrawal from anything not covered by `substances.ts` — medicine, in
+  // practice. The four real substances have their own comedown curve there.
   for (const sub of Object.keys(c.addiction)) {
+    if (sub === 'brew' || sub === 'herb' || sub === 'spark' || sub === 'tonic') continue
     const since = tick - (c.lastDose[sub] ?? -9999)
     if (c.addiction[sub] > 0.35 && since > 240) {
       c.fear = clamp01(c.fear + (c.addiction[sub] - 0.35) * 0.25)
@@ -108,8 +117,10 @@ export function applyDrink(c: ChemState, genome: Genome, tick = 1): void {
   c.pleasure = clamp01(c.pleasure + 0.35)
   c.intoxication = clamp01(c.intoxication + 0.3)
   c.social = clamp01(c.social + 0.15)
+  // the same key the tavern and `substances.ts` use, so one habit is tracked
+  // in one place rather than two that never meet
   const dose = 0.08 + genome.addictionProne * 0.25
-  c.addiction.drink = clamp01((c.addiction.drink ?? 0) + dose)
+  c.addiction.brew = clamp01((c.addiction.brew ?? 0) + dose)
   c.lastDose.drink = tick
 }
 
