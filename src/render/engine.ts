@@ -12,45 +12,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import type { QualityPreset } from '../lab/settings'
-
-export interface QualityProfile {
-  pixelRatio: number
-  shadows: boolean
-  shadowMapSize: number
-  shadowDistance: number
-  bloom: boolean
-  bloomStrength: number
-  /** whether undergrowth casts shadows */
-  smallShadows?: boolean
-  msaa: number
-  /** how far scattered props are drawn */
-  propDistance: number
-  /** fraction of ground cover kept */
-  groundCover: number
-  grade: boolean
-}
-
-export const QUALITY: Record<QualityPreset, QualityProfile> = {
-  low: {
-    pixelRatio: 1, shadows: false, shadowMapSize: 1024, shadowDistance: 60,
-    bloom: false, bloomStrength: 0, msaa: 0, propDistance: 150, groundCover: 0.25, grade: false,
-  },
-  medium: {
-    pixelRatio: 1.25, shadows: true, shadowMapSize: 2048, shadowDistance: 80,
-    bloom: true, bloomStrength: 0.22, msaa: 0, propDistance: 240, groundCover: 0.6, grade: true,
-  },
-  high: {
-    pixelRatio: 1.5, shadows: true, shadowMapSize: 3072, shadowDistance: 105,
-    bloom: true, bloomStrength: 0.3, msaa: 4, propDistance: 330, groundCover: 1, grade: true,
-    smallShadows: true,
-  },
-  ultra: {
-    pixelRatio: 2, shadows: true, shadowMapSize: 4096, shadowDistance: 140,
-    bloom: true, bloomStrength: 0.34, msaa: 4, propDistance: 440, groundCover: 1, grade: true,
-    smallShadows: true,
-  },
-}
+import { QUALITY, type QualityPreset, type QualityProfile } from './quality'
 
 /**
  * A warm filmic grade with a vignette. Subtle — the job is to stop the flat
@@ -145,7 +107,7 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.06
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
     // every post pass calls render() again, and each call would zero the
     // counters; reset once a frame so the overlay reports the whole frame
     this.renderer.info.autoReset = false
@@ -164,9 +126,29 @@ export class Engine {
     this.profile = QUALITY[preset] ?? QUALITY.medium
     const p = this.profile
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, p.pixelRatio))
+
+    const shadowsChanged = this.renderer.shadowMap.enabled !== p.shadows
     this.renderer.shadowMap.enabled = p.shadows
+    if (shadowsChanged) this.recompileMaterials()
+
     this.buildComposer()
     this.resize(this.width, this.height)
+  }
+
+  /**
+   * Turning the shadow map on or off changes the defines every material was
+   * compiled with, and three.js will not notice on its own — the programs stay
+   * as they were and some of them stop drawing anything at all. Dropping the
+   * graphics setting used to make the walls and roofs of every building
+   * vanish, which is a strange enough symptom to be worth the note.
+   */
+  private recompileMaterials(): void {
+    this.scene.traverse((object) => {
+      const material = (object as THREE.Mesh).material
+      if (!material) return
+      if (Array.isArray(material)) for (const m of material) m.needsUpdate = true
+      else material.needsUpdate = true
+    })
   }
 
   private buildComposer(): void {

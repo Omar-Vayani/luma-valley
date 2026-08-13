@@ -7,14 +7,12 @@ Luma Haven ships only with assets that permit redistribution.
 - Source: [Quaternius](https://quaternius.com/packs/ultimatenature.html)
 - Creator: Quaternius
 - License: CC0 1.0 Universal
-- Runtime subset: pine, common, birch, willow and dead trees; bushes and berry
-  bushes; rocks, mossy rocks and snow rocks; logs, stumps, grass, flowers,
-  plants, wheat, corn and lily pads, as OBJ/MTL
+- Runtime subset: pine, common and birch trees; bushes; rocks; logs, stumps,
+  grass and flowers, as OBJ/MTL
 
-Everything man-made in the valley — buildings, fences, market stalls, lanterns,
-the well, the bridge, the landmarks and the Luma themselves — is generated in
-code, so the settlement shares one look with the nature models rather than
-sitting beside them.
+Everything man-made in the valley — the timber buildings, the well, the fire
+pit, the benches and the Luma themselves — is generated in code, so the hamlet
+shares one look with the nature models rather than sitting beside them.
 
 Earlier builds also shipped the Kenney Cube Pets, Kenney Nature Kit and a
 village prop pack. Nothing loads them any more, and carrying seventeen

@@ -1,123 +1,91 @@
-# Playing Luma Haven
+# A first session
 
-You need [Node.js](https://nodejs.org) 20 or newer. Nothing else, and no account.
+Twenty minutes, and you will have taught a creature a word and watched it learn
+what you are.
 
-## Start it
+## Arriving
 
-```bash
-npm install
-npm run play
-```
+You start on the grass south of the hamlet, facing it. Click once to take hold
+of the mouse, and walk in. Six timber buildings around a green, a well in the
+middle, a fire pit with benches, berry bushes at the edges.
 
-Open the address it prints, usually <http://localhost:4173>. That is the real
-build — the same files that would go on a web server. It also serves on your
-local network, so the address ending in your machine's LAN IP works from a
-phone or tablet on the same Wi-Fi.
+Somewhere near the well there will be a Luma. They are about waist high, with
+long ears that tell you most of what you need to know: up and forward means
+they are attending to something, flat back means they are frightened.
 
-While you are changing things:
+## Saying hello
 
-```bash
-npm run dev        # hot reload, http://localhost:5173
-```
+Walk up until the crosshair says **E talk to** somebody, and press <kbd>E</kbd>.
 
-Add `?fresh=1` to the address to start a new valley and throw away the save.
+Type `hello`. They will stop whatever they were doing, turn to face you and
+answer immediately. The answer will not be in English, because they do not have
+any yet — it will be their own noise, and the panel will tell you they
+understood 0% of what you said. That is the honest starting point.
 
-## The first ten minutes
+Ask `how are you`. That one they can answer, because it is read straight off
+their drives: hungry, thirsty, tired, lonely, bored, or content.
 
-**Click once** to take the mouse. Escape gives it back.
+Close the panel with <kbd>Esc</kbd>. Everything you said is kept — walk away,
+come back tomorrow, reload the page, and the conversation is still there.
 
-1. **Walk down into Haven.** You start on the South Road above the settlement.
-   Sprint with Shift. The place name in the top-left changes as you cross into
-   somewhere new.
+## Teaching a word
 
-2. **Read the notice board** in the plaza — the wooden frame beside the well, or
-   just press **R**. Everything on it was read off the settlement a moment ago:
-   somebody is genuinely hungry, a shelf is genuinely empty. Take one.
+Hold <kbd>E</kbd> on a berry bush until you have three or four berries, then
+find a Luma that is hungry — ask one how it is, or open a mind and look at the
+hunger bar.
 
-3. **Pick some berries.** The hedges around the edge of the basin are berry
-   bushes. Point at one and *hold* **E** — the crosshair fills while you work.
-   Grain grows in the western fields, herbs in the woods, fallen wood in the
-   Northwood, stone in the rocky ground, fish in the lake shallows.
+Now do these two things in this order:
 
-4. **Bake something.** Press **Tab**, then Crafting. Two grain make a loaf, but
-   only at a hearth — the Commons Hall, the tavern, Market Row or a cottage.
-   Remedies need the apothecary. Lanterns need the smithy.
+1. Say `dinner` to it.
+2. Press <kbd>F</kbd> to put a berry in its hand.
 
-5. **Give it to somebody.** Look at a Luma and **left click** with the loaf in
-   your hand. They will remember it. If they were the one who asked, that closes
-   the request and Haven thinks a little better of you.
+Do that four or five times. What is happening underneath is that the word is
+being bound to whatever the concept lobe is doing at the moment it is heard,
+and feeding rewards the eating that follows. After a few repetitions, say
+`dinner` on its own and watch it go and look for food.
 
-6. **Trade.** Point at a shop counter and press **E**. You buy at the same
-   prices the Luma pay and sell into that building's till, which can be empty.
+Press <kbd>N</kbd> to open its mind and look at the vocabulary panel. It will
+tell you what it thinks the word means — and that is a readout of the actual
+network, not a lookup. Teach `dinner` onto sleeping instead and it will say
+sleeping.
 
-7. **Talk.** Look at someone and press **E**. Type in ordinary language: greet
-   them, ask how they are, ask where the bread is, warn them about somebody,
-   offer help. They answer out of what they actually know and feel, and they can
-   refuse you or lie to you. (Typing is typing — the keys do not move you.)
+## Being liked, and being feared
 
-8. **Ask why.** Still looking at them, press **I**. That is the state their last
-   decision came out of: needs, the scores the utility function produced, their
-   beliefs and how sure they are, who they trust.
+Left click on a Luma to put a hand on its head. Its trust goes up, and the
+behaviour it was in the middle of gets a small reward — which is how you
+encourage a habit rather than a word.
 
-9. **Walk out of the valley.** There are sixteen places with a story attached.
-   The Founders' Stones on the western plateau, the Burned Beacon on the hill
-   south-west, the Old Bridge over the Coldrun, a sunken boat in Mirror Lake.
-   Getting close writes each one into your journal (**J**).
+Right click is a swat. It is worth doing once, to see what awareness actually
+looks like: it yelps, an alarm mark appears over its head, its ears go flat, it
+turns and runs, and it does not stop until it is well away from you. Open its
+mind afterwards and *fears you* will have gone up.
 
-10. **Stay out after dark.** The shops shut, the windows light, the lamps come
-   on, and the Luma go home. A day is about three and a half minutes.
+That number does not decay quickly. Walk towards it half an hour later and it
+will leave before you get close, and it will not stop to listen when you speak
+— it will back away instead. If you want it back, feeding is the only thing
+that works, and it takes longer than the hitting did.
 
-## Controls
+## Watching a mind
 
-| Input | Action |
-|---|---|
-| W A S D | Move |
-| Mouse | Look |
-| Shift | Sprint |
-| Space | Jump |
-| Ctrl or C | Crouch |
-| E | Interact: talk, sit on a bench, open a door, sleep in a bed, take from a chest, trade at a counter. Hold it for chopping, mining and fishing |
-| Left click | Give what you hold to whoever you look at. Empty-handed it is a hand on their shoulder; with a stick it is a stick |
-| Right click | Put what you hold into the chest you are looking at, or set a lantern, fence post or stone marker down |
-| Q | Drop what you are holding |
-| 1–9 or scroll | Choose a hotbar slot |
-| Tab | Pack and crafting |
-| R | Notice board |
-| J | Journal |
-| H | Haven — chronicle, norms, work, trade |
-| I | Mind of whoever you are looking at |
-| M | Map |
-| O | Settings |
-| P | Pause · `,` and `.` for speed |
-| F3 | Performance overlay |
-| Esc | Close anything, or release the mouse |
+<kbd>N</kbd> on any Luma opens the whole network:
 
-## Making it run well
+- **Drives** — what it is trying to quiet, and how it feels about you
+- **Perception lobe** — one bar per sense, live
+- **Concept lobe** — sixteen cells; the three that are lit are what the
+  situation currently *means* to it, and the list underneath is its strongest
+  synapses
+- **Decision lobe** — every action it could take, scored; the highlighted one
+  is what it is doing, and greyed ones are not possible right now
+- **Vocabulary** — every word it has heard and what it takes each to mean
 
-Settings (**O**) has four quality presets. **High** is the default and is aimed
-at a gaming laptop; **medium** will hold sixty frames on most integrated
-graphics; **low** turns off shadows and post-processing. The population cap and
-how many minds get a full re-think per tick are in there too — those cost CPU
-rather than GPU.
+Leave it open and follow one around. The reward figure in the corner goes green
+when its drives fall and red when they rise, and the decision bars move as it
+learns.
 
-If the frame rate is fine but the settlement feels sluggish, raise *minds per
-tick*. If the frame rate is poor, drop the quality preset first.
+## Things worth trying
 
-## Saves
-
-The world autosaves to your browser every twenty seconds, with a one-deep
-backup, plus three manual slots and export/import to a `.luma.json` file
-(Settings). Your own progress — what you have found, made and been thanked for —
-is saved alongside it.
-
-Nothing leaves your machine. There is no server.
-
-## If something looks wrong
-
-- **Everything is black on load.** Give it a moment: the valley builds its
-  terrain and loads its models before it starts.
-- **The mouse will not lock.** Click the world once. Some browsers refuse
-  pointer lock until you have interacted with the page.
-- **It runs slowly.** Settings → quality → medium or low. Then check F3: if
-  *sim* is the large number rather than *frame*, lower the population cap.
-- **You want to start over.** Add `?fresh=1` to the address.
+- Feed the same Luma every time you see it and see how close it will come.
+- Teach two of them different words for the same thing.
+- Say `good` at the moment one does something you liked.
+- Sit by the fire in the evening; the windows come up as it gets dark.
+- Turn the hearing range down in settings if you want the valley quieter.
