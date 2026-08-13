@@ -87,6 +87,16 @@ export class WorldView {
   private gaze: Gaze = { kind: 'none', id: null, name: '', prompt: '', inReach: false }
   private talkingTo: number | null = null
   private pickHeld = 0
+  /**
+   * Who the crosshair last had within reach, and when. A creature is walking
+   * while you decide to press a key, and the press is handled on the frame
+   * after the prompt appeared — on a slow machine that gap is long enough for
+   * them to step out of range and for the key to do nothing at all. Honouring
+   * a press for a moment after the prompt was true is the difference between
+   * an interaction that feels immediate and one that feels ignored.
+   */
+  private lastInReach: { id: number; at: number } | null = null
+  private clock = 0
 
   private tmpVec = new THREE.Vector3()
   private tmpVec2 = new THREE.Vector3()
@@ -394,7 +404,23 @@ export class WorldView {
     }
   }
 
+  /** The creature a key press should apply to, allowing for the grace window. */
+  private actionTarget(): Creature | null {
+    if (this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
+      return this.sim.creature(this.gaze.id) ?? null
+    }
+    if (!this.lastInReach || this.clock - this.lastInReach.at > 0.35) return null
+    const c = this.sim.creature(this.lastInReach.id)
+    if (!c) return null
+    return this.sim.playerDistance(c) < REACH + 1.5 ? c : null
+  }
+
   private handleActions(dt: number): void {
+    this.clock += dt
+    if (this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
+      this.lastInReach = { id: this.gaze.id, at: this.clock }
+    }
+
     if (this.uiCaptured) {
       this.pickHeld = 0
       return
@@ -415,38 +441,32 @@ export class WorldView {
     }
     this.pickHeld = 0
 
+    const target = this.actionTarget()
+
     // --- E to talk -----------------------------------------------------------
-    if (this.input.wasPressed('interact') && this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
-      this.callbacks.onOpenChat(this.gaze.id)
+    if (this.input.wasPressed('interact') && target) {
+      this.callbacks.onOpenChat(target.id)
       return
     }
 
     // --- left click: a hand on the head --------------------------------------
-    if (this.input.takePrimary() && this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
-      const c = this.sim.creature(this.gaze.id)
-      if (c) {
-        this.sim.pet(c)
-        this.audio.play('pet', c.x, c.z, c.id)
-        this.callbacks.onToast(`${c.name} leans into it`)
-      }
+    if (this.input.takePrimary() && target) {
+      this.sim.pet(target)
+      this.audio.play('pet', target.x, target.z, target.id)
+      this.callbacks.onToast(`${target.name} leans into it`)
       return
     }
 
     // --- right click: a swat with the stick ----------------------------------
-    if (this.input.takeSecondary() && this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
-      const c = this.sim.creature(this.gaze.id)
-      if (c) {
-        this.sim.strike(c)
-        this.callbacks.onToast(`${c.name} is frightened of you`)
-      }
+    if (this.input.takeSecondary() && target) {
+      this.sim.strike(target)
+      this.callbacks.onToast(`${target.name} is frightened of you`)
       return
     }
 
     // --- F to offer a berry ---------------------------------------------------
-    if (this.input.wasPressed('use') && this.gaze.kind === 'luma' && this.gaze.inReach && this.gaze.id != null) {
-      const c = this.sim.creature(this.gaze.id)
-      if (!c) return
-      if (this.sim.feed(c)) this.callbacks.onToast(`${c.name} eats from your hand`)
+    if (this.input.wasPressed('use') && target) {
+      if (this.sim.feed(target)) this.callbacks.onToast(`${target.name} eats from your hand`)
       else this.callbacks.onToast('no berries left — pick some from a bush')
     }
   }
