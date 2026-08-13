@@ -326,6 +326,10 @@ export class LumaView {
     const look = lookOf(c)
     const coatMat = new THREE.MeshLambertMaterial({ color: look.coat, flatShading: true })
     const smockMat = new THREE.MeshLambertMaterial({ color: look.smock, flatShading: true })
+    const shinMat = new THREE.MeshLambertMaterial({
+      color: look.coat.clone().multiplyScalar(0.68),
+      flatShading: true,
+    })
 
     const root = new THREE.Group()
     const body = new THREE.Group()
@@ -395,8 +399,11 @@ export class LumaView {
     limb(hipR, GEO.thigh, coatMat)
     const kneeL = joint(hipL, 0, -0.26, 0)
     const kneeR = joint(hipR, 0, -0.26, 0)
-    limb(kneeL, GEO.shin, coatMat)
-    limb(kneeR, GEO.shin, coatMat)
+    // The shin is a shade darker than the thigh. The knee does bend, but with
+    // the whole leg one flat colour the break is nearly impossible to read at
+    // any distance, and the walk looks like a pendulum swinging from the hip.
+    limb(kneeL, GEO.shin, shinMat)
+    limb(kneeR, GEO.shin, shinMat)
     const ankleL = joint(kneeL, 0, -0.26, 0)
     const ankleR = joint(kneeR, 0, -0.26, 0)
     // tagged so the rig can be checked from a test without guessing which
@@ -597,10 +604,16 @@ export class LumaView {
     rig.hipL.rotation.x = swingL
     rig.hipR.rotation.x = swingR
 
-    // the knee is folded most as the foot is lifted through, and nearly
-    // straight while the leg is carrying weight
-    const foldL = Math.max(0, Math.sin(p + 1.4)) * amp * 1.5
-    const foldR = Math.max(0, Math.sin(p + Math.PI + 1.4)) * amp * 1.5
+    // The knee folds while the leg is swinging *forward* and straightens as it
+    // takes weight, which is the half of the cycle it happens in. Folding it
+    // on the other half — which is what this did — is still a backwards-only
+    // hinge, but it reads as the shin kicking out in front at the wrong
+    // moment, and everyone who watched it said the knees looked inverted.
+    //
+    // `-sin(p)` is positive exactly while the hip angle is negative, so the
+    // fold and the forward swing are the same half of the stride.
+    const foldL = Math.max(0, -Math.sin(p + 0.4)) * amp * 1.7
+    const foldR = Math.max(0, -Math.sin(p + Math.PI + 0.4)) * amp * 1.7
     const restBend = walking ? 0.06 : 0.04
     rig.kneeL.rotation.x = foldL + restBend + crouch * 1.6
     rig.kneeR.rotation.x = foldR + restBend + crouch * 1.6
@@ -610,13 +623,17 @@ export class LumaView {
     rig.ankleR.rotation.x = -swingR * 0.4 - foldR * 0.55 - crouch * 0.9
 
     // --- arms ---------------------------------------------------------------
-    const armRest = 0.1 + slump * 0.14 + fear * 0.3
-    rig.shoulderL.rotation.x = -swingL * 0.55 - armRest
-    rig.shoulderR.rotation.x = -swingR * 0.55 - armRest
-    rig.shoulderL.rotation.z = 0.1 + fear * 0.25
-    rig.shoulderR.rotation.z = -0.1 - fear * 0.25
-    rig.elbowL.rotation.x = -0.25 - Math.max(0, swingL) * 0.4
-    rig.elbowR.rotation.x = -0.25 - Math.max(0, swingR) * 0.4
+    // Kept close to the body. They used to counter-swing hard and carry a deep
+    // resting bend at the elbow, which on a creature this size put a forearm
+    // out in front at nearly sixty degrees — and every person shown the walk
+    // read that jutting forearm as a leg kicking forwards.
+    const armRest = 0.06 + slump * 0.1 + fear * 0.22
+    rig.shoulderL.rotation.x = -swingL * 0.32 - armRest
+    rig.shoulderR.rotation.x = -swingR * 0.32 - armRest
+    rig.shoulderL.rotation.z = 0.12 + fear * 0.25
+    rig.shoulderR.rotation.z = -0.12 - fear * 0.25
+    rig.elbowL.rotation.x = -0.12 - Math.max(0, swingL) * 0.18
+    rig.elbowR.rotation.x = -0.12 - Math.max(0, swingR) * 0.18
 
     // --- tail ---------------------------------------------------------------
     const wag = content * 0.5 - fear * 0.6

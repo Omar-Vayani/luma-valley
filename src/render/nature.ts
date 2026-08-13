@@ -19,6 +19,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { HALF, VILLAGE, heightAt, isUnderwater, slopeAt } from '../sim/terrain'
 import { circle, type Solid } from '../sim/collision'
 import { mulberry32 } from '../sim/rng'
+import { buildVillage, isInside } from '../sim/village'
 
 const BASE = 'models/nature/'
 
@@ -159,11 +160,18 @@ export async function loadPropGeometries(): Promise<PropGeometries> {
 export function scatter(seed = 1): Prop[] {
   const rand = mulberry32(seed)
   const props: Prop[] = []
+  // Nothing grows through a floor. The ring the hamlet stands on is wide
+  // enough that the outer buildings poke past it, and grass was coming up
+  // inside the longhouse.
+  const buildings = buildVillage().buildings
+  const indoors = (x: number, z: number): boolean =>
+    buildings.some((b) => isInside(b, x, z, 1))
 
   const tryPlace = (kind: PropKind, x: number, z: number, scale: number): void => {
     if (Math.hypot(x, z) > HALF - 8) return
     if (isUnderwater(x, z)) return
     if (slopeAt(x, z) > 0.42) return
+    if (indoors(x, z)) return
     const fromVillage = Math.hypot(x - VILLAGE.x, z - VILLAGE.z)
     // keep the green clear, and thin the treeline as it approaches
     if (fromVillage < VILLAGE.radius * 0.8) return
@@ -220,6 +228,7 @@ export function scatter(seed = 1): Prop[] {
     const z = Math.cos(angle) * radius
     if (Math.hypot(x, z) > HALF - 8 || isUnderwater(x, z) || slopeAt(x, z) > 0.42) continue
     if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.radius * 0.62) continue
+    if (indoors(x, z)) continue
     props.push({
       kind: rand() < 0.8 ? 'grass' : 'flower',
       variant: 0,

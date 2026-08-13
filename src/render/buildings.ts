@@ -22,7 +22,7 @@ import { heightAt } from '../sim/terrain'
 // ---------------------------------------------------------------- materials
 
 /** Wood, in the range wood comes in. */
-const PLANK = ['#b98a5c', '#a97b50', '#c49365', '#9f7248']
+const PLANK = ['#b78a5e', '#ae8155', '#bd9165', '#a97c50']
 const BEAM = '#7d5a36'
 const POST = '#6d4e30'
 const SHINGLE = ['#8b6a45', '#79593a']
@@ -90,7 +90,7 @@ function plankWall(
     // apart is a wall you can see straight through, and the whole hamlet
     // looked like it was made of drying racks. The line comes from the
     // alternating depth instead, which catches the light without a hole.
-    const relief = (i % 2) * 0.02
+    const relief = (i % 2) * 0.014
     const w = alongX ? width : thickness - relief
     const d = alongX ? thickness - relief : width
     const cy = y - height / 2 + courseHeight * (i + 0.5)

@@ -75,6 +75,69 @@ describe('the Luma rig', () => {
     expect(worst).toBeGreaterThanOrEqual(0)
   })
 
+  it('folds the knee while the leg swings forward, not while it takes weight', () => {
+    // A hinge that only goes one way is still wrong if it goes that way at the
+    // wrong moment: folding during stance makes the shin flick out in front
+    // just as the foot should be planting, and reads as an inverted knee.
+    const view = new LumaView()
+    const c = createCreature(0, 0, 0, mulberry32(23))
+    const camera = new THREE.PerspectiveCamera(70, 1.6, 0.1, 100)
+    camera.updateMatrixWorld(true)
+
+    let foldWhileSwinging = 0
+    let foldWhilePlanted = 0
+    let swinging = 0
+    let planted = 0
+    let now = 0
+    for (let step = 0; step < 600; step++) {
+      now += 1 / 60
+      c.x += 1.5 / 60
+      c.posture = 'walk'
+      view.sync([c], 1 / 60, now, camera, { showNames: false }, null, null)
+      view.group.children[0].traverse((knee) => {
+        if (!knee.userData.isKnee) return
+        // the hip is the knee's parent; negative pitch means the leg is out in
+        // front of the body
+        const hip = knee.parent
+        if (!hip) return
+        if (hip.rotation.x < -0.05) {
+          foldWhileSwinging += knee.rotation.x
+          swinging++
+        } else if (hip.rotation.x > 0.05) {
+          foldWhilePlanted += knee.rotation.x
+          planted++
+        }
+      })
+    }
+    expect(swinging).toBeGreaterThan(50)
+    expect(planted).toBeGreaterThan(50)
+    expect(foldWhileSwinging / swinging).toBeGreaterThan((foldWhilePlanted / planted) * 2)
+  })
+
+  it('bends the knee far enough to be seen', () => {
+    // A knee that only ever folds a couple of degrees is, from any distance, a
+    // straight leg swinging from the hip. It has to actually articulate.
+    const view = new LumaView()
+    const c = createCreature(0, 0, 0, mulberry32(17))
+    const camera = new THREE.PerspectiveCamera(70, 1.6, 0.1, 100)
+    camera.position.set(0, 1.6, 6)
+    camera.updateMatrixWorld(true)
+
+    let deepest = 0
+    let now = 0
+    for (let step = 0; step < 400; step++) {
+      now += 1 / 60
+      c.x += 1.5 / 60
+      c.posture = 'walk'
+      view.sync([c], 1 / 60, now, camera, { showNames: false }, null, null)
+      view.group.children[0].traverse((o) => {
+        if (o.userData.isKnee) deepest = Math.max(deepest, o.rotation.x)
+      })
+    }
+    // about twenty-five degrees at the deepest part of the stride
+    expect(deepest).toBeGreaterThan(0.45)
+  })
+
   it('only ever folds the shin behind where a straight leg would put it', () => {
     const view = new LumaView()
     const rand = mulberry32(11)
