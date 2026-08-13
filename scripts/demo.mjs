@@ -136,19 +136,31 @@ for (let i = 0; i < 3; i++) {
 }
 await wait(1200)
 
-// open the mind again: the word is in there now
+// open the mind again: the word is in there now. They may have drifted while
+// eating, so step back into reach and look at them first.
+await page.evaluate((creature) => {
+  const { sim, view } = window.luma
+  const c = sim.creatures.find((x) => x.name === creature)
+  view.teleport(c.x + 1.8, c.z + 1.8)
+  view.lookAt(c.x, c.z)
+}, name)
+await wait(1600)
 await page.evaluate(() => {
   window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))
   window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE' }))
 })
-await wait(1400)
-await page.getByRole('button', { name: 'mind' }).click()
-await wait(2000)
-await page.locator('.panel.wide .body').hover()
-await page.mouse.wheel(0, 1100)
-await wait(5000)
-await page.keyboard.press('Escape')
-await wait(1500)
+await wait(1600)
+
+const mind = page.getByRole('button', { name: 'mind' })
+if (await mind.count()) {
+  await mind.click()
+  await wait(2000)
+  await page.locator('.panel.wide .body').hover()
+  await page.mouse.wheel(0, 1100)
+  await wait(5000)
+  await page.keyboard.press('Escape')
+  await wait(1500)
+}
 
 // --- and what happens if you are unkind -----------------------------------
 // keep them in frame, then swat, and watch them go
