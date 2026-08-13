@@ -73,26 +73,24 @@ const name = await page.evaluate(async () => {
   const target = [...sim.creatures]
     .sort((a, b) => sim.playerDistance(a) - sim.playerDistance(b))[0]
   view.teleport(target.x + 5.5, target.z + 5.5)
-  const deadline = Date.now() + 15000
+  const deadline = Date.now() + 25000
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))
   while (Date.now() < deadline) {
     view.lookAt(target.x, target.z)
     const gaze = view.currentGaze()
-    if (gaze.kind === 'luma' && gaze.inReach) break
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }))
-    await new Promise((r) => setTimeout(r, 90))
+    if (gaze.kind === 'luma' && gaze.inReach) {
+      // press it on the frame the prompt appears, the way a player would
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE' }))
+      break
+    }
+    await new Promise((r) => requestAnimationFrame(r))
   }
   window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }))
   view.lookAt(target.x, target.z)
   return target.name
 })
 await wait(1800)
-
-// --- talk to them ---------------------------------------------------------
-await page.evaluate(() => {
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' }))
-  window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE' }))
-})
-await wait(1600)
 
 const input = page.locator('.chat-input input')
 async function say(line) {
